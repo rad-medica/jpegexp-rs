@@ -51,7 +51,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             }
             let b2 = self.reader.read_u8()?;
             let marker = JpegMarkerCode::try_from(b2)?;
-            println!("Parsed marker: {:?}", marker);
 
             match marker {
                 JpegMarkerCode::ImageAndTileSize => self.parse_siz()?,
@@ -126,7 +125,10 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             coding_style: scod,
             progression_order: sprog,
             number_of_layers: nlayers,
-            // Additional fields can be added later
+            mct,
+            decomposition_levels,
+            codeblock_width_exp,
+            codeblock_height_exp,
         });
         Ok(())
     }
@@ -175,9 +177,9 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         // len includes 2 bytes length. We read 4 bytes Pcap.
         // Total 6 bytes.
         let mut bytes_left = (len as usize).saturating_sub(6);
-        let mut ccap = Vec::new();
 
         // Ccap is u16[]
+        let mut ccap = Vec::new();
         while bytes_left >= 2 {
             let c = self.reader.read_u16()?;
             ccap.push(c);
@@ -191,11 +193,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
 
         self.image.cap = Some(J2kCap { pcap, ccap });
 
-        println!(
-            "Parsed CAP: Pcap={:08X}, Ccap={:?}",
-            pcap,
-            self.image.cap.as_ref().unwrap().ccap
-        );
         Ok(())
     }
 
@@ -207,12 +204,12 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         // Assume SOT marker (FF90) has been consumed (or we are inside SOT segment).
 
         let _lsot = self.reader.read_u16()?;
-        let isot = self.reader.read_u16()?;
+        let _isot = self.reader.read_u16()?;
         let psot = self.reader.read_u32()?;
         let _tpsot = self.reader.read_u8()?;
         let _tnsot = self.reader.read_u8()?;
 
-        println!("Parsing Tile Part: Index={}, Length={}", isot, psot);
+        // println!("Parsing Tile Part: Index={}, Length={}", isot, psot);
 
         // Loop for other markers until SOD
         loop {
@@ -227,15 +224,11 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             }
             let b2 = self.reader.read_u8()?;
 
-            // Check if SOD
-            if b2 == 0x93 {
-                // SOD
-                println!("Found SOD");
-                break;
-            }
+            // SOD
+            break;
 
             let marker = JpegMarkerCode::try_from(b2)?;
-            println!("Tile Marker: {:?}", marker);
+            // println!("Tile Marker: {:?}", marker);
 
             match marker {
                 JpegMarkerCode::CodingStyleDefault => self.parse_cod()?,
@@ -262,7 +255,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
 
         loop {
             if marker == JpegMarkerCode::EndOfImage {
-                println!("EOC reached.");
                 break;
             }
 

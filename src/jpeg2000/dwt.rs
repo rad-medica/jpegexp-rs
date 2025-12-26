@@ -11,7 +11,9 @@ impl Dwt53 {
     /// Standard usually separates into Low (first half) and High (second half) subbands.
     pub fn forward(signal: &[i32], out_l: &mut [i32], out_h: &mut [i32]) {
         let len = signal.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         if len == 1 {
             out_l[0] = signal[0];
             return;
@@ -20,12 +22,12 @@ impl Dwt53 {
         // 1. Lifting Step 1: Prediction
         // y[2n+1] = x[2n+1] - floor((x[2n] + x[2n+2])/2)
         // We need to handle extending signal.
-        
+
         // Let's implement simpler buffer approach first.
         let mut x = signal.to_vec();
-        
+
         // Count of low and high pass coefficients
-        let l_count = (len + 1) / 2;
+        let _l_count = (len + 1) / 2;
         let _h_count = len / 2;
 
         // Prediction (Odd samples updated based on Even samples)
@@ -40,11 +42,11 @@ impl Dwt53 {
         // Update (Even samples updated based on Odd samples)
         // y[2n] = x[2n] + floor((y[2n-1] + y[2n+1] + 2)/4)
         for i in 0..len {
-             if i % 2 == 0 {
+            if i % 2 == 0 {
                 let left = if i > 0 { x[i - 1] } else { x[i + 1] }; // Symmetric extension
                 let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
                 x[i] += (left + right + 2) >> 2;
-             }
+            }
         }
 
         // De-interleave
@@ -52,9 +54,15 @@ impl Dwt53 {
         let mut h_idx = 0;
         for i in 0..len {
             if i % 2 == 0 {
-                if l_idx < out_l.len() { out_l[l_idx] = x[i]; l_idx += 1; }
+                if l_idx < out_l.len() {
+                    out_l[l_idx] = x[i];
+                    l_idx += 1;
+                }
             } else {
-                if h_idx < out_h.len() { out_h[h_idx] = x[i]; h_idx += 1; }
+                if h_idx < out_h.len() {
+                    out_h[h_idx] = x[i];
+                    h_idx += 1;
+                }
             }
         }
     }
@@ -68,9 +76,15 @@ impl Dwt53 {
         let mut h_idx = 0;
         for i in 0..len {
             if i % 2 == 0 {
-                 if l_idx < in_l.len() { x[i] = in_l[l_idx]; l_idx += 1; }
+                if l_idx < in_l.len() {
+                    x[i] = in_l[l_idx];
+                    l_idx += 1;
+                }
             } else {
-                 if h_idx < in_h.len() { x[i] = in_h[h_idx]; h_idx += 1; }
+                if h_idx < in_h.len() {
+                    x[i] = in_h[h_idx];
+                    h_idx += 1;
+                }
             }
         }
 
@@ -93,7 +107,7 @@ impl Dwt53 {
                 x[i] += (left + right) >> 1;
             }
         }
-        
+
         output.copy_from_slice(&x);
     }
 }
@@ -112,11 +126,13 @@ impl Dwt97 {
 
     pub fn forward(signal: &[f32], out_l: &mut [f32], out_h: &mut [f32]) {
         let len = signal.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let mut x = signal.to_vec();
 
         // 1. Splitting (already done by indexing)
-        
+
         // 2. Lifting Steps
         // Prediction 1
         for i in 0..len {
@@ -129,7 +145,7 @@ impl Dwt97 {
         // Update 1
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] }; 
+                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
                 let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
                 x[i] += Self::BETA * (left + right);
             }
@@ -145,12 +161,12 @@ impl Dwt97 {
         // Update 2
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] }; 
+                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
                 let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
                 x[i] += Self::DELTA * (left + right);
             }
         }
-        
+
         // Scaling
         for i in 0..len {
             if i % 2 == 0 {
@@ -165,9 +181,15 @@ impl Dwt97 {
         let mut h_idx = 0;
         for i in 0..len {
             if i % 2 == 0 {
-                if l_idx < out_l.len() { out_l[l_idx] = x[i]; l_idx += 1; }
+                if l_idx < out_l.len() {
+                    out_l[l_idx] = x[i];
+                    l_idx += 1;
+                }
             } else {
-                if h_idx < out_h.len() { out_h[h_idx] = x[i]; h_idx += 1; }
+                if h_idx < out_h.len() {
+                    out_h[h_idx] = x[i];
+                    h_idx += 1;
+                }
             }
         }
     }
@@ -177,20 +199,26 @@ impl Dwt97 {
         let mut x = vec![0.0f32; len];
         let mut l_idx = 0;
         let mut h_idx = 0;
-        
+
         // Interleave
         for i in 0..len {
             if i % 2 == 0 {
-                 if l_idx < in_l.len() { x[i] = in_l[l_idx]; l_idx += 1; }
+                if l_idx < in_l.len() {
+                    x[i] = in_l[l_idx];
+                    l_idx += 1;
+                }
             } else {
-                 if h_idx < in_h.len() { x[i] = in_h[h_idx]; h_idx += 1; }
+                if h_idx < in_h.len() {
+                    x[i] = in_h[h_idx];
+                    h_idx += 1;
+                }
             }
         }
 
         // Inverse Scaling
         for i in 0..len {
             if i % 2 == 0 {
-                x[i] *= Self::K; 
+                x[i] *= Self::K;
             } else {
                 x[i] *= Self::INV_K;
             }
@@ -200,7 +228,7 @@ impl Dwt97 {
         // Update 2
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] }; 
+                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
                 let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
                 x[i] -= Self::DELTA * (left + right);
             }
@@ -216,7 +244,7 @@ impl Dwt97 {
         // Update 1
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] }; 
+                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
                 let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
                 x[i] -= Self::BETA * (left + right);
             }
@@ -229,7 +257,7 @@ impl Dwt97 {
                 x[i] -= Self::ALPHA * (left + right);
             }
         }
-        
+
         output.copy_from_slice(&x);
     }
 }
@@ -244,12 +272,12 @@ mod tests {
         let h_len = len / 2;
         let mut l = vec![0i32; l_len];
         let mut h = vec![0i32; h_len];
-        
+
         Dwt53::forward(&input, &mut l, &mut h);
-        
+
         let mut output = vec![0i32; len];
         Dwt53::inverse(&l, &h, &mut output);
-        
+
         assert_eq!(input.to_vec(), output);
     }
 
@@ -278,15 +306,21 @@ mod tests {
         let h_len = len / 2;
         let mut l = vec![0.0f32; l_len];
         let mut h = vec![0.0f32; h_len];
-        
+
         Dwt97::forward(&input, &mut l, &mut h);
-        
+
         let mut output = vec![0.0f32; len];
         Dwt97::inverse(&l, &h, &mut output);
-        
+
         for i in 0..len {
             let diff = (input[i] - output[i]).abs();
-            assert!(diff < 1e-4, "Mismatch at {}: {} vs {}", i, input[i], output[i]);
+            assert!(
+                diff < 1e-4,
+                "Mismatch at {}: {} vs {}",
+                i,
+                input[i],
+                output[i]
+            );
         }
     }
 }

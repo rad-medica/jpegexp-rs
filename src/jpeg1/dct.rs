@@ -41,30 +41,30 @@ pub fn idct_8x8_baseline(input: &[f32; 64], output: &mut [f32; 64]) {
     }
 }
 
-#[allow(dead_code)] 
+#[allow(dead_code)]
 pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
     // A simple, separable, fixed-point IDCT
     // Scale factor: 12 bits (4096)
-    
+
     let mut intermediate = [0i32; 64];
-    
+
     // Row pass
     for y in 0..8 {
-       for x in 0..8 {
-           let mut val = 0i32;
-           for u in 0..8 {
-               let cu = if u == 0 { 2896 } else { 4096 }; // 1/sqrt(2) * 4096
-               let angle = ((2 * x + 1) * u) as f32 * std::f32::consts::PI / 16.0;
-               let cos_val = (angle.cos() * 4096.0) as i32;
-               let i_val = (input[y*8+u] * 256.0) as i32; // Scale input by 256 (8 bits)
-               
-               // val += i_val * cu * cos_val
-               // shifts: cu(12) + cos(12) = 24. We want to keep some precision.
-               // i_val is 8+bits. 
-               val += (i_val * cu >> 12) * cos_val >> 12;
-           }
-           intermediate[y*8+x] = val;
-       }
+        for x in 0..8 {
+            let mut val = 0i32;
+            for u in 0..8 {
+                let cu = if u == 0 { 2896 } else { 4096 }; // 1/sqrt(2) * 4096
+                let angle = ((2 * x + 1) * u) as f32 * std::f32::consts::PI / 16.0;
+                let cos_val = (angle.cos() * 4096.0) as i32;
+                let i_val = (input[y * 8 + u] * 256.0) as i32; // Scale input by 256 (8 bits)
+
+                // val += i_val * cu * cos_val
+                // shifts: cu(12) + cos(12) = 24. We want to keep some precision.
+                // i_val is 8+bits.
+                val += (i_val * cu >> 12) * cos_val >> 12;
+            }
+            intermediate[y * 8 + x] = val;
+        }
     }
 
     // Column pass
@@ -75,8 +75,8 @@ pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
                 let cv = if v == 0 { 2896 } else { 4096 };
                 let angle = ((2 * y + 1) * v) as f32 * std::f32::consts::PI / 16.0;
                 let cos_val = (angle.cos() * 4096.0) as i32;
-                let i_val = intermediate[v*8+x];
-                
+                let i_val = intermediate[v * 8 + x];
+
                 val += (i_val * cv >> 12) * cos_val >> 12;
             }
             // Final scaling
@@ -84,7 +84,7 @@ pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
             // Input scaled by 256.
             // Formula requires * 0.25.
             // Output is f32.
-            output[y*8+x] = (val as f32) / 256.0 * 0.25; 
+            output[y * 8 + x] = (val as f32) / 256.0 * 0.25;
         }
     }
 }
@@ -93,15 +93,21 @@ mod tests {
 
     #[test]
     fn test_fdct_idct_dc_only() {
-        let mut input = [-128.0f32; 64];
+        let input = [-128.0f32; 64];
         let mut dct_coeffs = [0.0f32; 64];
         fdct_8x8(&input, &mut dct_coeffs);
-        
+
         let mut output = [0.0f32; 64];
         idct_8x8_baseline(&dct_coeffs, &mut output);
-        
+
         for i in 0..64 {
-            assert!((input[i] - output[i]).abs() < 0.1, "Mismatch at {}: {} vs {}", i, input[i], output[i]);
+            assert!(
+                (input[i] - output[i]).abs() < 0.1,
+                "Mismatch at {}: {} vs {}",
+                i,
+                input[i],
+                output[i]
+            );
         }
     }
 }

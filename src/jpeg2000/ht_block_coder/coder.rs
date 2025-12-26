@@ -84,7 +84,7 @@ impl<'a> HTBlockCoder<'a> {
 
             // Placeholder: Decode VLC assuming we have peek capability
             let peek = 0; // TODO: Real peek
-            let (rho, _u_off, _e_k, bits_consumed) = vlc::decode_vlc(peek, context);
+            let (rho, _u_off, _e_k, _bits_consumed) = vlc::decode_vlc(peek, context);
 
             // Advance MEL/VLC stream by `bits_consumed`.
 
@@ -104,7 +104,7 @@ impl<'a> HTBlockCoder<'a> {
         Ok(())
     }
 
-    fn apply_rho(&mut self, x: usize, y_base: usize, rho: u8, block: &mut J2kCodeBlock) {
+    fn apply_rho(&mut self, _x: usize, _y_base: usize, rho: u8, _block: &mut J2kCodeBlock) {
         // Apply significance mapping
         // pixel order: (0,0), (1,0), (0,1), (1,1) usually (raster within quad)
         if (rho & 1) != 0 { /* (x, y) sig */ }
@@ -118,7 +118,7 @@ impl<'a> HTBlockCoder<'a> {
         x: usize,
         y_base: usize,
         rho: u8,
-        block: &mut J2kCodeBlock,
+        _block: &mut J2kCodeBlock,
     ) -> Result<(), ()> {
         // Process each pixel in the quad in raster order
         let coords = [(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -127,8 +127,8 @@ impl<'a> HTBlockCoder<'a> {
             let is_sig_in_quad = (rho >> i) & 1 == 1;
 
             if is_sig_in_quad {
-                let px = x + dx;
-                let py = y_base + dy;
+                let _px = x + dx;
+                let _py = y_base + dy;
 
                 // If pixel was NOT significant before this pass (HT Cleanup), we read SIGN.
                 // In HTJ2K Cleanup pass, we process *newly* significant pixels.
@@ -145,7 +145,7 @@ impl<'a> HTBlockCoder<'a> {
 
                 // Simplified Logic:
                 // Read Sign Bit
-                if let Some(sign) = self.magsgn_decoder.read_bit() {
+                if let Some(_sign) = self.magsgn_decoder.read_bit() {
                     // 0 = Positive, 1 = Negative
                     // Store sign in block (placeholder)
                 } else {

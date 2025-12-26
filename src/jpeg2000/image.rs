@@ -64,7 +64,10 @@ pub struct J2kCod {
     pub coding_style: u8,
     pub progression_order: u8,
     pub number_of_layers: u16,
-    // Additional fields can be added as needed
+    pub mct: u8,
+    pub decomposition_levels: u8,
+    pub codeblock_width_exp: u8,
+    pub codeblock_height_exp: u8,
 }
 
 /// Quantization Default (QCD) marker information

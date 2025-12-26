@@ -2,9 +2,8 @@
 
 use crate::error::JpeglsError;
 use crate::jpeg_stream_reader::JpegStreamReader;
-use crate::jpeg1::dct::idct_8x8_baseline;
-use crate::jpeg1::quantization::dequantize_block;
 use crate::jpeg1::huffman::{HuffmanEncoder, JpegBitReader};
+use crate::jpeg1::quantization::dequantize_block;
 
 pub struct Jpeg1Decoder<'a> {
     reader: JpegStreamReader<'a>,
@@ -57,23 +56,23 @@ impl<'a> Jpeg1Decoder<'a> {
                     continue;
                 }
                 Ok(
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData0 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData1 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData2 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData3 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData4 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData5 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData6 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData7 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData8 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData9 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData10 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData11 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData12 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData13 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData14 |
-                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData15 |
-                    crate::jpeg_marker_code::JpegMarkerCode::Comment
+                    crate::jpeg_marker_code::JpegMarkerCode::ApplicationData0
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData1
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData2
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData3
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData4
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData5
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData6
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData7
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData8
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData9
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData10
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData11
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData12
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData13
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData14
+                    | crate::jpeg_marker_code::JpegMarkerCode::ApplicationData15
+                    | crate::jpeg_marker_code::JpegMarkerCode::Comment,
                 ) => {
                     self.reader.skip_segment()?;
                     continue;
@@ -87,16 +86,16 @@ impl<'a> Jpeg1Decoder<'a> {
 
             let scan_components = self.reader.scan_component_indices.clone();
             let scan_components_count = scan_components.len();
-            
+
             // Re-initialize predictors for this scan
             let mut dc_preds = vec![0i16; components_count]; // Using separate tracking
 
             let mut bit_reader = JpegBitReader::new(self.reader.remaining_data());
-            
+
             let restart_interval = self.reader.restart_interval as usize;
             let mut mcus_decoded = 0;
             let mut next_restart_index = 0;
-            
+
             // Logic differs for interleaved vs non-interleaved
             if scan_components_count > 1 {
                 // Interleaved (MCU based)
@@ -105,45 +104,65 @@ impl<'a> Jpeg1Decoder<'a> {
                 for block_y in 0..blocks_h {
                     for block_x in 0..blocks_w {
                         // Restart Check
-                        if restart_interval > 0 && mcus_decoded > 0 && (mcus_decoded % restart_interval == 0) && mcus_decoded < total_mcus {
-                             bit_reader.align_to_byte();
-                             let marker = bit_reader.read_bits(16)?;
-                             let expected_marker = 0xFFD0 + (next_restart_index % 8);
-                             if marker != expected_marker {
-                                 // Strict check could be return Err
-                             }
-                             next_restart_index += 1;
-                             for i in 0..components_count { dc_preds[i] = 0; }
+                        if restart_interval > 0
+                            && mcus_decoded > 0
+                            && (mcus_decoded % restart_interval == 0)
+                            && mcus_decoded < total_mcus
+                        {
+                            bit_reader.align_to_byte();
+                            let marker = bit_reader.read_bits(16)?;
+                            let expected_marker = 0xFFD0 + (next_restart_index % 8);
+                            if marker != expected_marker {
+                                // Strict check could be return Err
+                            }
+                            next_restart_index += 1;
+                            for i in 0..components_count {
+                                dc_preds[i] = 0;
+                            }
                         }
 
                         for &comp_idx in &scan_components {
                             let (dc_idx, ac_idx, quant_idx) = {
                                 let c = &self.reader.components[comp_idx];
-                                (c.dc_table_dest as usize, c.ac_table_dest as usize, c.quant_table_dest as usize)
+                                (
+                                    c.dc_table_dest as usize,
+                                    c.ac_table_dest as usize,
+                                    c.quant_table_dest as usize,
+                                )
                             };
 
                             let mut block_data = [0i16; 64];
                             let mut dequant_coeffs = [0.0f32; 64];
 
-                            let dc_table = self.reader.huffman_tables_dc[dc_idx].as_ref().ok_or(JpeglsError::InvalidData)?;
-                            let ac_table = self.reader.huffman_tables_ac[ac_idx].as_ref().ok_or(JpeglsError::InvalidData)?;
+                            let dc_table = self.reader.huffman_tables_dc[dc_idx]
+                                .as_ref()
+                                .ok_or(JpeglsError::InvalidData)?;
+                            let ac_table = self.reader.huffman_tables_ac[ac_idx]
+                                .as_ref()
+                                .ok_or(JpeglsError::InvalidData)?;
                             let quant_table = &self.reader.quantization_tables[quant_idx];
 
-                            Self::decode_block(&mut bit_reader, &mut dc_preds[comp_idx], &mut block_data, dc_table, ac_table)?;
+                            Self::decode_block(
+                                &mut bit_reader,
+                                &mut dc_preds[comp_idx],
+                                &mut block_data,
+                                dc_table,
+                                ac_table,
+                            )?;
                             dequantize_block(&block_data, quant_table, &mut dequant_coeffs);
-                            
+
                             // Write directly to component buffer
                             // Calculate offset
                             let block_offset = (block_y * blocks_w + block_x) * 64;
                             let buffer = &mut component_buffers[comp_idx];
-                            
+
                             // Perform IDCT and write
-                             let mut idct_out = [0.0f32; 64];
-                             // Use fixed point implementation for performance
-                             crate::jpeg1::dct::idct_8x8_fixed_point(&dequant_coeffs, &mut idct_out);
-                             for k in 0..64 {
-                                 buffer[block_offset + k] = idct_out[k];
-                             }
+                            let mut idct_out = [0.0f32; 64];
+                            // Use fixed point implementation for performance
+                            crate::jpeg1::dct::idct_8x8_fixed_point(&dequant_coeffs, &mut idct_out);
+                            for k in 0..64 {
+                                buffer[block_offset + k] = idct_out[k];
+                            }
                         }
                         mcus_decoded += 1;
                     }
@@ -151,47 +170,65 @@ impl<'a> Jpeg1Decoder<'a> {
             } else {
                 // Non-Interleaved (One component)
                 let comp_idx = scan_components[0];
-                 // Calculate blocks for this component (assuming 4:4:4 for now, so matches image blocks)
-                 let total_blocks = blocks_h * blocks_w;
-                 
-                 for block_y in 0..blocks_h {
+                // Calculate blocks for this component (assuming 4:4:4 for now, so matches image blocks)
+                let total_blocks = blocks_h * blocks_w;
+
+                for block_y in 0..blocks_h {
                     for block_x in 0..blocks_w {
                         // Restart Check
-                        if restart_interval > 0 && mcus_decoded > 0 && (mcus_decoded % restart_interval == 0) && mcus_decoded < total_blocks {
-                             bit_reader.align_to_byte();
-                             let marker = bit_reader.read_bits(16)?;
-                             let expected_marker = 0xFFD0 + (next_restart_index % 8);
-                             if marker != expected_marker {
-                                 // Strict check
-                             }
-                             next_restart_index += 1;
-                             dc_preds[comp_idx] = 0; 
+                        if restart_interval > 0
+                            && mcus_decoded > 0
+                            && (mcus_decoded % restart_interval == 0)
+                            && mcus_decoded < total_blocks
+                        {
+                            bit_reader.align_to_byte();
+                            let marker = bit_reader.read_bits(16)?;
+                            let expected_marker = 0xFFD0 + (next_restart_index % 8);
+                            if marker != expected_marker {
+                                // Strict check
+                            }
+                            next_restart_index += 1;
+                            dc_preds[comp_idx] = 0;
                         }
 
                         let (dc_idx, ac_idx, quant_idx) = {
                             let c = &self.reader.components[comp_idx];
-                            (c.dc_table_dest as usize, c.ac_table_dest as usize, c.quant_table_dest as usize)
+                            (
+                                c.dc_table_dest as usize,
+                                c.ac_table_dest as usize,
+                                c.quant_table_dest as usize,
+                            )
                         };
 
                         let mut block_data = [0i16; 64];
                         let mut dequant_coeffs = [0.0f32; 64];
 
-                        let dc_table = self.reader.huffman_tables_dc[dc_idx].as_ref().ok_or(JpeglsError::InvalidData)?;
-                        let ac_table = self.reader.huffman_tables_ac[ac_idx].as_ref().ok_or(JpeglsError::InvalidData)?;
+                        let dc_table = self.reader.huffman_tables_dc[dc_idx]
+                            .as_ref()
+                            .ok_or(JpeglsError::InvalidData)?;
+                        let ac_table = self.reader.huffman_tables_ac[ac_idx]
+                            .as_ref()
+                            .ok_or(JpeglsError::InvalidData)?;
                         let quant_table = &self.reader.quantization_tables[quant_idx];
 
-                        Self::decode_block(&mut bit_reader, &mut dc_preds[comp_idx], &mut block_data, dc_table, ac_table)?;
+                        Self::decode_block(
+                            &mut bit_reader,
+                            &mut dc_preds[comp_idx],
+                            &mut block_data,
+                            dc_table,
+                            ac_table,
+                        )?;
                         dequantize_block(&block_data, quant_table, &mut dequant_coeffs);
-                        
+
                         let block_offset = (block_y * blocks_w + block_x) * 64;
                         let buffer = &mut component_buffers[comp_idx];
-                        
+
                         let mut idct_out = [0.0f32; 64];
                         crate::jpeg1::dct::idct_8x8_fixed_point(&dequant_coeffs, &mut idct_out);
                         for k in 0..64 {
                             buffer[block_offset + k] = idct_out[k];
                         }
-                        
+
                         mcus_decoded += 1;
                     }
                 }
@@ -211,7 +248,9 @@ impl<'a> Jpeg1Decoder<'a> {
                 let block_idx = (by * blocks_w + bx) * 64 + (ty * 8 + tx);
 
                 if components_count == 1 {
-                    let val = (component_buffers[0][block_idx] + 128.0).round().clamp(0.0, 255.0) as u8;
+                    let val = (component_buffers[0][block_idx] + 128.0)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
                     destination[py * width + px] = val;
                 } else if components_count == 3 {
                     let y_val = component_buffers[0][block_idx];
@@ -223,7 +262,7 @@ impl<'a> Jpeg1Decoder<'a> {
                     let b = y_val + 1.772 * cb_val + 128.0;
 
                     let pixel_idx = (py * width + px) * 3;
-                     if pixel_idx + 2 < destination.len() {
+                    if pixel_idx + 2 < destination.len() {
                         destination[pixel_idx] = r.clamp(0.0, 255.0) as u8;
                         destination[pixel_idx + 1] = g.clamp(0.0, 255.0) as u8;
                         destination[pixel_idx + 2] = b.clamp(0.0, 255.0) as u8;
@@ -235,7 +274,13 @@ impl<'a> Jpeg1Decoder<'a> {
         Ok(())
     }
 
-    fn decode_block(bit_reader: &mut JpegBitReader, dc_prev: &mut i16, output: &mut [i16; 64], dc_table: &crate::jpeg1::huffman::HuffmanTable, ac_table: &crate::jpeg1::huffman::HuffmanTable) -> Result<(), JpeglsError> {
+    fn decode_block(
+        bit_reader: &mut JpegBitReader,
+        dc_prev: &mut i16,
+        output: &mut [i16; 64],
+        dc_table: &crate::jpeg1::huffman::HuffmanTable,
+        ac_table: &crate::jpeg1::huffman::HuffmanTable,
+    ) -> Result<(), JpeglsError> {
         // 1. Decode DC
         let dc_category = dc_table.decode(bit_reader)?;
         let dc_diff_bits = bit_reader.read_bits(dc_category)?;
@@ -248,27 +293,29 @@ impl<'a> Jpeg1Decoder<'a> {
         let mut k = 1;
         while k < 64 {
             let symbol = ac_table.decode(bit_reader)?;
-            if symbol == 0 { // EOB
+            if symbol == 0 {
+                // EOB
                 break;
             }
-            if symbol == 0xF0 { // ZRL
+            if symbol == 0xF0 {
+                // ZRL
                 k += 16;
                 continue;
             }
-            
+
             let run = (symbol >> 4) as usize;
             let category = symbol & 0x0F;
             k += run;
             if k >= 64 {
                 return Err(JpeglsError::InvalidData);
             }
-            
+
             let bits = bit_reader.read_bits(category)?;
             let val = HuffmanEncoder::decode_value_bits(bits, category);
             output[crate::jpeg1::encoder::ZIGZAG_ORDER[k]] = val;
             k += 1;
         }
-        
+
         Ok(())
     }
 }

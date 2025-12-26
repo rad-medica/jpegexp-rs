@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_decoder_htj2k_integration_final() {
         // Mock stream with SOC, CAP (HTJ2K), SIZ, COD, QCD, SOT, SOD, data, EOC
-        let mut data = vec![
+        let data = vec![
             0xFF, 0x4F, // SOC
             // CAP: 0xFF50, Len=6 (2 len + 4 Pcap), Pcap=0x00004000
             0xFF, 0x50, 0x00, 0x06, 0x00, 0x00, 0x40, 0x00, // Pcap (big endian 0x00004000)
@@ -89,7 +89,7 @@ mod tests {
             0xFF, 0x5C, 0x00, 0x05, 0x06, 0x00, 0x10, // SOT
             0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             // SOD
-            0xFF, 0x93, 0x00, // Empty Packet (Packet header 0 bit)
+            0xFF, 0x93, // Empty Packet (Packet header 0 bit)
             // EOC
             0xFF, 0xD9,
         ];
@@ -98,7 +98,6 @@ mod tests {
         let mut decoder = J2kDecoder::new(&mut reader);
 
         let res = decoder.decode();
-        println!("INTEGRATION TEST: decode result: {:?}", res.is_ok());
         if let Err(e) = &res {
             panic!("Decode failed: {:?}", e);
         }

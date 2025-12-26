@@ -98,9 +98,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let mut state = crate::jpeg2000::packet::PrecinctState::new(grid_w, grid_h);
 
         // 2. Mock Packet Loop
-        // In reality, we read packets until data is consumed or EPH marker.
-        // For this Integration step, we attempt to read ONE packet.
-
         // Scope for bit_reader borrow
         let header;
         let consumed;
@@ -136,7 +133,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 if is_htj2k {
                     // 4. Dispatch to HTBlockCoder
                     // Assuming data contains both MEL and MagSgn for now.
-                    // In production, we'd split or manage pointers.
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
                         &data, // Mel data (mock: same buffer)
                         &data, // MagSgn data (mock: same buffer)
@@ -215,5 +211,48 @@ mod tests {
             "HTJ2K bit (14) not set in PCAP: {:08X}",
             cap.pcap
         );
+    }
+
+    #[test]
+    fn test_decoder_htj2k_with_data() {
+        // Mock stream with non-empty HTJ2K packet
+        let data = vec![
+            0xFF, 0x4F, // SOC
+            // CAP: 0xFF50, Len=6, Pcap=0x00004000 (HTJ2K)
+            0xFF, 0x50, 0x00, 0x06, 0x00, 0x00, 0x40, 0x00,
+            // SIZ: 41 bytes total (2 len + 39 payload)
+            0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, // Xsiz=16
+            0x00, 0x00, 0x00, 0x10, // Ysiz=16
+            0x00, 0x00, 0x00, 0x00, // XOsiz=0
+            0x00, 0x00, 0x00, 0x00, // YOsiz=0
+            0x00, 0x00, 0x00, 0x10, // XTsiz=16
+            0x00, 0x00, 0x00, 0x10, // YTsiz=16
+            0x00, 0x00, 0x00, 0x00, // XTOsiz=0
+            0x00, 0x00, 0x00, 0x00, // YTOsiz=0
+            0x00, 0x01, // Csiz=1
+            0x07, 0x01, 0x01, // Comp0: 8-bit, 1x1 subsampling
+            // COD: 12 bytes total (2 len + 10 payload)
+            0xFF, 0x52, 0x00, 0x0C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // QCD: 4 bytes total (2 len + 2 payload)
+            0xFF, 0x5C, 0x00, 0x04, 0x00, 0x20,
+            // SOT: 10 bytes total (2 len + 8 payload)
+            0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            // SOD
+            0xFF, 0x93,
+            // Packet Header: 1 (not empty), 0 (included), 00000000 00000100 (len 4)
+            // Bytes: 10000000 00000001 00... -> 0x80, 0x01, 0x00
+            0x80, 0x01, 0x00, // Packet Data: 4 bytes
+            0xDE, 0xAD, 0xBE, 0xEF, // EOC
+            0xFF, 0xD9,
+        ];
+
+        let mut reader = JpegStreamReader::new(&data);
+        let mut decoder = J2kDecoder::new(&mut reader);
+
+        let res = decoder.decode();
+        // Since we have mocked HTBlockCoder to just return Ok(()),
+        // and we haven't implemented full pixel reconstruction yet,
+        // we just verify it doesn't crash and reaches EOC.
+        assert!(res.is_ok(), "Decode failed with data: {:?}", res.err());
     }
 }

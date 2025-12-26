@@ -308,6 +308,7 @@ pub struct MqCoder {
 
     // State (Shared/Encoder)
     ct: u8,
+    #[allow(dead_code)]
     b: u8,
 
     // State for Decoder
@@ -611,7 +612,7 @@ mod tests {
         mq.init_contexts(5);
         // Encode a few MPS symbols
         let cx = 0;
-        let original_c = mq.c;
+        let _original_c = mq.c;
         mq.encode(0, cx); // MPS (0 is default MPS for 0 index table?)
 
         // After encoding, A should be renormalized to >= 0x8000

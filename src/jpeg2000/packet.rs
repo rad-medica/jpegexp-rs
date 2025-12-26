@@ -143,22 +143,6 @@ impl PacketHeader {
                 // Check if codeblock is included in this packet
                 let cb_info = self.included_cblks.iter().find(|c| c.x == x && c.y == y);
 
-                // If included:
-                // Update TagTree state (encode).
-                // Threshold is (layer + 1).
-                // If included, value logic:
-                // "If a code-block is included in the current packet...
-                // the inclusion information is coded using the tag tree...
-                // The value encoded is the layer index + 1?"
-                // Wait.
-                // "If the code-block is not included in the current packet, the value ... is > layer index."
-                // "If included ... value is <= layer index? No."
-                // Standard B.10.4: "The value ... is the number of the layer in which the code-block is first included."
-
-                // Assume for now we encode simple inclusion.
-                // If included here, and not before, we encode layer_index.
-                // If not included, we encode > layer_index.
-
                 let included_now = cb_info.is_some() && cb_info.unwrap().included;
 
                 // Tag tree encode:
@@ -179,14 +163,7 @@ impl PacketHeader {
                 // For writing, we need to manipulate the Tag Tree nodes to set the value?
                 // Or the TagTree::encode simply writes bits based on preset values?
                 // TagTree::encode uses `node.value`.
-                // We must set `node.value` in the PrecinctState before calling encode?
-                // Currently PrecinctState has new trees. Values are initialized to 0? Or Max?
-                // TagTree::new initializes to 0.
-
-                // TODO: We need to populate the TagTrees in PrecinctState with the correct CodeBlock inclusion layers
-                // BEFORE encoding.
-                // Or we update them on the fly?
-                // If we update on the fly, we need to know the global state.
+                // We MUST set `node.value` for this (x,y) to `self.layer_index` (or similar) if included.
 
                 // Current hack: Assume single layer or simple logic.
                 // If included, we perform encode.
@@ -220,7 +197,7 @@ impl PacketHeader {
 
                     // Zero BP, passes, length...
                     // if included...
-                    let cb = cb_info.unwrap();
+                    let _cb = cb_info.unwrap();
                     // Zero BP (Tag Tree)
                     // state.zero_bp_tree.encode(...)
 

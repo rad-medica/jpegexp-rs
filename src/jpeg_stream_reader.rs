@@ -134,11 +134,12 @@ impl<'a> JpegStreamReader<'a> {
         if self.position >= self.source.len() {
             return Err(JpeglsError::InvalidData);
         }
-        let val = self.source[self.position];
+        let b = self.source[self.position];
         self.position += 1;
-        Ok(val)
+        Ok(b)
     }
 
+    #[allow(dead_code)]
     fn read_byte(&mut self) -> Result<u8, JpeglsError> {
         self.read_u8()
     }

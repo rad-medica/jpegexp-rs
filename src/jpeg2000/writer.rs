@@ -164,6 +164,7 @@ mod tests {
             coding_style: 0,
             progression_order: 0,
             number_of_layers: 1,
+            ..Default::default()
         };
         j2k_writer.write_cod(&cod).unwrap();
 
