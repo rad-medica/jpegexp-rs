@@ -1,0 +1,170 @@
+    Checking jpegexp-rs v0.1.0 (C:\Users\aroja\CODE\jpegls-rs)
+error[E0432]: unresolved import `crate::constants::NOT_ENOUGH_MEMORY`
+ --> src\jpeg_stream_reader.rs:6:55
+  |
+6 |     MAXIMUM_COMPONENT_INDEX, MINIMUM_BITS_PER_SAMPLE, NOT_ENOUGH_MEMORY,
+  |                                                       ^^^^^^^^^^^^^^^^^ no `NOT_ENOUGH_MEMORY` in `constants`
+
+warning: unused import: `InterleaveMode`
+ --> src\decoder.rs:4:24
+  |
+4 | use crate::{FrameInfo, InterleaveMode, SpiffHeader};
+  |                        ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `compute_maximum_near_lossless` and `is_valid`
+ --> src\jpeg_stream_reader.rs:2:5
+  |
+2 |     compute_maximum_near_lossless, is_valid, CodingParameters, JpeglsPcParameters,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `MAXIMUM_COMPONENT_COUNT` and `MAXIMUM_COMPONENT_INDEX`
+ --> src\jpeg_stream_reader.rs:5:30
+  |
+5 |     MAXIMUM_BITS_PER_SAMPLE, MAXIMUM_COMPONENT_COUNT, MAXIMUM_COMPONENT_COUNT_IN_SCAN,
+  |                              ^^^^^^^^^^^^^^^^^^^^^^^
+6 |     MAXIMUM_COMPONENT_INDEX, MINIMUM_BITS_PER_SAMPLE, NOT_ENOUGH_MEMORY,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ColorTransformation`
+  --> src\jpeg_stream_reader.rs:11:5
+   |
+11 |     ColorTransformation, CompressedDataFormat, FrameInfo, InterleaveMode, SpiffHeader,
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::golomb_lut::GOLOMB_LUT`
+ --> src\scan_decoder.rs:3:5
+  |
+3 | use crate::golomb_lut::GOLOMB_LUT;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `JPEG_RESTART_MARKER_BASE` and `JPEG_RESTART_MARKER_RANGE`
+ --> src\scan_decoder.rs:5:29
+  |
+5 |     JPEG_MARKER_START_BYTE, JPEG_RESTART_MARKER_BASE, JPEG_RESTART_MARKER_RANGE,
+  |                             ^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `BitAnd`, `BitOr`, `BitXor`, `Not`, `Shl`, and `Shr`
+ --> src\traits.rs:1:26
+  |
+1 | use std::ops::{Add, Sub, BitAnd, BitOr, BitXor, Shl, Shr, Not};
+  |                          ^^^^^^  ^^^^^  ^^^^^^  ^^^  ^^^  ^^^
+
+warning: unused import: `InterleaveMode`
+ --> src\scan_encoder.rs:5:24
+  |
+5 | use crate::{FrameInfo, InterleaveMode, JpeglsPcParameters};
+  |                        ^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+  --> src\encoder.rs:71:51
+   |
+71 |          self.writer.write_start_of_frame_segment(frame_info)?;
+   |                      ---------------------------- ^^^^^^^^^^ expected `&FrameInfo`, found `FrameInfo`
+   |                      |
+   |                      arguments to this method are incorrect
+   |
+note: method defined here
+  --> src\jpeg_stream_writer.rs:61:12
+   |
+61 |     pub fn write_start_of_frame_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^            ----------------------
+help: consider borrowing here
+   |
+71 |          self.writer.write_start_of_frame_segment(&frame_info)?;
+   |                                                   +
+
+error[E0308]: mismatched types
+   --> src\encoder.rs:108:51
+    |
+108 |              self.encode_scan_typed::<u8>(source, frame_info, pc, coding_parameters)?
+    |                   -----------------------         ^^^^^^^^^^ expected `&FrameInfo`, found `FrameInfo`
+    |                   |
+    |                   arguments to this method are incorrect
+    |
+note: method defined here
+   --> src\encoder.rs:128:8
+    |
+128 |     fn encode_scan_typed<T: crate::traits::JpeglsSample>(&mut self, source: &[T], frame_info: &FrameInfo, pc: JpeglsPcParameters, coding_...
+    |        ^^^^^^^^^^^^^^^^^                                                          ----------------------
+help: consider borrowing here
+    |
+108 |              self.encode_scan_typed::<u8>(source, &frame_info, pc, coding_parameters)?
+    |                                                   +
+
+error[E0308]: mismatched types
+   --> src\encoder.rs:117:50
+    |
+117 |              self.encode_scan_typed::<u16>(body, frame_info, pc, coding_parameters)?
+    |                   ------------------------       ^^^^^^^^^^ expected `&FrameInfo`, found `FrameInfo`
+    |                   |
+    |                   arguments to this method are incorrect
+    |
+note: method defined here
+   --> src\encoder.rs:128:8
+    |
+128 |     fn encode_scan_typed<T: crate::traits::JpeglsSample>(&mut self, source: &[T], frame_info: &FrameInfo, pc: JpeglsPcParameters, coding_...
+    |        ^^^^^^^^^^^^^^^^^                                                          ----------------------
+help: consider borrowing here
+    |
+117 |              self.encode_scan_typed::<u16>(body, &frame_info, pc, coding_parameters)?
+    |                                                  +
+
+error[E0283]: type annotations needed
+   --> src\scan_encoder.rs:392:37
+    |
+392 |         let interruption_val = self.encode_run_interruption_pixel(x.to_i32(), ra.to_i32(), rb.to_i32());
+    |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot infer type of the type parameter `T` declared on the method `encode_run_interruption_pixel`
+    |
+    = note: cannot satisfy `_: JpeglsSample`
+    = help: the following types implement trait `JpeglsSample`:
+              u16
+              u8
+note: required by a bound in `ScanEncoder::<'a>::encode_run_interruption_pixel`
+   --> src\scan_encoder.rs:431:41
+    |
+431 |     fn encode_run_interruption_pixel<T: JpeglsSample>(&mut self, x: i32, ra: i32, rb: i32) -> i32 {
+    |                                         ^^^^^^^^^^^^ required by this bound in `ScanEncoder::<'a>::encode_run_interruption_pixel`
+help: consider specifying the generic argument
+    |
+392 |         let interruption_val = self.encode_run_interruption_pixel::<T>(x.to_i32(), ra.to_i32(), rb.to_i32());
+    |                                                                  +++++
+
+warning: value assigned to `error_value` is never read
+  --> src\golomb_lut.rs:14:21
+   |
+14 |             let mut error_value: i16 = 0;
+   |                     ^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+error[E0499]: cannot borrow `*self` as mutable more than once at a time
+   --> src\scan_decoder.rs:246:23
+    |
+243 |         let context = &mut self.regular_mode_contexts[ctx_index];
+    |                            -------------------------- first mutable borrow occurs here
+...
+246 |         let map_val = self.decode_mapped_error_value(k)?;
+    |                       ^^^^ second mutable borrow occurs here
+...
+250 |              error_value = error_value ^ context.get_error_correction(self.coding_parameters.near_lossless);
+    |                                          ------- first borrow later used here
+
+error[E0502]: cannot borrow `*self` as immutable because it is also borrowed as mutable
+   --> src\scan_decoder.rs:247:31
+    |
+243 |         let context = &mut self.regular_mode_contexts[ctx_index];
+    |                            -------------------------- mutable borrow occurs here
+...
+247 |         let mut error_value = self.unmap_error_value(map_val);
+    |                               ^^^^ immutable borrow occurs here
+...
+250 |              error_value = error_value ^ context.get_error_correction(self.coding_parameters.near_lossless);
+    |                                          ------- mutable borrow later used here
+
+Some errors have detailed explanations: E0283, E0308, E0432, E0499, E0502.
+For more information about an error, try `rustc --explain E0283`.
+warning: `jpegexp-rs` (lib) generated 9 warnings
+error: could not compile `jpegexp-rs` (lib) due to 7 previous errors; 9 warnings emitted

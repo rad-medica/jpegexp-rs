@@ -1,0 +1,80 @@
+    Checking jpegexp-rs v0.1.0 (C:\Users\aroja\CODE\jpegls-rs)
+error[E0609]: no field `t3` on type `&ScanDecoder<'a>`
+   --> src\scan_decoder.rs:276:24
+    |
+276 |         if di <= -self.t3 { return -4; }
+    |                        ^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+276 |         if di <= -self._t3 { return -4; }
+    |                        +
+
+error[E0609]: no field `t2` on type `&ScanDecoder<'a>`
+   --> src\scan_decoder.rs:277:24
+    |
+277 |         if di <= -self.t2 { return -3; }
+    |                        ^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+277 |         if di <= -self._t2 { return -3; }
+    |                        +
+
+error[E0609]: no field `t1` on type `&ScanDecoder<'a>`
+   --> src\scan_decoder.rs:278:24
+    |
+278 |         if di <= -self.t1 { return -2; }
+    |                        ^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+278 |         if di <= -self._t1 { return -2; }
+    |                        +
+
+error[E0609]: no field `t1` on type `&ScanDecoder<'a>`
+   --> src\scan_decoder.rs:281:22
+    |
+281 |         if di < self.t1 { return 1; }
+    |                      ^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+281 |         if di < self._t1 { return 1; }
+    |                      +
+
+error[E0609]: no field `t2` on type `&ScanDecoder<'a>`
+   --> src\scan_decoder.rs:282:22
+    |
+282 |         if di < self.t2 { return 2; }
+    |                      ^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+282 |         if di < self._t2 { return 2; }
+    |                      +
+
+error[E0609]: no field `t3` on type `&ScanDecoder<'a>`
+   --> src\scan_decoder.rs:283:22
+    |
+283 |         if di < self.t3 { return 3; }
+    |                      ^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+283 |         if di < self._t3 { return 3; }
+    |                      +
+
+error[E0609]: no field `pc_parameters` on type `&ScanEncoder<'a>`
+   --> src\scan_encoder.rs:259:26
+    |
+259 |         let range = self.pc_parameters.maximum_sample_value + 1;
+    |                          ^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+259 |         let range = self._pc_parameters.maximum_sample_value + 1;
+    |                          +
+
+For more information about this error, try `rustc --explain E0609`.
+error: could not compile `jpegexp-rs` (lib) due to 7 previous errors
