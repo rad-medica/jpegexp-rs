@@ -1,5 +1,5 @@
 use crate::error::JpeglsError;
-use crate::jpeg_marker_code::{JpegMarkerCode, JPEG_MARKER_START_BYTE};
+use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
 use crate::{FrameInfo, InterleaveMode, JpeglsPcParameters};
 
 pub struct JpegStreamWriter<'a> {
@@ -58,16 +58,19 @@ impl<'a> JpegStreamWriter<'a> {
         self.write_marker(JpegMarkerCode::EndOfImage)
     }
 
-    pub fn write_start_of_frame_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
+    pub fn write_start_of_frame_segment(
+        &mut self,
+        frame_info: &FrameInfo,
+    ) -> Result<(), JpeglsError> {
         self.write_marker(JpegMarkerCode::StartOfFrameJpegls)?;
         let length = 2 + 6 + (frame_info.component_count as usize * 3);
         self.write_u16(length as u16)?;
-        
+
         self.write_byte(frame_info.bits_per_sample as u8)?;
         self.write_u16(frame_info.height as u16)?;
         self.write_u16(frame_info.width as u16)?;
         self.write_byte(frame_info.component_count as u8)?;
-        
+
         for i in 0..frame_info.component_count {
             self.write_byte((i + 1) as u8)?; // Component ID
             self.write_byte(0x11)?; // H=1, V=1
@@ -76,36 +79,44 @@ impl<'a> JpegStreamWriter<'a> {
         Ok(())
     }
 
-    pub fn write_start_of_scan_segment(&mut self, component_count: i32, near_lossless: i32, interleave_mode: InterleaveMode) -> Result<(), JpeglsError> {
+    pub fn write_start_of_scan_segment(
+        &mut self,
+        component_count: i32,
+        near_lossless: i32,
+        interleave_mode: InterleaveMode,
+    ) -> Result<(), JpeglsError> {
         self.write_marker(JpegMarkerCode::StartOfScan)?;
         let length = 2 + 1 + (component_count as usize * 2) + 3;
         self.write_u16(length as u16)?;
-        
+
         self.write_byte(component_count as u8)?;
         for i in 0..component_count {
             self.write_byte((i + 1) as u8)?; // Component Selector (assuming 1-based sequential)
             self.write_byte(0)?; // Mapping table selector
         }
-        
+
         self.write_byte(near_lossless as u8)?;
         self.write_byte(interleave_mode as u8)?;
         self.write_byte(0)?; // Ah, Al point transform (0)
-        
+
         Ok(())
     }
-    
-    pub fn write_jpegls_preset_parameters_segment(&mut self, pc: &JpeglsPcParameters) -> Result<(), JpeglsError> {
+
+    pub fn write_jpegls_preset_parameters_segment(
+        &mut self,
+        pc: &JpeglsPcParameters,
+    ) -> Result<(), JpeglsError> {
         self.write_marker(JpegMarkerCode::JpeglsPresetParameters)?;
         let length = 2 + 1 + 5 * 2;
         self.write_u16(length as u16)?;
         self.write_byte(1)?; // Type 1: Preset coding parameters
-        
+
         self.write_u16(pc.maximum_sample_value as u16)?;
         self.write_u16(pc.threshold1 as u16)?;
         self.write_u16(pc.threshold2 as u16)?;
         self.write_u16(pc.threshold3 as u16)?;
         self.write_u16(pc.reset_value as u16)?;
-        
+
         Ok(())
     }
 

@@ -20,16 +20,16 @@ impl<'a> JpeglsDecoder<'a> {
         self.reader.read_header(&mut self.spiff_header)?;
         if let Some(spiff) = &self.spiff_header {
             let frame_info = self.frame_info();
-             validate_spiff_header(spiff, &frame_info)?;
+            validate_spiff_header(spiff, &frame_info)?;
         }
         Ok(())
     }
 
     pub fn read_spiff_header(&mut self) -> Result<bool, JpeglsError> {
-         // Logic to just read spiff header if present
-         // self.reader.try_read_spiff_header... ?
-         // For now, let's rely on read_header doing it all
-         Ok(self.spiff_header.is_some())
+        // Logic to just read spiff header if present
+        // self.reader.try_read_spiff_header... ?
+        // For now, let's rely on read_header doing it all
+        Ok(self.spiff_header.is_some())
     }
 
     pub fn frame_info(&self) -> FrameInfo {
@@ -38,14 +38,14 @@ impl<'a> JpeglsDecoder<'a> {
 
     pub fn decode(&mut self, destination: &mut [u8]) -> Result<(), JpeglsError> {
         let frame_info = self.frame_info().clone();
-        
+
         let mut scan_decoder = crate::scan_decoder::ScanDecoder::new(
             frame_info,
             self.reader.preset_coding_parameters(), // Need to expose this
-            self.reader.parameters(), // Need to expose this
-            self.reader.remaining_data(), // Need to expose this
+            self.reader.parameters(),               // Need to expose this
+            self.reader.remaining_data(),           // Need to expose this
         )?;
-        
+
         scan_decoder.decode_scan(destination, 0)?; // stride 0 means packed? or width*bpp
         Ok(())
     }

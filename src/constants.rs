@@ -44,6 +44,6 @@ pub const SEGMENT_LENGTH_SIZE: usize = 2;
 pub const SEGMENT_MAX_DATA_SIZE: usize = u16::MAX as usize - SEGMENT_LENGTH_SIZE;
 
 pub const J: [i32; 32] = [
-    0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 9, 10, 11, 12, 13,
+    14, 15,
 ];
-

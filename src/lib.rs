@@ -1,8 +1,8 @@
 pub mod constants;
 pub mod error;
 
-pub use error::JpeglsError;
 pub use coding_parameters::{CodingParameters, JpeglsPcParameters};
+pub use error::JpeglsError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterleaveMode {
@@ -188,10 +188,10 @@ pub mod encoder;
 pub mod golomb_lut;
 pub mod jpeg_marker_code;
 pub mod jpeg_stream_reader;
+pub mod jpeg_stream_writer;
 pub mod regular_mode_context;
 pub mod run_mode_context;
 pub mod scan_decoder;
+pub mod scan_encoder;
 pub mod traits;
 pub mod validate_spiff_header;
-pub mod jpeg_stream_writer;
-pub mod scan_encoder;

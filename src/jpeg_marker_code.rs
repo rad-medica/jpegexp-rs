@@ -55,12 +55,11 @@ pub enum JpegMarkerCode {
     Comment = 0xFE,
 
     // The following markers are defined in ISO/IEC 14495-1 | ITU T.87. (JPEG-LS standard)
-
     /// SOF_55: Marks the start of a JPEG-LS encoded frame.
     StartOfFrameJpegls = 0xF7,
 
     /// LSE: Marks the start of a JPEG-LS preset parameters segment.
-    JpeglsPresetParameters = 0xF8
+    JpeglsPresetParameters = 0xF8,
 }
 
 impl std::convert::TryFrom<u8> for JpegMarkerCode {

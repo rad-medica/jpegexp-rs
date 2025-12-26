@@ -53,12 +53,14 @@ pub fn compute_maximum_near_lossless(maximum_sample_value: i32) -> i32 {
 // Default coding threshold values as defined by ISO/IEC 14495-1, C.2.4.1.1.1
 pub fn compute_default(maximum_sample_value: i32, near_lossless: i32) -> JpeglsPcParameters {
     debug_assert!(maximum_sample_value <= u16::MAX as i32);
-    debug_assert!(near_lossless >= 0 && near_lossless <= compute_maximum_near_lossless(maximum_sample_value));
+    debug_assert!(
+        near_lossless >= 0 && near_lossless <= compute_maximum_near_lossless(maximum_sample_value)
+    );
 
     // Default threshold values for JPEG-LS statistical modeling as defined in ISO/IEC 14495-1, table C.3
     // for the case MAXVAL = 255 and NEAR = 0.
-    const DEFAULT_THRESHOLD1: i32 = 3;  // BASIC_T1
-    const DEFAULT_THRESHOLD2: i32 = 7;  // BASIC_T2
+    const DEFAULT_THRESHOLD1: i32 = 3; // BASIC_T1
+    const DEFAULT_THRESHOLD2: i32 = 7; // BASIC_T2
     const DEFAULT_THRESHOLD3: i32 = 21; // BASIC_T3
 
     if maximum_sample_value >= 128 {
@@ -112,7 +114,10 @@ pub fn compute_default(maximum_sample_value: i32, near_lossless: i32) -> JpeglsP
     }
 }
 
-pub fn is_default(preset_coding_parameters: &JpeglsPcParameters, defaults: &JpeglsPcParameters) -> bool {
+pub fn is_default(
+    preset_coding_parameters: &JpeglsPcParameters,
+    defaults: &JpeglsPcParameters,
+) -> bool {
     if preset_coding_parameters.maximum_sample_value == 0
         && preset_coding_parameters.threshold1 == 0
         && preset_coding_parameters.threshold2 == 0
@@ -154,7 +159,8 @@ pub fn is_valid(
 
     // ISO/IEC 14495-1, C.2.4.1.1, Table C.1 defines the valid JPEG-LS preset coding parameters values.
     if pc_parameters.maximum_sample_value != 0
-        && (pc_parameters.maximum_sample_value < 1 || pc_parameters.maximum_sample_value > maximum_component_value)
+        && (pc_parameters.maximum_sample_value < 1
+            || pc_parameters.maximum_sample_value > maximum_component_value)
     {
         return Err(());
     }
@@ -166,7 +172,8 @@ pub fn is_valid(
     };
 
     if pc_parameters.threshold1 != 0
-        && (pc_parameters.threshold1 < near_lossless + 1 || pc_parameters.threshold1 > maximum_sample_value)
+        && (pc_parameters.threshold1 < near_lossless + 1
+            || pc_parameters.threshold1 > maximum_sample_value)
     {
         return Err(());
     }
@@ -180,7 +187,8 @@ pub fn is_valid(
     };
 
     if pc_parameters.threshold2 != 0
-        && (pc_parameters.threshold2 < threshold1 || pc_parameters.threshold2 > maximum_sample_value)
+        && (pc_parameters.threshold2 < threshold1
+            || pc_parameters.threshold2 > maximum_sample_value)
     {
         return Err(());
     }
@@ -192,13 +200,15 @@ pub fn is_valid(
     };
 
     if pc_parameters.threshold3 != 0
-        && (pc_parameters.threshold3 < threshold2 || pc_parameters.threshold3 > maximum_sample_value)
+        && (pc_parameters.threshold3 < threshold2
+            || pc_parameters.threshold3 > maximum_sample_value)
     {
         return Err(());
     }
 
     if pc_parameters.reset_value != 0
-        && (pc_parameters.reset_value < 3 || pc_parameters.reset_value > max(255, maximum_sample_value))
+        && (pc_parameters.reset_value < 3
+            || pc_parameters.reset_value > max(255, maximum_sample_value))
     {
         return Err(());
     }
@@ -222,6 +232,10 @@ pub fn is_valid(
     Ok(validated_parameters)
 }
 
-pub fn compute_limit_parameter(bits_per_sample: i32, _near_lossless: i32, _component_count: i32) -> i32 {
+pub fn compute_limit_parameter(
+    bits_per_sample: i32,
+    _near_lossless: i32,
+    _component_count: i32,
+) -> i32 {
     2 * (bits_per_sample + std::cmp::max(8, bits_per_sample))
 }

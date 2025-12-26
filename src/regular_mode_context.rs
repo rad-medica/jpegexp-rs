@@ -1,5 +1,5 @@
-use crate::traits::bit_wise_sign;
 use crate::error::JpeglsError;
+use crate::traits::bit_wise_sign;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegularModeContext {
@@ -42,7 +42,7 @@ impl RegularModeContext {
         self.b += error_value * (2 * near_lossless + 1);
 
         if self.a >= 65536 * 256 || self.b.abs() >= 65536 * 256 {
-             return Err(JpeglsError::InvalidData);
+            return Err(JpeglsError::InvalidData);
         }
 
         if self.n == reset_threshold {
@@ -83,13 +83,13 @@ impl RegularModeContext {
         while (self.n << k) < self.a && k < max_k_value {
             k += 1;
         }
-        
+
         if k == max_k_value {
-             return Err(JpeglsError::InvalidData);
+            return Err(JpeglsError::InvalidData);
         }
         Ok(k)
     }
-    
+
     fn initialization_value_for_a(range: i32) -> i32 {
         std::cmp::max(2, (range + 32) / 64)
     }

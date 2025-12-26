@@ -26,7 +26,7 @@ impl RunModeContext {
         let temp = self.a + (self.n >> 1) * self.run_interruption_type;
         let mut n_test = self.n;
         let mut k = 0;
-        
+
         while n_test < temp {
             n_test <<= 1;
             k += 1;
@@ -41,7 +41,7 @@ impl RunModeContext {
         let temp = self.a + (self.n >> 1) * self.run_interruption_type;
         let mut n_test = self.n;
         let mut k = 0;
-        
+
         while n_test < temp {
             n_test <<= 1;
             k += 1;
