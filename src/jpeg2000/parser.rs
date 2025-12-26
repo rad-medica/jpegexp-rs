@@ -209,8 +209,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let _tpsot = self.reader.read_u8()?;
         let _tnsot = self.reader.read_u8()?;
 
-        // println!("Parsing Tile Part: Index={}, Length={}", isot, psot);
-
         // Loop for other markers until SOD
         loop {
             // Check for potential markers
@@ -223,12 +221,12 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 return Err(JpeglsError::InvalidData);
             }
             let b2 = self.reader.read_u8()?;
-
-            // SOD
-            break;
+            if b2 == 0x93 {
+                // SOD
+                break;
+            }
 
             let marker = JpegMarkerCode::try_from(b2)?;
-            // println!("Tile Marker: {:?}", marker);
 
             match marker {
                 JpegMarkerCode::CodingStyleDefault => self.parse_cod()?,
@@ -307,7 +305,7 @@ mod tests {
         // 2(len) + 2(cap) + 4(w) + 4(h) + 4(ox) + 4(oy) + 4(tw) + 4(th) + 4(tox) + 4(toy) + 2(c) + 3*1(comp)
         // 2+2+16+16+2+3 = 41 bytes.
 
-        let mut data = vec![
+        let data = vec![
             0xFF, 0x4F, // SOC
             0xFF, 0x51, // SIZ
             0x00, 0x29, // Len = 41 (0x29)
@@ -322,14 +320,12 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, // tileOffY
             0x00, 0x01, // 1 Component
             0x07, 0x01, 0x01, // Depth 8 (unsigned), 1x1 sub
+            // Terminate so parser loop breaks or fails on EOF if we don't have SOT.
+            // Let's add SOT.
+            0xFF, 0x90, // SOT
+            // Add fake SOT len
+            0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-
-        // Terminate so parser loop breaks or fails on EOF if we don't have SOT.
-        // Let's add SOT.
-        data.extend_from_slice(&[0xFF, 0x90]); // SOT
-
-        // Add fake SOT len
-        data.extend_from_slice(&[0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
 
         let mut reader = JpegStreamReader::new(&data);
         let mut parser = J2kParser::new(&mut reader);
@@ -343,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_parse_codestream() {
-        let mut data = vec![
+        let data = vec![
             0xFF, 0x4F, // SOC
             // SIZ
             0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, // Caps
@@ -401,7 +397,7 @@ mod tests {
     #[test]
     fn test_parse_cod_qcd() {
         // Build a mock stream with SOC, SIZ, COD, QCD, and SOT markers.
-        let mut data = vec![
+        let data = vec![
             0xFF, 0x4F, // SOC
             // SIZ marker
             0xFF, 0x51, // SIZ

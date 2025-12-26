@@ -38,12 +38,6 @@ impl<'a> MagSgnDecoder<'a> {
             self.bits_left = 8;
         }
 
-        let bit = (self.bits_buffer >> 0) & 1; // LSB first? 
-        // Wait, standard bit order.
-        // "Bits are packed into bytes ... MSB first?"
-        // Usually J2K is MSB first.
-        // Let's assume standard MSB first for now.
-
         let bit = (self.bits_buffer >> (self.bits_left - 1)) & 1;
         self.bits_left -= 1;
         Some(bit)

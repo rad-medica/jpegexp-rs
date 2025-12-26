@@ -31,8 +31,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             false
         };
 
-        println!("Decoding J2K Codestream. HTJ2K Mode: {}", is_htj2k);
-
         // 3. Iterate Tiles
         let mut marker = last_marker;
         loop {
@@ -143,14 +141,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
                     // Result ignored for now as DWT/IQ not ready to use output
                     let _ = coder.decode_block(&mut block);
-
-                    println!(
-                        "Decoded HT Codeblock at ({}, {}) len={}",
-                        cb_info.x, cb_info.y, data_len
-                    );
                 } else {
                     // Tier-1 MQ Coder (Placeholder)
-                    println!("Standard J2K Codeblock (Not Implemented)");
                 }
             }
         }
@@ -238,11 +230,8 @@ mod tests {
             // SOT: 10 bytes total (2 len + 8 payload)
             0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             // SOD
-            0xFF, 0x93,
-            // Packet Header: 1 (not empty), 0 (included), 00000000 00000100 (len 4)
-            // Bytes: 10000000 00000001 00... -> 0x80, 0x01, 0x00
-            0x80, 0x01, 0x00, // Packet Data: 4 bytes
-            0xDE, 0xAD, 0xBE, 0xEF, // EOC
+            0xFF, 0x93, // Packet Header: 0 (empty)
+            0x00, // EOC
             0xFF, 0xD9,
         ];
 
@@ -254,5 +243,59 @@ mod tests {
         // and we haven't implemented full pixel reconstruction yet,
         // we just verify it doesn't crash and reaches EOC.
         assert!(res.is_ok(), "Decode failed with data: {:?}", res.err());
+    }
+
+    #[test]
+    fn test_decoder_htj2k_complex() {
+        use crate::jpeg2000::bit_io::J2kBitWriter;
+        use crate::jpeg2000::packet::PrecinctState;
+
+        let grid_w = 4;
+        let grid_h = 4;
+        let mut state = PrecinctState::new(grid_w, grid_h);
+
+        // Include codeblocks at (0,0) and (2,2)
+        state.inclusion_tree.set_value(0, 0, 0);
+        state.inclusion_tree.set_value(2, 2, 0);
+
+        let mut writer = J2kBitWriter::new();
+        // 1. Not empty
+        writer.write_bit(1);
+
+        // 2. Inclusion tree and data lengths
+        for y in 0..grid_h {
+            for x in 0..grid_w {
+                state.inclusion_tree.encode(&mut writer, x, y, 1);
+                if x == 0 && y == 0 {
+                    writer.write_bits(4, 16); // len 4
+                } else if x == 2 && y == 2 {
+                    writer.write_bits(8, 16); // len 8
+                }
+            }
+        }
+        let header_bits = writer.finish();
+
+        let mut data = vec![
+            0xFF, 0x4F, // SOC
+            0xFF, 0x50, 0x00, 0x06, 0x00, 0x00, 0x40, 0x00, // CAP
+            0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
+            0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01,
+            0x01, 0xFF, 0x52, 0x00, 0x0C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0xFF, 0x5C, 0x00, 0x04, 0x00, 0x20, 0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0xFF, 0x93, // SOD
+        ];
+        data.extend_from_slice(&header_bits);
+        // Data for (0,0) [4 bytes]
+        data.extend_from_slice(&[0x11, 0x22, 0x33, 0x44]);
+        // Data for (2,2) [8 bytes]
+        data.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02]);
+        data.extend_from_slice(&[0xFF, 0xD9]); // EOC
+
+        let mut reader = JpegStreamReader::new(&data);
+        let mut decoder = J2kDecoder::new(&mut reader);
+
+        let res = decoder.decode();
+        assert!(res.is_ok(), "Complex decode failed: {:?}", res.err());
     }
 }

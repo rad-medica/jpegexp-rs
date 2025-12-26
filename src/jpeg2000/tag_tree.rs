@@ -160,8 +160,21 @@ impl TagTree {
         }
 
         while let Some(curr_idx) = stack.pop() {
+            let parent_low = if let Some(p_idx) = self.nodes[curr_idx].parent_index {
+                self.nodes[p_idx].low
+            } else {
+                0
+            };
+
             let node = &mut self.nodes[curr_idx];
+            if node.low < parent_low {
+                node.low = parent_low;
+            }
+
             while node.low < threshold {
+                if node.known {
+                    break;
+                }
                 let bit = reader.read_bit()?;
                 if bit == 1 {
                     node.low += 1;

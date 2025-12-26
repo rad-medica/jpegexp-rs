@@ -89,6 +89,7 @@ pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
     }
 }
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

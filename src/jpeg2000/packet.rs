@@ -10,11 +10,13 @@ pub struct PrecinctState {
 
 impl PrecinctState {
     pub fn new(w: usize, h: usize) -> Self {
-        Self {
+        let mut state = Self {
             inclusion_tree: TagTree::new(w, h),
             zero_bp_tree: TagTree::new(w, h),
             lblock_tree: TagTree::new(w, h),
-        }
+        };
+        state.reset();
+        state
     }
 
     pub fn reset(&mut self) {
@@ -81,7 +83,7 @@ impl PacketHeader {
                 let included = !not_included_yet;
 
                 if included {
-                    let mut zero_bp = 0;
+                    let zero_bp = 0;
                     // First time inclusion?
                     // Check if already included in previous layers?
                     // Current TagTree doesn't persistently store "included".
@@ -218,7 +220,6 @@ impl PacketHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jpeg2000::bit_io::J2kBitWriter;
 
     #[test]
     fn test_packet_read_empty() {

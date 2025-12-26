@@ -84,6 +84,14 @@ impl J2kBitWriter {
         }
     }
 
+    pub fn write_bits(&mut self, value: u32, mut count: u8) {
+        while count > 0 {
+            let bit = ((value >> (count - 1)) & 1) as u8;
+            self.write_bit(bit);
+            count -= 1;
+        }
+    }
+
     fn flush_byte(&mut self) {
         let b = self.bit_buffer;
         self.data.push(b);
