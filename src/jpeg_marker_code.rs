@@ -88,6 +88,8 @@ pub enum JpegMarkerCode {
     // JPEG 2000 (ISO/IEC 15444-1) Markers
     /// SOC: Start of Codestream
     StartOfCodestream = 0x4F,
+    /// CAP: Capabilities (Part 15)
+    Capability = 0x50,
     /// SIZ: Image and tile size
     ImageAndTileSize = 0x51,
     /// COD: Coding style default
@@ -147,9 +149,10 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0xFE => Ok(Self::Comment),
             0xF7 => Ok(Self::StartOfFrameJpegls),
             0xF8 => Ok(Self::JpeglsPresetParameters),
-            
+
             // J2K
             0x4F => Ok(Self::StartOfCodestream),
+            0x50 => Ok(Self::Capability),
             0x51 => Ok(Self::ImageAndTileSize),
             0x52 => Ok(Self::CodingStyleDefault),
             0x53 => Ok(Self::CodingStyleComponent),
@@ -159,7 +162,7 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0x91 => Ok(Self::StartOfPacket),
             0x92 => Ok(Self::EndOfPacketHeader),
             0x93 => Ok(Self::StartOfData),
-            
+
             _ => Err(JpeglsError::InvalidData),
         }
     }

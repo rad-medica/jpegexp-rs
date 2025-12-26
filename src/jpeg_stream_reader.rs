@@ -79,6 +79,10 @@ impl<'a> JpegStreamReader<'a> {
         &self.source[self.position..]
     }
 
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
     pub fn read_header(
         &mut self,
         spiff_header: &mut Option<SpiffHeader>,
@@ -412,8 +416,5 @@ impl<'a> JpegStreamReader<'a> {
         }
         self.restart_interval = self.read_u16()?;
         Ok(())
-    }
-    pub fn align_to_byte(&mut self) {
-        // No-op for byte-aligned source reader
     }
 }

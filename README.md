@@ -6,9 +6,17 @@
 The goal of `jpegexp-rs` is to become a single, safe, and efficient library for all common JPEG variants used in medical imaging (DICOM), geospatial data, and professional photography.
 
 ### Roadmap
-- **Phase 1: JPEG-LS** (ISO/IEC 14495-1) - **Completed / Ported**
-- **Phase 2: JPEG 1** (ISO/IEC 10918-1) - **Planned**
-- **Phase 3: JPEG 2000** (ISO/IEC 15444-1) - **Planned**
+- **Phase 1: JPEG-LS** (ISO/IEC 14495-1) - **Completed**
+- **Phase 2: JPEG 1** (ISO/IEC 10918-1) - **Completed**
+  - Baseline DCT support.
+  - Huffman coding (Encoder/Decoder).
+  - DQT/DHT/SOF0/SOS support.
+- **Phase 3: JPEG 2000** (ISO/IEC 15444-1) - **In Progress**
+  - **Tier-1 Coding**: MQ Coder, Context Modeling (Bitplane Coding) - **Completed**.
+  - **Tier-2 Coding**: Tag Trees, Packet Header Parsing/Writing - **Completed**.
+  - **Codestream**: Parsing and Writing (SOC, SIZ, COD, QCD, SOT, SOD, EOC) - **Completed**.
+  - **Wavelet Transform**: DWT/IDWT 5-3 (Lossless) and 9-7 (Lossy) - **In Progress**.
+  - **Quantization**: Scalar quantization - **Implemented**.
 - **Phase 4: HTJ2K** (High Throughput JPEG 2000) - **Planned**
 
 ## Core Features

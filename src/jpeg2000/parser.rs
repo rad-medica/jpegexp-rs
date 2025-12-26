@@ -1,11 +1,11 @@
-use super::image::{J2kCod, J2kImage, J2kQcd};
+use super::image::{J2kCap, J2kCod, J2kImage, J2kQcd};
 use crate::JpeglsError;
 use crate::jpeg_marker_code::JpegMarkerCode;
 use crate::jpeg_stream_reader::JpegStreamReader;
 
 pub struct J2kParser<'a, 'b> {
-    reader: &'b mut JpegStreamReader<'a>,
-    image: J2kImage,
+    pub reader: &'b mut JpegStreamReader<'a>,
+    pub image: J2kImage,
 }
 
 impl<'a, 'b> J2kParser<'a, 'b> {
@@ -16,7 +16,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         }
     }
 
-    pub fn parse_main_header(&mut self) -> Result<(), JpeglsError> {
+    pub fn parse_main_header(&mut self) -> Result<JpegMarkerCode, JpeglsError> {
         // Expect SOC (0xFF4F)
         let soc = self.reader.read_u16()?;
         if soc != 0xFF4F {
@@ -32,6 +32,18 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             self.reader.align_to_byte();
 
             // Peek or read marker
+            if self.reader.remaining_data().len() < 2 {
+                // Should at least be able to see potential EOI or SOT start
+                // If we run out of data before EOI, it's an issue but here we just loop
+                // until we hit SOT or invalid.
+                if self.reader.remaining_data().is_empty() {
+                    // EOF unexpected
+                    panic!(
+                        "EOF unexpected at pos {}",
+                        self.reader.remaining_data().len()
+                    );
+                }
+            }
             let b1 = self.reader.read_u8()?;
             if b1 != 0xFF {
                 // Should be marker start
@@ -39,6 +51,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             }
             let b2 = self.reader.read_u8()?;
             let marker = JpegMarkerCode::try_from(b2)?;
+            println!("Parsed marker: {:?}", marker);
 
             match marker {
                 JpegMarkerCode::ImageAndTileSize => self.parse_siz()?,
@@ -46,12 +59,9 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 JpegMarkerCode::QuantizationDefault => self.parse_qcd()?,
                 JpegMarkerCode::StartOfTile => {
                     // SOT indicates end of main header
-                    // Backtrack? Or just stop.
-                    // Ideally we push back the marker or leave stream position.
-                    // For now, let's assume we consume SOT and return, to let tile parser take over.
-                    // But JpegStreamReader doesn't support unread easily.
-                    break;
+                    return Ok(JpegMarkerCode::StartOfTile);
                 }
+                JpegMarkerCode::Capability => self.parse_cap()?,
                 _ => {
                     // Skip unknown segment
                     let len = self.reader.read_u16()?;
@@ -62,8 +72,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 }
             }
         }
-
-        Ok(())
     }
 
     fn parse_siz(&mut self) -> Result<(), JpeglsError> {
@@ -92,23 +100,25 @@ impl<'a, 'b> J2kParser<'a, 'b> {
     }
 
     fn parse_cod(&mut self) -> Result<(), JpeglsError> {
-        // COD marker parsing (simplified)
+        // COD marker parsing
         // Length includes the length field itself
         let len = self.reader.read_u16()?;
-        // Ensure we have enough bytes for minimal fields
-        if len < 7 {
+        // We read 8 bytes of content (Scod=1, SGcod=4, SPcod partial=3)
+        // plus 2 bytes for length = 10 bytes minimum.
+        if len < 10 {
             return Err(JpeglsError::InvalidData);
         }
-        // Read fields according to JPEG2000 spec (subset)
         let scod = self.reader.read_u8()?; // coding style flags
         let sprog = self.reader.read_u8()?; // progression order
         let nlayers = self.reader.read_u16()?; // number of layers
-        let mct = self.reader.read_u8()?; // multi-component transform flag (unused here)
+        let mct = self.reader.read_u8()?; // multi-component transform flag
         let decomposition_levels = self.reader.read_u8()?; // number of decomposition levels
         let codeblock_width_exp = self.reader.read_u8()?; // codeblock width exponent (log2)
         let codeblock_height_exp = self.reader.read_u8()?; // codeblock height exponent (log2)
-        // Skip any remaining bytes in the COD segment
-        let remaining = (len as usize).saturating_sub(7);
+
+        // Skip remaining bytes (Codeblock style, transformation, precints sizes if any)
+        // We consumed 2 (len) + 8 (fields) = 10 bytes from the 'len' budget.
+        let remaining = (len as usize).saturating_sub(10);
         if remaining > 0 {
             self.reader.advance(remaining);
         }
@@ -122,21 +132,26 @@ impl<'a, 'b> J2kParser<'a, 'b> {
     }
 
     fn parse_qcd(&mut self) -> Result<(), JpeglsError> {
-        // QCD marker parsing (simplified)
+        // QCD marker parsing
         let len = self.reader.read_u16()?;
         if len < 3 {
             return Err(JpeglsError::InvalidData);
         }
         let sqcd = self.reader.read_u8()?; // quantization style flags
-        // Remaining bytes are step sizes (2 bytes each)
-        let mut step_sizes = Vec::new();
+
+        // Remaining in the marker segment
+        // len includes 2 bytes for len.
+        // We read 1 byte (sqcd).
+        // Total consumed from len budget = 3.
         let mut bytes_left = (len as usize).saturating_sub(3);
+
+        let mut step_sizes = Vec::new();
         while bytes_left >= 2 {
             let step = self.reader.read_u16()?;
             step_sizes.push(step);
             bytes_left -= 2;
         }
-        // Skip any leftover bytes
+        // Skip any leftover bytes (e.g. if odd length, though unlikely for u16 steps)
         if bytes_left > 0 {
             self.reader.advance(bytes_left);
         }
@@ -144,6 +159,147 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             quant_style: sqcd,
             step_sizes,
         });
+        Ok(())
+    }
+
+    fn parse_cap(&mut self) -> Result<(), JpeglsError> {
+        // CAP marker (0xFF50)
+        let len = self.reader.read_u16()?;
+        if len < 6 {
+            // Must have at least Pcap (4 bytes)
+            return Err(JpeglsError::InvalidData);
+        }
+
+        let pcap = self.reader.read_u32()?;
+        // Ccap parts
+        // len includes 2 bytes length. We read 4 bytes Pcap.
+        // Total 6 bytes.
+        let mut bytes_left = (len as usize).saturating_sub(6);
+        let mut ccap = Vec::new();
+
+        // Ccap is u16[]
+        while bytes_left >= 2 {
+            let c = self.reader.read_u16()?;
+            ccap.push(c);
+            bytes_left -= 2;
+        }
+
+        // Advance remaining (align)
+        if bytes_left > 0 {
+            self.reader.advance(bytes_left);
+        }
+
+        self.image.cap = Some(J2kCap { pcap, ccap });
+
+        println!(
+            "Parsed CAP: Pcap={:08X}, Ccap={:?}",
+            pcap,
+            self.image.cap.as_ref().unwrap().ccap
+        );
+        Ok(())
+    }
+
+    /// Parses a Tile-Part.
+    /// Returns the length of the data (header + bitstream) as indicated by Psot.
+    /// - If Psot == 0, it means until EOC.
+    /// - If Psot > 0, it includes SOT marker length (2) + SOT header length (10) + optional markers length + bitstream length.
+    pub fn parse_tile_part_header(&mut self) -> Result<u32, JpeglsError> {
+        // Assume SOT marker (FF90) has been consumed (or we are inside SOT segment).
+
+        let _lsot = self.reader.read_u16()?;
+        let isot = self.reader.read_u16()?;
+        let psot = self.reader.read_u32()?;
+        let _tpsot = self.reader.read_u8()?;
+        let _tnsot = self.reader.read_u8()?;
+
+        println!("Parsing Tile Part: Index={}, Length={}", isot, psot);
+
+        // Loop for other markers until SOD
+        loop {
+            // Check for potential markers
+            if self.reader.remaining_data().len() < 2 {
+                return Err(JpeglsError::InvalidData);
+            }
+
+            let b1 = self.reader.read_u8()?;
+            if b1 != 0xFF {
+                return Err(JpeglsError::InvalidData);
+            }
+            let b2 = self.reader.read_u8()?;
+
+            // Check if SOD
+            if b2 == 0x93 {
+                // SOD
+                println!("Found SOD");
+                break;
+            }
+
+            let marker = JpegMarkerCode::try_from(b2)?;
+            println!("Tile Marker: {:?}", marker);
+
+            match marker {
+                JpegMarkerCode::CodingStyleDefault => self.parse_cod()?,
+                JpegMarkerCode::QuantizationDefault => self.parse_qcd()?,
+                // Add COC, QCC, etc. support as needed
+                _ => {
+                    // Skip unknown
+                    let len = self.reader.read_u16()?;
+                    if len < 2 {
+                        return Err(JpeglsError::InvalidData);
+                    }
+                    self.reader.advance((len - 2) as usize);
+                }
+            }
+        }
+
+        // At this point we are at the start of bitstream.
+        Ok(psot)
+    }
+
+    /// Parses the entire codestream (Main Header + All Tiles).
+    pub fn parse_codestream(&mut self) -> Result<(), JpeglsError> {
+        let mut marker = self.parse_main_header()?;
+
+        loop {
+            if marker == JpegMarkerCode::EndOfImage {
+                println!("EOC reached.");
+                break;
+            }
+
+            if marker == JpegMarkerCode::StartOfTile {
+                // Parse tile part
+                let psot = self.parse_tile_part_header()?;
+
+                // Read Tile Data (packets)
+                if psot == 0 {
+                    // Read until EOC.
+                    break;
+                } else {
+                    // Logic to find next marker (skip data)
+                    loop {
+                        if self.reader.remaining_data().len() < 2 {
+                            break;
+                        }
+                        let b = self.reader.read_u8()?;
+                        if b == 0xFF {
+                            let b2 = self.reader.read_u8()?;
+                            if b2 == 0x90 {
+                                // SOT
+                                marker = JpegMarkerCode::StartOfTile;
+                                break;
+                            } else if b2 == 0xD9 {
+                                // EOC
+                                marker = JpegMarkerCode::EndOfImage;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Unexpected marker or EOC
+                break;
+            }
+        }
         Ok(())
     }
 }
@@ -194,6 +350,63 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_codestream() {
+        let mut data = vec![
+            0xFF, 0x4F, // SOC
+            // SIZ
+            0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, // Caps
+            0x00, 0x00, 0x01, 0x00, // W=256
+            0x00, 0x00, 0x01, 0x00, // H=256
+            0x00, 0x00, 0x00, 0x00, // offX
+            0x00, 0x00, 0x00, 0x00, // offY
+            0x00, 0x00, 0x01, 0x00, // tileW=256
+            0x00, 0x00, 0x01, 0x00, // tileH=256
+            0x00, 0x00, 0x00, 0x00, // tileOffX
+            0x00, 0x00, 0x00, 0x00, // tileOffY
+            0x00, 0x01, // 1 Comp
+            0x07, 0x01, 0x01, // Depth 8
+            // SOT 1
+            0xFF, 0x90, 0x00, 0x0A, // Lsot=10
+            0x00, 0x00, // Isot=0
+            0x00, 0x00, 0x00, 0x14, // Psot=20 (10 header + 2 marker + 8 data)
+            0x00, // TPsot=0
+            0x01, // TNsot=1
+            // SOD
+            0xFF, 0x93, // Data (Start of bitstream)
+            0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11, // 8 bytes data
+            // EOC
+            0xFF, 0xD9,
+        ];
+
+        // Actually Psot=20 includes: SOT header (14 bytes?? Markers are 2 bytes, Segment is len. SOT marker is 2 bytes. Segment len=10. So SOT total = 12 bytes.)
+        // Plus SOD marker (2 bytes) = 14 bytes.
+        // Data = 6 bytes.
+        // Let's adjust Psot to 25 to be safe/explicit?
+        // Standard: Psot "Length of the tile-part ... starting from the first byte of the SOT marker segment."
+        // "SOT marker segment" includes the marker header?
+        // "The length ... includes ... the marker segment itself."
+        // Yes, includes the 2 bytes of marker?
+        // Wait, "marker segment" usually refers to the parameters (including length).
+        // The marker code (FF90) is NOT part of the segment length field usually.
+        // But Psot says "length of THIS tile-part".
+        // A.4.2: "Psot: Length of this tile-part. ... Value: Total number of bytes ... including the SOT marker segment and the tile-part bit stream."
+        // "SOT Marker Segment" usually means FF90 + Lsot + ...
+        // If Psot=0, length is unknown.
+
+        // Let's test blindly.
+
+        let mut reader = JpegStreamReader::new(&data);
+        let mut parser = J2kParser::new(&mut reader);
+
+        // parser.parse_codestream().unwrap();
+        // Since we didn't implement robust skipping based on Psot yet (we scan for FF90/FFD9),
+        // the Psot value in our mock might be ignored by the scanner loop, but parsed.
+
+        let res = parser.parse_codestream();
+        assert!(res.is_ok(), "Codestream parsing failed: {:?}", res.err());
+    }
+
+    #[test]
     fn test_parse_cod_qcd() {
         // Build a mock stream with SOC, SIZ, COD, QCD, and SOT markers.
         let mut data = vec![
@@ -214,7 +427,7 @@ mod tests {
             0x07, 0x01, 0x01, // depth/subsampling
             // COD marker
             0xFF, 0x52, // COD
-            0x00, 0x09, // length 9
+            0x00, 0x0A, // length 10 (2 len + 8 payload)
             0x01, // scod
             0x02, // sprog
             0x00, 0x01, // nlayers = 1
@@ -233,10 +446,7 @@ mod tests {
         ];
         let mut reader = JpegStreamReader::new(&data);
         let mut parser = J2kParser::new(&mut reader);
-        match parser.parse_main_header() {
-            Ok(_) => {}
-            Err(e) => panic!("Parse failed: {:?}", e),
-        }
+        parser.parse_main_header().unwrap();
         let cod = parser.image.cod.as_ref().expect("COD should be parsed");
         assert_eq!(cod.coding_style, 0x01);
         assert_eq!(cod.progression_order, 0x02);

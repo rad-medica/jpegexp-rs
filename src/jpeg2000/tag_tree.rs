@@ -1,53 +1,178 @@
-// Tag Tree coding for JPEG2000
-// Simplified implementation placeholder for building and accessing tag tree nodes.
-// In full JPEG2000, tag trees are used for packet header coding (e.g., inclusion and zero-bitplane flags).
+use crate::jpeg2000::bit_io::{J2kBitReader, J2kBitWriter};
 
+/// Tag Tree for JPEG 2000 Packet Header coding.
+/// Represents a quad-tree structure used to encode 2D arrays of values (e.g. inclusion, zero bit-planes).
 pub struct TagTree {
-    // Stores the current value of each node in the tree.
-    // For simplicity we store a flat vector; the actual tree structure can be derived from the index.
-    nodes: Vec<u8>,
+    nodes: Vec<TagTreeNode>,
+    leaf_width: usize,
+    leaf_height: usize,
+}
+
+#[derive(Clone, Default, Debug)]
+struct TagTreeNode {
+    value: i32,
+    low: i32,
+    known: bool,
+    parent_index: Option<usize>,
 }
 
 impl TagTree {
-    /// Create a new TagTree with the given number of leaf nodes.
-    /// The tree will be built with the minimal number of internal nodes required.
-    pub fn new(num_leaves: usize) -> Self {
-        // Compute total nodes needed for a full binary tree covering `num_leaves` leaves.
-        // The number of nodes in a complete binary tree is 2 * next_power_of_two(num_leaves) - 1.
-        let size = if num_leaves == 0 {
-            0
-        } else {
-            let next_pow = num_leaves.next_power_of_two();
-            2 * next_pow - 1
-        };
-        TagTree {
-            nodes: vec![0; size],
+    /// Create a new TagTree for a grid of `w` x `h` leaves.
+    pub fn new(w: usize, h: usize) -> Self {
+        let mut nodes = Vec::new();
+        let mut levels = Vec::new();
+
+        // Level 0 (Leaves)
+        let mut current_level_start = 0;
+        let mut current_w = w;
+        let mut current_h = h;
+
+        levels.push((current_level_start, current_w, current_h));
+        // Allocate leaves
+        for _ in 0..(w * h) {
+            nodes.push(TagTreeNode::default());
+        }
+
+        // Build levels up to root
+        while current_w > 1 || current_h > 1 {
+            let next_w = (current_w + 1) / 2;
+            let next_h = (current_h + 1) / 2;
+            let next_level_start = nodes.len();
+
+            for _ in 0..(next_w * next_h) {
+                nodes.push(TagTreeNode::default());
+            }
+
+            // Link children to parents
+            for y in 0..current_h {
+                for x in 0..current_w {
+                    let child_idx = current_level_start + y * current_w + x;
+                    let parent_y = y / 2;
+                    let parent_x = x / 2;
+                    let parent_idx = next_level_start + parent_y * next_w + parent_x;
+                    nodes[child_idx].parent_index = Some(parent_idx);
+                }
+            }
+
+            current_w = next_w;
+            current_h = next_h;
+            current_level_start = next_level_start;
+            levels.push((current_level_start, current_w, current_h));
+        }
+
+        Self {
+            nodes,
+            leaf_width: w,
+            leaf_height: h,
         }
     }
 
-    /// Get the value stored at a node index.
-    /// Index 0 is the root; children of node i are at 2*i+1 and 2*i+2.
-    pub fn get(&self, idx: usize) -> Option<u8> {
-        self.nodes.get(idx).copied()
-    }
-
-    /// Set the value at a node index.
-    pub fn set(&mut self, idx: usize, value: u8) {
-        if idx < self.nodes.len() {
-            self.nodes[idx] = value;
+    /// Reset the tree state (values and known status).
+    pub fn reset(&mut self) {
+        for node in &mut self.nodes {
+            node.value = 99999;
+            node.low = 0;
+            node.known = false;
         }
     }
 
-    /// Decode a tag tree value from the bitstream using the provided reader.
-    /// This is a stub that always returns 0 for now; full implementation would
-    /// read bits until the value is determined according to the JPEG2000 spec.
-    pub fn decode_placeholder(
+    /// Set the value at a leaf coordinate (x, y).
+    pub fn set_value(&mut self, x: usize, y: usize, value: i32) {
+        if x >= self.leaf_width || y >= self.leaf_height {
+            return;
+        }
+        let leaf_idx = y * self.leaf_width + x;
+        self.nodes[leaf_idx].value = value;
+    }
+
+    /// Encode the value for leaf at (x, y) given a threshold.
+    /// Tag tree coding in Packet Headers uses J2kBitWriter (Raw bits with stuffing).
+    pub fn encode(&mut self, writer: &mut J2kBitWriter, x: usize, y: usize, threshold: i32) {
+        if x >= self.leaf_width || y >= self.leaf_height {
+            return;
+        }
+        let leaf_idx = y * self.leaf_width + x;
+
+        let mut idx = leaf_idx;
+        let mut stack = Vec::new();
+
+        // Find start node
+        loop {
+            stack.push(idx);
+            let node = &self.nodes[idx];
+            if node.low >= threshold || node.known {
+                break;
+            }
+            if let Some(parent) = node.parent_index {
+                idx = parent;
+            } else {
+                break;
+            }
+        }
+
+        // Encode
+        while let Some(curr_idx) = stack.pop() {
+            let node = &mut self.nodes[curr_idx];
+            while node.low < threshold {
+                if node.value > node.low {
+                    writer.write_bit(1);
+                    node.low += 1;
+                } else {
+                    writer.write_bit(0);
+                    break;
+                }
+            }
+            if node.low >= threshold {
+                node.known = false;
+            } else {
+                node.known = true;
+            }
+        }
+    }
+
+    /// Decode the tag tree for leaf (x,y) up to threshold.
+    pub fn decode(
         &mut self,
-        _reader: &mut crate::jpeg_stream_reader::JpegStreamReader<'_>,
-        _cx: usize,
-    ) -> Result<u8, crate::JpeglsError> {
-        // Placeholder: real implementation would involve reading bits via the MQ coder.
-        Ok(0)
+        reader: &mut J2kBitReader,
+        x: usize,
+        y: usize,
+        threshold: i32,
+    ) -> Result<bool, ()> {
+        if x >= self.leaf_width || y >= self.leaf_height {
+            return Ok(false);
+        }
+        let leaf_idx = y * self.leaf_width + x;
+
+        let mut idx = leaf_idx;
+        let mut stack = Vec::new();
+
+        loop {
+            stack.push(idx);
+            let node = &self.nodes[idx];
+            if node.low >= threshold || node.known {
+                break;
+            }
+            if let Some(parent) = node.parent_index {
+                idx = parent;
+            } else {
+                break;
+            }
+        }
+
+        while let Some(curr_idx) = stack.pop() {
+            let node = &mut self.nodes[curr_idx];
+            while node.low < threshold {
+                let bit = reader.read_bit()?;
+                if bit == 1 {
+                    node.low += 1;
+                } else {
+                    node.known = true;
+                    break;
+                }
+            }
+        }
+
+        Ok(self.nodes[leaf_idx].low >= threshold)
     }
 }
 
@@ -56,18 +181,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tag_tree_creation() {
-        let tt = TagTree::new(4);
-        // For 4 leaves, next_power_of_two = 4, total nodes = 2*4-1 = 7
-        assert_eq!(tt.nodes.len(), 7);
+    fn test_tag_tree_structure() {
+        let tt = TagTree::new(3, 3);
+        assert_eq!(tt.nodes.len(), 14);
+
+        let leaf0 = &tt.nodes[0];
+        assert_eq!(leaf0.parent_index, Some(9));
+
+        let leaf8 = &tt.nodes[8];
+        assert_eq!(leaf8.parent_index, Some(12));
     }
 
     #[test]
-    fn test_get_set() {
-        let mut tt = TagTree::new(2);
-        // total nodes = 2*2-1 = 3
-        tt.set(1, 5);
-        assert_eq!(tt.get(1), Some(5));
-        assert_eq!(tt.get(0), Some(0));
+    fn test_tag_tree_roundtrip() {
+        let mut tt_enc = TagTree::new(2, 2);
+        tt_enc.set_value(0, 0, 5);
+        tt_enc.set_value(1, 0, 2);
+        tt_enc.set_value(0, 1, 10);
+        tt_enc.set_value(1, 1, 0);
+
+        let mut writer = J2kBitWriter::new();
+        tt_enc.encode(&mut writer, 0, 0, 6);
+        tt_enc.encode(&mut writer, 1, 0, 6);
+        let buffer = writer.finish();
+
+        let mut tt_dec = TagTree::new(2, 2);
+        let mut reader = J2kBitReader::new(&buffer);
+
+        let res1 = tt_dec.decode(&mut reader, 0, 0, 6).unwrap();
+        assert_eq!(res1, false);
+
+        let res2 = tt_dec.decode(&mut reader, 1, 0, 6).unwrap();
+        assert_eq!(res2, false);
+
+        let mut tt_enc3 = TagTree::new(1, 1);
+        tt_enc3.set_value(0, 0, 5);
+        let mut writer3 = J2kBitWriter::new();
+        tt_enc3.encode(&mut writer3, 0, 0, 5);
+        let buf3 = writer3.finish();
+
+        let mut tt_dec3 = TagTree::new(1, 1);
+        let mut reader3 = J2kBitReader::new(&buf3);
+        let res3 = tt_dec3.decode(&mut reader3, 0, 0, 5).unwrap();
+        assert_eq!(res3, true);
     }
 }

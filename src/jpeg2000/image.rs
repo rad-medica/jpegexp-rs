@@ -7,6 +7,7 @@ pub struct J2kImage {
     pub component_count: u32,
     pub cod: Option<J2kCod>,
     pub qcd: Option<J2kQcd>,
+    pub cap: Option<J2kCap>,
     pub tiles: Vec<J2kTile>,
 }
 
@@ -71,6 +72,13 @@ pub struct J2kCod {
 pub struct J2kQcd {
     pub quant_style: u8,
     pub step_sizes: Vec<u16>,
+}
+
+/// Capability (CAP) marker information (Part 15)
+#[derive(Debug, Clone, Default)]
+pub struct J2kCap {
+    pub pcap: u32,
+    pub ccap: Vec<u16>,
 }
 
 // Extend J2kImage with optional COD and QCD information
