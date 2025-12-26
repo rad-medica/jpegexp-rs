@@ -20,6 +20,23 @@ pub enum JpegMarkerCode {
     /// DRI: Defines the restart interval used in succeeding scans.
     DefineRestartInterval = 0xDD,
 
+    /// RST0: Restart Marker 0.
+    RST0 = 0xD0,
+    /// RST1: Restart Marker 1.
+    RST1 = 0xD1,
+    /// RST2: Restart Marker 2.
+    RST2 = 0xD2,
+    /// RST3: Restart Marker 3.
+    RST3 = 0xD3,
+    /// RST4: Restart Marker 4.
+    RST4 = 0xD4,
+    /// RST5: Restart Marker 5.
+    RST5 = 0xD5,
+    /// RST6: Restart Marker 6.
+    RST6 = 0xD6,
+    /// RST7: Restart Marker 7.
+    RST7 = 0xD7,
+
     /// APP0: Application data 0: used for JFIF header.
     ApplicationData0 = 0xE0,
     /// APP1: Application data 1: used for EXIF or XMP header.
@@ -67,12 +84,42 @@ pub enum JpegMarkerCode {
 
     /// LSE: Marks the start of a JPEG-LS preset parameters segment.
     JpeglsPresetParameters = 0xF8,
+
+    // JPEG 2000 (ISO/IEC 15444-1) Markers
+    /// SOC: Start of Codestream
+    StartOfCodestream = 0x4F,
+    /// SIZ: Image and tile size
+    ImageAndTileSize = 0x51,
+    /// COD: Coding style default
+    CodingStyleDefault = 0x52,
+    /// COC: Coding style component
+    CodingStyleComponent = 0x53,
+    /// QCD: Quantization default
+    QuantizationDefault = 0x5C,
+    /// QCC: Quantization component
+    QuantizationComponent = 0x5D,
+    /// SOT: Start of Tile
+    StartOfTile = 0x90,
+    /// SOP: Start of Packet
+    StartOfPacket = 0x91,
+    /// EPH: End of Packet Header
+    EndOfPacketHeader = 0x92,
+    /// SOD: Start of Data
+    StartOfData = 0x93,
 }
 
 impl std::convert::TryFrom<u8> for JpegMarkerCode {
     type Error = JpeglsError;
     fn try_from(v: u8) -> Result<Self, Self::Error> {
         match v {
+            0xD0 => Ok(Self::RST0),
+            0xD1 => Ok(Self::RST1),
+            0xD2 => Ok(Self::RST2),
+            0xD3 => Ok(Self::RST3),
+            0xD4 => Ok(Self::RST4),
+            0xD5 => Ok(Self::RST5),
+            0xD6 => Ok(Self::RST6),
+            0xD7 => Ok(Self::RST7),
             0xD8 => Ok(Self::StartOfImage),
             0xD9 => Ok(Self::EndOfImage),
             0xDA => Ok(Self::StartOfScan),
@@ -100,6 +147,19 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0xFE => Ok(Self::Comment),
             0xF7 => Ok(Self::StartOfFrameJpegls),
             0xF8 => Ok(Self::JpeglsPresetParameters),
+            
+            // J2K
+            0x4F => Ok(Self::StartOfCodestream),
+            0x51 => Ok(Self::ImageAndTileSize),
+            0x52 => Ok(Self::CodingStyleDefault),
+            0x53 => Ok(Self::CodingStyleComponent),
+            0x5C => Ok(Self::QuantizationDefault),
+            0x5D => Ok(Self::QuantizationComponent),
+            0x90 => Ok(Self::StartOfTile),
+            0x91 => Ok(Self::StartOfPacket),
+            0x92 => Ok(Self::EndOfPacketHeader),
+            0x93 => Ok(Self::StartOfData),
+            
             _ => Err(JpeglsError::InvalidData),
         }
     }

@@ -41,7 +41,53 @@ pub fn idct_8x8_baseline(input: &[f32; 64], output: &mut [f32; 64]) {
     }
 }
 
-#[cfg(test)]
+#[allow(dead_code)] 
+pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
+    // A simple, separable, fixed-point IDCT
+    // Scale factor: 12 bits (4096)
+    
+    let mut intermediate = [0i32; 64];
+    
+    // Row pass
+    for y in 0..8 {
+       for x in 0..8 {
+           let mut val = 0i32;
+           for u in 0..8 {
+               let cu = if u == 0 { 2896 } else { 4096 }; // 1/sqrt(2) * 4096
+               let angle = ((2 * x + 1) * u) as f32 * std::f32::consts::PI / 16.0;
+               let cos_val = (angle.cos() * 4096.0) as i32;
+               let i_val = (input[y*8+u] * 256.0) as i32; // Scale input by 256 (8 bits)
+               
+               // val += i_val * cu * cos_val
+               // shifts: cu(12) + cos(12) = 24. We want to keep some precision.
+               // i_val is 8+bits. 
+               val += (i_val * cu >> 12) * cos_val >> 12;
+           }
+           intermediate[y*8+x] = val;
+       }
+    }
+
+    // Column pass
+    for x in 0..8 {
+        for y in 0..8 {
+            let mut val = 0i32;
+            for v in 0..8 {
+                let cv = if v == 0 { 2896 } else { 4096 };
+                let angle = ((2 * y + 1) * v) as f32 * std::f32::consts::PI / 16.0;
+                let cos_val = (angle.cos() * 4096.0) as i32;
+                let i_val = intermediate[v*8+x];
+                
+                val += (i_val * cv >> 12) * cos_val >> 12;
+            }
+            // Final scaling
+            // We reduced shifts during accumulation to avoid overflow? No, we used >>12.
+            // Input scaled by 256.
+            // Formula requires * 0.25.
+            // Output is f32.
+            output[y*8+x] = (val as f32) / 256.0 * 0.25; 
+        }
+    }
+}
 mod tests {
     use super::*;
 

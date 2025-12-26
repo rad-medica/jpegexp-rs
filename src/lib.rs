@@ -13,6 +13,7 @@ pub mod jpeg_stream_writer;
 
 pub mod jpegls;
 pub mod jpeg1;
+pub mod jpeg2000;
 
 pub use error::JpeglsError;
 

@@ -1,0 +1,84 @@
+﻿cargo :     Checking jpegexp-rs v0.1.0 
+(C:\Users\aroja\CODE\jpegexp-rs)
+En línea: 1 Carácter: 1
++ cargo check 2>&1 | Out-File -Encoding UTF8 
+compile_error.txt
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checkin 
+   g jp...ODE\jpegexp-rs):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error[E0502]: cannot borrow `*self` as mutable because 
+it is also borrowed as immutable
+  --> src\jpeg1\encoder.rs:99:21
+   |
+99 | ...   self.encode_block_internal(&block_data, &mut 
+bit_writer, &self.dc_table_lum, &self.ac_table_lum, 
+&self.quantization_table_lum, 0)?;
+   |       ^^^^^---------------------^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^------------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |       |    |                                        
+           |
+   |       |    |                                        
+           immutable borrow occurs here
+   |       |    immutable borrow later used by call
+   |       mutable borrow occurs here
+
+error[E0502]: cannot borrow `*self` as mutable because 
+it is also borrowed as immutable
+   --> src\jpeg1\encoder.rs:129:21
+    |
+129 | ...   self.encode_block_internal(&block_y_data, 
+&mut bit_writer, &self.dc_table_lum, &self.ac_table_lum, 
+&self.quantization_table_lum, 0)?;
+    |       ^^^^^---------------------^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^------------------^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |       |    |                                       
+              |
+    |       |    |                                       
+              immutable borrow occurs here
+    |       |    immutable borrow later used by call
+    |       mutable borrow occurs here
+
+error[E0502]: cannot borrow `*self` as mutable because 
+it is also borrowed as immutable
+   --> src\jpeg1\encoder.rs:135:21
+    |
+135 | ...   self.encode_block_internal(&block_cb_data, 
+&mut bit_writer, &self.dc_table_chrom, 
+&self.ac_table_chrom, &self.quantization_table_chrom, 
+1)?;
+    |       ^^^^^---------------------^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^--------------------^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |       |    |                                       
+               |
+    |       |    |                                       
+               immutable borrow occurs here
+    |       |    immutable borrow later used by call
+    |       mutable borrow occurs here
+
+error[E0502]: cannot borrow `*self` as mutable because 
+it is also borrowed as immutable
+   --> src\jpeg1\encoder.rs:136:21
+    |
+136 | ...   self.encode_block_internal(&block_cr_data, 
+&mut bit_writer, &self.dc_table_chrom, 
+&self.ac_table_chrom, &self.quantization_table_chrom, 
+2)?;
+    |       ^^^^^---------------------^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^--------------------^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |       |    |                                       
+               |
+    |       |    |                                       
+               immutable borrow occurs here
+    |       |    immutable borrow later used by call
+    |       mutable borrow occurs here
+
+For more information about this error, try `rustc 
+--explain E0502`.
+error: could not compile `jpegexp-rs` (lib) due to 4 
+previous errors

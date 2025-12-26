@@ -1,9 +1,20 @@
-use crate::jpegls::coding_parameters::{CodingParameters, JpeglsPcParameters};
+use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
+use crate::jpegls::coding_parameters::{CodingParameters, JpeglsPcParameters};
 use crate::jpegls::{InterleaveMode, SpiffHeader};
-use crate::FrameInfo;
 use std::convert::{TryFrom, TryInto};
+
+#[derive(Debug, Clone, Default)]
+pub struct JpegComponent {
+    pub id: u8,
+    pub h_samp_factor: u8,
+    pub v_samp_factor: u8,
+    pub quant_table_dest: u8,
+    pub dc_table_dest: u8,
+    pub ac_table_dest: u8,
+    pub dc_pred: i16,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JpegStreamReaderState {
@@ -22,8 +33,11 @@ pub struct JpegStreamReader<'a> {
     preset_coding_parameters: JpeglsPcParameters,
     spiff_header: Option<SpiffHeader>,
     pub quantization_tables: [[u8; 64]; 4],
-    pub huffman_tables_dc: Vec<Option<crate::jpeg1::huffman::HuffmanTable>>,
-    pub huffman_tables_ac: Vec<Option<crate::jpeg1::huffman::HuffmanTable>>,
+    pub huffman_tables_dc: [Option<crate::jpeg1::huffman::HuffmanTable>; 4],
+    pub huffman_tables_ac: [Option<crate::jpeg1::huffman::HuffmanTable>; 4],
+    pub components: Vec<JpegComponent>,
+    pub restart_interval: u16,
+    pub scan_component_indices: Vec<usize>,
 }
 
 impl<'a> JpegStreamReader<'a> {
@@ -37,8 +51,11 @@ impl<'a> JpegStreamReader<'a> {
             preset_coding_parameters: JpeglsPcParameters::default(),
             spiff_header: None,
             quantization_tables: [[0u8; 64]; 4],
-            huffman_tables_dc: vec![None, None, None, None],
-            huffman_tables_ac: vec![None, None, None, None],
+            huffman_tables_dc: [const { None }; 4],
+            huffman_tables_ac: [const { None }; 4],
+            components: Vec::new(),
+            restart_interval: 0,
+            scan_component_indices: Vec::new(),
         }
     }
 
@@ -98,6 +115,9 @@ impl<'a> JpegStreamReader<'a> {
                 JpegMarkerCode::DefineHuffmanTable => {
                     self.read_dht_segment()?;
                 }
+                JpegMarkerCode::DefineRestartInterval => {
+                    self.read_dri_segment()?;
+                }
                 _ => {
                     self.skip_segment()?;
                 }
@@ -106,7 +126,7 @@ impl<'a> JpegStreamReader<'a> {
         Ok(())
     }
 
-    fn read_byte(&mut self) -> Result<u8, JpeglsError> {
+    pub fn read_u8(&mut self) -> Result<u8, JpeglsError> {
         if self.position >= self.source.len() {
             return Err(JpeglsError::InvalidData);
         }
@@ -115,17 +135,39 @@ impl<'a> JpegStreamReader<'a> {
         Ok(val)
     }
 
-    fn read_u16(&mut self) -> Result<u16, JpeglsError> {
-        let b1 = self.read_byte()? as u16;
-        let b2 = self.read_byte()? as u16;
+    fn read_byte(&mut self) -> Result<u8, JpeglsError> {
+        self.read_u8()
+    }
+
+    pub fn read_u16(&mut self) -> Result<u16, JpeglsError> {
+        let b1 = self.read_u8()? as u16;
+        let b2 = self.read_u8()? as u16;
         Ok((b1 << 8) | b2)
     }
 
-    fn read_marker(&mut self) -> Result<JpegMarkerCode, JpeglsError> {
-        if self.read_byte()? != JPEG_MARKER_START_BYTE {
+    pub fn read_u32(&mut self) -> Result<u32, JpeglsError> {
+        let b1 = self.read_u8()? as u32;
+        let b2 = self.read_u8()? as u32;
+        let b3 = self.read_u8()? as u32;
+        let b4 = self.read_u8()? as u32;
+        Ok((b1 << 24) | (b2 << 16) | (b3 << 8) | b4)
+    }
+
+    pub fn peek_marker(&self) -> Result<JpegMarkerCode, JpeglsError> {
+        if self.position + 1 >= self.source.len() {
             return Err(JpeglsError::InvalidData);
         }
-        let marker_byte = self.read_byte()?;
+        if self.source[self.position] != JPEG_MARKER_START_BYTE {
+            return Err(JpeglsError::InvalidData);
+        }
+        JpegMarkerCode::try_from(self.source[self.position + 1])
+    }
+
+    pub fn read_marker(&mut self) -> Result<JpegMarkerCode, JpeglsError> {
+        if self.read_u8()? != JPEG_MARKER_START_BYTE {
+            return Err(JpeglsError::InvalidData);
+        }
+        let marker_byte = self.read_u8()?;
         JpegMarkerCode::try_from(marker_byte)
     }
 
@@ -139,22 +181,22 @@ impl<'a> JpegStreamReader<'a> {
 
     fn read_start_of_frame_segment(&mut self) -> Result<(), JpeglsError> {
         let _length = self.read_u16()?;
-        self.frame_info.bits_per_sample = self.read_byte()? as i32;
+        self.frame_info.bits_per_sample = self.read_u8()? as i32;
         self.frame_info.height = self.read_u16()? as u32;
         self.frame_info.width = self.read_u16()? as u32;
-        self.frame_info.component_count = self.read_byte()? as i32;
+        self.frame_info.component_count = self.read_u8()? as i32;
 
         for _ in 0..self.frame_info.component_count {
-            let _id = self.read_byte()?;
-            let _sampling = self.read_byte()?;
-            let _tq = self.read_byte()?;
+            let _id = self.read_u8()?;
+            let _sampling = self.read_u8()?;
+            let _tq = self.read_u8()?;
         }
         Ok(())
     }
 
     fn read_jpegls_preset_parameters_segment(&mut self) -> Result<(), JpeglsError> {
         let _length = self.read_u16()?;
-        let param_type = self.read_byte()?;
+        let param_type = self.read_u8()?;
         if param_type == 1 {
             self.preset_coding_parameters.maximum_sample_value = self.read_u16()? as i32;
             self.preset_coding_parameters.threshold1 = self.read_u16()? as i32;
@@ -172,14 +214,14 @@ impl<'a> JpegStreamReader<'a> {
             return Err(JpeglsError::InvalidData);
         }
         let _length = self.read_u16()?;
-        let components_in_scan = self.read_byte()? as i32;
+        let components_in_scan = self.read_u8()? as i32;
         for _ in 0..components_in_scan {
-            let _id = self.read_byte()?;
-            let _mapping = self.read_byte()?;
+            let _id = self.read_u8()?;
+            let _mapping = self.read_u8()?;
         }
-        self.parameters.near_lossless = self.read_byte()? as i32;
-        self.parameters.interleave_mode = InterleaveMode::try_from(self.read_byte()?)?;
-        let _point_transform = self.read_byte()?;
+        self.parameters.near_lossless = self.read_u8()? as i32;
+        self.parameters.interleave_mode = InterleaveMode::try_from(self.read_u8()?)?;
+        let _point_transform = self.read_u8()?;
 
         self.state = JpegStreamReaderState::ScanSection;
         Ok(())
@@ -190,14 +232,27 @@ impl<'a> JpegStreamReader<'a> {
             return Err(JpeglsError::InvalidData);
         }
         let _length = self.read_u16()?;
-        let components_in_scan = self.read_byte()? as i32;
+        let components_in_scan = self.read_u8()? as i32;
+        self.scan_component_indices.clear();
+
         for _ in 0..components_in_scan {
-            let _id = self.read_byte()?;
-            let _selector = self.read_byte()?;
+            let id = self.read_u8()?;
+            let selector = self.read_u8()?;
+            let dc_dest = selector >> 4;
+            let ac_dest = selector & 0x0F;
+
+            for (idx, component) in self.components.iter_mut().enumerate() {
+                if component.id == id {
+                    component.dc_table_dest = dc_dest;
+                    component.ac_table_dest = ac_dest;
+                    self.scan_component_indices.push(idx);
+                    break;
+                }
+            }
         }
-        let _ss = self.read_byte()?;
-        let _se = self.read_byte()?;
-        let _ah_al = self.read_byte()?;
+        let _ss = self.read_u8()?;
+        let _se = self.read_u8()?;
+        let _ah_al = self.read_u8()?;
 
         self.state = JpegStreamReaderState::ScanSection;
         Ok(())
@@ -212,7 +267,7 @@ impl<'a> JpegStreamReader<'a> {
 
         let mut identifier = [0u8; 6];
         for i in 0..6 {
-            identifier[i] = self.read_byte()?;
+            identifier[i] = self.read_u8()?;
         }
 
         if identifier != [b'S', b'P', b'I', b'F', b'F', 0] {
@@ -220,18 +275,18 @@ impl<'a> JpegStreamReader<'a> {
             return Ok(None);
         }
 
-        let _version_major = self.read_byte()?;
-        let _version_minor = self.read_byte()?;
-        let profile_id = self.read_byte()?;
-        let component_count = self.read_byte()?;
-        let height = self.read_u32_internal()?;
-        let width = self.read_u32_internal()?;
-        let color_space = self.read_byte()?;
-        let bits_per_sample = self.read_byte()?;
-        let compression_type = self.read_byte()?;
-        let resolution_units = self.read_byte()?;
-        let vertical_resolution = self.read_u32_internal()?;
-        let horizontal_resolution = self.read_u32_internal()?;
+        let _version_major = self.read_u8()?;
+        let _version_minor = self.read_u8()?;
+        let profile_id = self.read_u8()?;
+        let component_count = self.read_u8()?;
+        let height = self.read_u32()?;
+        let width = self.read_u32()?;
+        let color_space = self.read_u8()?;
+        let bits_per_sample = self.read_u8()?;
+        let compression_type = self.read_u8()?;
+        let resolution_units = self.read_u8()?;
+        let vertical_resolution = self.read_u32()?;
+        let horizontal_resolution = self.read_u32()?;
 
         Ok(Some(SpiffHeader {
             profile_id: profile_id.try_into()?,
@@ -247,15 +302,10 @@ impl<'a> JpegStreamReader<'a> {
         }))
     }
 
-    fn read_u32_internal(&mut self) -> Result<u32, JpeglsError> {
-        let b1 = self.read_byte()? as u32;
-        let b2 = self.read_byte()? as u32;
-        let b3 = self.read_byte()? as u32;
-        let b4 = self.read_byte()? as u32;
-        Ok((b1 << 24) | (b2 << 16) | (b3 << 8) | b4)
-    }
+    // Deprecated? No, used in other methods I didn't verify fully?
+    // I replaced read_u32_internal usage with read_u32 above.
 
-    fn skip_segment(&mut self) -> Result<(), JpeglsError> {
+    pub fn skip_segment(&mut self) -> Result<(), JpeglsError> {
         let length = self.read_u16()?;
         if length < 2 {
             return Err(JpeglsError::InvalidData);
@@ -264,44 +314,63 @@ impl<'a> JpegStreamReader<'a> {
         Ok(())
     }
 
+    pub fn advance(&mut self, count: usize) {
+        self.position += count;
+    }
+
+    // Helper to align (No-op in byte stream)
+    pub fn align_to_byte(&mut self) {}
+
+    // JPEG 1 Headers
+
     fn read_sof0_segment(&mut self) -> Result<(), JpeglsError> {
         let _length = self.read_u16()?;
-        self.frame_info.bits_per_sample = self.read_byte()? as i32;
+        self.frame_info.bits_per_sample = self.read_u8()? as i32;
         self.frame_info.height = self.read_u16()? as u32;
         self.frame_info.width = self.read_u16()? as u32;
-        self.frame_info.component_count = self.read_byte()? as i32;
+        self.frame_info.component_count = self.read_u8()? as i32;
 
+        self.components.clear();
         for _ in 0..self.frame_info.component_count {
-            let _id = self.read_byte()?;
-            let _sampling = self.read_byte()?;
-            let _tq = self.read_byte()?;
+            let id = self.read_u8()?;
+            let sampling = self.read_u8()?;
+            let tq = self.read_u8()?;
+            self.components.push(JpegComponent {
+                id,
+                h_samp_factor: sampling >> 4,
+                v_samp_factor: sampling & 0x0F,
+                quant_table_dest: tq,
+                dc_table_dest: 0,
+                ac_table_dest: 0,
+                dc_pred: 0,
+            });
         }
         Ok(())
     }
 
-    fn read_dqt_segment(&mut self) -> Result<(), JpeglsError> {
+    pub fn read_dqt_segment(&mut self) -> Result<(), JpeglsError> {
         let length = self.read_u16()? as usize;
         let mut remaining = length - 2;
         while remaining >= 65 {
-            let pq_tq = self.read_byte()?;
+            let pq_tq = self.read_u8()?;
             let precision = pq_tq >> 4;
             let id = (pq_tq & 0x0F) as usize;
             if id >= 4 || precision != 0 {
                 return Err(JpeglsError::ParameterValueNotSupported);
             }
             for i in 0..64 {
-                self.quantization_tables[id][i] = self.read_byte()?;
+                self.quantization_tables[id][i] = self.read_u8()?;
             }
             remaining -= 65;
         }
         Ok(())
     }
 
-    fn read_dht_segment(&mut self) -> Result<(), JpeglsError> {
+    pub fn read_dht_segment(&mut self) -> Result<(), JpeglsError> {
         let length = self.read_u16()? as usize;
         let mut remaining = length - 2;
         while remaining >= 17 {
-            let tc_th = self.read_byte()?;
+            let tc_th = self.read_u8()?;
             let class = tc_th >> 4;
             let id = (tc_th & 0x0F) as usize;
             if id >= 4 {
@@ -311,7 +380,7 @@ impl<'a> JpegStreamReader<'a> {
             let mut lengths = [0u8; 16];
             let mut total_values = 0usize;
             for i in 0..16 {
-                lengths[i] = self.read_byte()?;
+                lengths[i] = self.read_u8()?;
                 total_values += lengths[i] as usize;
             }
             remaining -= 17;
@@ -322,7 +391,7 @@ impl<'a> JpegStreamReader<'a> {
 
             let mut values = vec![0u8; total_values];
             for i in 0..total_values {
-                values[i] = self.read_byte()?;
+                values[i] = self.read_u8()?;
             }
             remaining -= total_values;
 
@@ -334,5 +403,17 @@ impl<'a> JpegStreamReader<'a> {
             }
         }
         Ok(())
+    }
+
+    pub fn read_dri_segment(&mut self) -> Result<(), JpeglsError> {
+        let length = self.read_u16()?;
+        if length != 4 {
+            return Err(JpeglsError::InvalidData);
+        }
+        self.restart_interval = self.read_u16()?;
+        Ok(())
+    }
+    pub fn align_to_byte(&mut self) {
+        // No-op for byte-aligned source reader
     }
 }

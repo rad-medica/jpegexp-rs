@@ -1,0 +1,47 @@
+﻿cargo : warning: variable does not need to be mutable
+En línea: 1 Carácter: 1
++ cargo test --lib jpeg1::encoder::tests -- --nocapture 
+2>&1 | Out-File ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : NotSpecified: (warning: va 
+   riab...d to be mutable:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  --> src\jpeg1\dct.rs:50:13
+   |
+50 |         let mut input = [-128.0f32; 64];
+   |             ----^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: `jpegexp-rs` (lib test) generated 1 warning 
+(run `cargo fix --lib -p jpegexp-rs --tests` to apply 1 
+suggestion)
+    Finished `test` profile [unoptimized + debuginfo] 
+target(s) in 0.04s
+     Running unittests src\lib.rs 
+(target\debug\deps\jpegexp_rs-c6d37c9d6b1939e9.exe)
+
+running 2 tests
+test jpeg1::encoder::tests::test_encode_decode_roundtrip_grayscale ... ok
+
+thread 'jpeg1::encoder::tests::test_encode_decode_roundtr
+ip_color' (12888) panicked at 
+src\jpeg1\encoder.rs:281:13:
+Mismatch at index 0: src=0 dec=207 diff=207
+note: run with `RUST_BACKTRACE=1` environment variable 
+to display a backtrace
+test jpeg1::encoder::tests::test_encode_decode_roundtrip_color ... FAILED
+
+failures:
+
+failures:
+    jpeg1::encoder::tests::test_encode_decode_roundtrip_color
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`

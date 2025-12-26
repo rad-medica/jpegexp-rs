@@ -116,7 +116,9 @@ impl<'a> JpegStreamWriter<'a> {
         for i in 0..frame_info.component_count {
             self.write_byte((i + 1) as u8)?;
             self.write_byte(0x11)?; // Sampling factors 1x1
-            self.write_byte(0)?; // Quantization table ID
+            // Use Quantization Table 0 for Y (component 0), Table 1 for Cb/Cr (components 1, 2)
+            let q_table_id = if i == 0 { 0 } else { 1 };
+            self.write_byte(q_table_id)?; 
         }
         Ok(())
     }
@@ -128,11 +130,20 @@ impl<'a> JpegStreamWriter<'a> {
         self.write_byte(component_count)?;
         for i in 0..component_count {
             self.write_byte(i + 1)?; // Component selector
-            self.write_byte(0x00)?; // DC/AC entropy table destination (DC 0, AC 0)
+            // Use DC/AC Table 0 for Y, Table 1 for Cb/Cr
+            let table_sel = if i == 0 { 0x00 } else { 0x11 };
+            self.write_byte(table_sel)?;
         }
         self.write_byte(0)?; // Ss
         self.write_byte(63)?; // Se
         self.write_byte(0)?; // Ah/Al
+        Ok(())
+    }
+
+    pub fn write_dri(&mut self, restart_interval: u16) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::DefineRestartInterval)?;
+        self.write_u16(4)?; // Length
+        self.write_u16(restart_interval)?;
         Ok(())
     }
 
