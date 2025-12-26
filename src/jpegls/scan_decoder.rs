@@ -1,8 +1,9 @@
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::JPEG_MARKER_START_BYTE;
-use crate::regular_mode_context::RegularModeContext;
-use crate::run_mode_context::RunModeContext;
-use crate::{CodingParameters, FrameInfo, InterleaveMode, JpeglsPcParameters};
+use crate::jpegls::regular_mode_context::RegularModeContext;
+use crate::jpegls::run_mode_context::RunModeContext;
+use crate::FrameInfo;
+use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
 
 pub struct ScanDecoder<'a> {
     frame_info: FrameInfo,
@@ -89,7 +90,7 @@ impl<'a> ScanDecoder<'a> {
         }
     }
 
-    fn decode_scan_typed<T: crate::traits::JpeglsSample>(
+    fn decode_scan_typed<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         destination: &mut [u8],
         stride: usize,
@@ -99,7 +100,7 @@ impl<'a> ScanDecoder<'a> {
         Ok(self.position)
     }
 
-    fn decode_lines<T: crate::traits::JpeglsSample>(
+    fn decode_lines<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         destination: &mut [u8],
         stride: usize,
@@ -136,7 +137,7 @@ impl<'a> ScanDecoder<'a> {
         Ok(())
     }
 
-    fn decode_sample_line<T: crate::traits::JpeglsSample>(
+    fn decode_sample_line<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         prev_line: &[T],
         curr_line: &mut [T],
@@ -178,7 +179,7 @@ impl<'a> ScanDecoder<'a> {
         Ok(())
     }
 
-    fn decode_regular<T: crate::traits::JpeglsSample>(
+    fn decode_regular<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         qs: i32,
         predicted: i32,
@@ -340,18 +341,18 @@ impl<'a> ScanDecoder<'a> {
     }
 
     fn bit_wise_sign(val: i32) -> i32 {
-        crate::traits::bit_wise_sign(val)
+        crate::jpegls::traits::bit_wise_sign(val)
     }
 
     fn apply_sign(val: i32, sign: i32) -> i32 {
-        crate::traits::apply_sign(val, sign)
+        crate::jpegls::traits::apply_sign(val, sign)
     }
 
     fn apply_sign_for_index(val: i32, sign: i32) -> usize {
-        crate::traits::apply_sign_for_index(val, sign)
+        crate::jpegls::traits::apply_sign_for_index(val, sign)
     }
 
-    fn decode_run_mode<T: crate::traits::JpeglsSample>(
+    fn decode_run_mode<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         start_index: usize,
         prev_line: &[T],
@@ -406,7 +407,7 @@ impl<'a> ScanDecoder<'a> {
         Ok(run_length)
     }
 
-    fn decode_run_interruption_pixel<T: crate::traits::JpeglsSample>(
+    fn decode_run_interruption_pixel<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         ra: i32,
         rb: i32,

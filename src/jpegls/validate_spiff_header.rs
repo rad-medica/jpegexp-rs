@@ -1,6 +1,7 @@
 use crate::error::JpeglsError;
-use crate::{
-    FrameInfo, SpiffColorSpace, SpiffCompressionType, SpiffHeader, SpiffProfileId,
+use crate::FrameInfo;
+use crate::jpegls::{
+    SpiffColorSpace, SpiffCompressionType, SpiffHeader, SpiffProfileId,
     SpiffResolutionUnits,
 };
 

@@ -1,5 +1,5 @@
 use crate::error::JpeglsError;
-use crate::traits::bit_wise_sign;
+use crate::jpegls::traits::bit_wise_sign;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegularModeContext {

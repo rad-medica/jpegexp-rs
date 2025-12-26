@@ -1,7 +1,8 @@
 use crate::error::JpeglsError;
 use crate::jpeg_stream_reader::JpegStreamReader;
-use crate::validate_spiff_header::validate_spiff_header;
-use crate::{FrameInfo, SpiffHeader};
+use crate::jpegls::validate_spiff_header::validate_spiff_header;
+use crate::FrameInfo;
+use crate::jpegls::SpiffHeader;
 
 pub struct JpeglsDecoder<'a> {
     reader: JpegStreamReader<'a>,
@@ -37,9 +38,10 @@ impl<'a> JpeglsDecoder<'a> {
     }
 
     pub fn decode(&mut self, destination: &mut [u8]) -> Result<(), JpeglsError> {
+        self.reader.read_start_of_scan_segment_jpegls()?;
         let frame_info = self.frame_info().clone();
 
-        let mut scan_decoder = crate::scan_decoder::ScanDecoder::new(
+        let mut scan_decoder = crate::jpegls::scan_decoder::ScanDecoder::new(
             frame_info,
             self.reader.preset_coding_parameters(), // Need to expose this
             self.reader.parameters(),               // Need to expose this

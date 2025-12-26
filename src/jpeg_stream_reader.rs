@@ -1,7 +1,8 @@
-use crate::coding_parameters::{CodingParameters, JpeglsPcParameters};
+use crate::jpegls::coding_parameters::{CodingParameters, JpeglsPcParameters};
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
-use crate::{FrameInfo, InterleaveMode, SpiffHeader};
+use crate::jpegls::{InterleaveMode, SpiffHeader};
+use crate::FrameInfo;
 use std::convert::{TryFrom, TryInto};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,9 @@ pub struct JpegStreamReader<'a> {
     parameters: CodingParameters,
     preset_coding_parameters: JpeglsPcParameters,
     spiff_header: Option<SpiffHeader>,
+    pub quantization_tables: [[u8; 64]; 4],
+    pub huffman_tables_dc: Vec<Option<crate::jpeg1::huffman::HuffmanTable>>,
+    pub huffman_tables_ac: Vec<Option<crate::jpeg1::huffman::HuffmanTable>>,
 }
 
 impl<'a> JpegStreamReader<'a> {
@@ -32,6 +36,9 @@ impl<'a> JpegStreamReader<'a> {
             parameters: CodingParameters::default(),
             preset_coding_parameters: JpeglsPcParameters::default(),
             spiff_header: None,
+            quantization_tables: [[0u8; 64]; 4],
+            huffman_tables_dc: vec![None, None, None, None],
+            huffman_tables_ac: vec![None, None, None, None],
         }
     }
 
@@ -81,6 +88,15 @@ impl<'a> JpegStreamReader<'a> {
                         *spiff_header = spiff;
                         self.spiff_header = spiff;
                     }
+                }
+                JpegMarkerCode::StartOfFrameBaseline => {
+                    self.read_sof0_segment()?;
+                }
+                JpegMarkerCode::DefineQuantizationTable => {
+                    self.read_dqt_segment()?;
+                }
+                JpegMarkerCode::DefineHuffmanTable => {
+                    self.read_dht_segment()?;
                 }
                 _ => {
                     self.skip_segment()?;
@@ -151,7 +167,7 @@ impl<'a> JpegStreamReader<'a> {
         Ok(())
     }
 
-    pub fn read_start_of_scan_segment(&mut self) -> Result<(), JpeglsError> {
+    pub fn read_start_of_scan_segment_jpegls(&mut self) -> Result<(), JpeglsError> {
         let _length = self.read_u16()?;
         let components_in_scan = self.read_byte()? as i32;
         for _ in 0..components_in_scan {
@@ -161,6 +177,21 @@ impl<'a> JpegStreamReader<'a> {
         self.parameters.near_lossless = self.read_byte()? as i32;
         self.parameters.interleave_mode = InterleaveMode::try_from(self.read_byte()?)?;
         let _point_transform = self.read_byte()?;
+
+        self.state = JpegStreamReaderState::ScanSection;
+        Ok(())
+    }
+
+    pub fn read_start_of_scan_segment_jpeg1(&mut self) -> Result<(), JpeglsError> {
+        let _length = self.read_u16()?;
+        let components_in_scan = self.read_byte()? as i32;
+        for _ in 0..components_in_scan {
+            let _id = self.read_byte()?;
+            let _selector = self.read_byte()?;
+        }
+        let _ss = self.read_byte()?;
+        let _se = self.read_byte()?;
+        let _ah_al = self.read_byte()?;
 
         self.state = JpegStreamReaderState::ScanSection;
         Ok(())
@@ -224,6 +255,78 @@ impl<'a> JpegStreamReader<'a> {
             return Err(JpeglsError::InvalidData);
         }
         self.position += (length as usize) - 2;
+        Ok(())
+    }
+
+    fn read_sof0_segment(&mut self) -> Result<(), JpeglsError> {
+        let _length = self.read_u16()?;
+        self.frame_info.bits_per_sample = self.read_byte()? as i32;
+        self.frame_info.height = self.read_u16()? as u32;
+        self.frame_info.width = self.read_u16()? as u32;
+        self.frame_info.component_count = self.read_byte()? as i32;
+
+        for _ in 0..self.frame_info.component_count {
+            let _id = self.read_byte()?;
+            let _sampling = self.read_byte()?;
+            let _tq = self.read_byte()?;
+        }
+        Ok(())
+    }
+
+    fn read_dqt_segment(&mut self) -> Result<(), JpeglsError> {
+        let length = self.read_u16()? as usize;
+        let mut remaining = length - 2;
+        while remaining >= 65 {
+            let pq_tq = self.read_byte()?;
+            let precision = pq_tq >> 4;
+            let id = (pq_tq & 0x0F) as usize;
+            if id >= 4 || precision != 0 {
+                return Err(JpeglsError::ParameterValueNotSupported);
+            }
+            for i in 0..64 {
+                self.quantization_tables[id][i] = self.read_byte()?;
+            }
+            remaining -= 65;
+        }
+        Ok(())
+    }
+
+    fn read_dht_segment(&mut self) -> Result<(), JpeglsError> {
+        let length = self.read_u16()? as usize;
+        let mut remaining = length - 2;
+        while remaining >= 17 {
+            let tc_th = self.read_byte()?;
+            let class = tc_th >> 4;
+            let id = (tc_th & 0x0F) as usize;
+            if id >= 4 {
+                return Err(JpeglsError::ParameterValueNotSupported);
+            }
+
+            let mut lengths = [0u8; 16];
+            let mut total_values = 0usize;
+            for i in 0..16 {
+                lengths[i] = self.read_byte()?;
+                total_values += lengths[i] as usize;
+            }
+            remaining -= 17;
+
+            if remaining < total_values {
+                return Err(JpeglsError::InvalidData);
+            }
+
+            let mut values = vec![0u8; total_values];
+            for i in 0..total_values {
+                values[i] = self.read_byte()?;
+            }
+            remaining -= total_values;
+
+            let table = crate::jpeg1::huffman::HuffmanTable::build_from_dht(&lengths, &values);
+            if class == 0 {
+                self.huffman_tables_dc[id] = Some(table);
+            } else {
+                self.huffman_tables_ac[id] = Some(table);
+            }
+        }
         Ok(())
     }
 }

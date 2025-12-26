@@ -1,6 +1,7 @@
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
-use crate::{FrameInfo, InterleaveMode, JpeglsPcParameters};
+use crate::jpegls::{InterleaveMode, JpeglsPcParameters};
+use crate::FrameInfo;
 
 pub struct JpegStreamWriter<'a> {
     destination: &'a mut [u8],
@@ -58,7 +59,7 @@ impl<'a> JpegStreamWriter<'a> {
         self.write_marker(JpegMarkerCode::EndOfImage)
     }
 
-    pub fn write_start_of_frame_segment(
+    pub fn write_start_of_frame_jpegls(
         &mut self,
         frame_info: &FrameInfo,
     ) -> Result<(), JpeglsError> {
@@ -76,6 +77,62 @@ impl<'a> JpegStreamWriter<'a> {
             self.write_byte(0x11)?; // H=1, V=1
             self.write_byte(0)?; // Tq
         }
+        Ok(())
+    }
+
+    pub fn write_dqt(&mut self, table_id: u8, table: &[u8; 64]) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::DefineQuantizationTable)?;
+        self.write_u16(2 + 1 + 64)?;
+        self.write_byte(table_id & 0x0F)?; // Precision 0 (8-bit), ID
+        for &val in table {
+            self.write_byte(val)?;
+        }
+        Ok(())
+    }
+
+    pub fn write_dht(&mut self, table_class: u8, table_id: u8, lengths: &[u8; 16], values: &[u8]) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::DefineHuffmanTable)?;
+        let length = 2 + 1 + 16 + values.len();
+        self.write_u16(length as u16)?;
+        self.write_byte(((table_class & 1) << 4) | (table_id & 0x0F))?;
+        for &len in lengths {
+            self.write_byte(len)?;
+        }
+        for &val in values {
+            self.write_byte(val)?;
+        }
+        Ok(())
+    }
+
+    pub fn write_sof0_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::StartOfFrameBaseline)?;
+        let length = 2 + 1 + 2 + 2 + 1 + (frame_info.component_count as usize * 3);
+        self.write_u16(length as u16)?;
+        self.write_byte(frame_info.bits_per_sample as u8)?;
+        self.write_u16(frame_info.height as u16)?;
+        self.write_u16(frame_info.width as u16)?;
+        self.write_byte(frame_info.component_count as u8)?;
+
+        for i in 0..frame_info.component_count {
+            self.write_byte((i + 1) as u8)?;
+            self.write_byte(0x11)?; // Sampling factors 1x1
+            self.write_byte(0)?; // Quantization table ID
+        }
+        Ok(())
+    }
+
+    pub fn write_sos_segment(&mut self, component_count: u8) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::StartOfScan)?;
+        let length = 2 + 1 + (component_count as usize * 2) + 3;
+        self.write_u16(length as u16)?;
+        self.write_byte(component_count)?;
+        for i in 0..component_count {
+            self.write_byte(i + 1)?; // Component selector
+            self.write_byte(0x00)?; // DC/AC entropy table destination (DC 0, AC 0)
+        }
+        self.write_byte(0)?; // Ss
+        self.write_byte(63)?; // Se
+        self.write_byte(0)?; // Ah/Al
         Ok(())
     }
 

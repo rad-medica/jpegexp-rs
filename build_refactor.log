@@ -1,0 +1,234 @@
+    Checking jpegexp-rs v0.1.0 (C:\Users\aroja\CODE\jpegexp-rs)
+error[E0583]: file not found for module `dct`
+ --> src\jpeg1\mod.rs:2:1
+  |
+2 | pub mod dct;
+  | ^^^^^^^^^^^^
+  |
+  = help: to create the module `dct`, create file "src\jpeg1\dct.rs" or "src\jpeg1\dct\mod.rs"
+  = note: if there is a `mod dct` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `quantization`
+ --> src\jpeg1\mod.rs:3:1
+  |
+3 | pub mod quantization;
+  | ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `quantization`, create file "src\jpeg1\quantization.rs" or "src\jpeg1\quantization\mod.rs"
+  = note: if there is a `mod quantization` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `huffman`
+ --> src\jpeg1\mod.rs:4:1
+  |
+4 | pub mod huffman;
+  | ^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `huffman`, create file "src\jpeg1\huffman.rs" or "src\jpeg1\huffman\mod.rs"
+  = note: if there is a `mod huffman` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `encoder`
+ --> src\jpeg1\mod.rs:5:1
+  |
+5 | pub mod encoder;
+  | ^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `encoder`, create file "src\jpeg1\encoder.rs" or "src\jpeg1\encoder\mod.rs"
+  = note: if there is a `mod encoder` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `decoder`
+ --> src\jpeg1\mod.rs:6:1
+  |
+6 | pub mod decoder;
+  | ^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `decoder`, create file "src\jpeg1\decoder.rs" or "src\jpeg1\decoder\mod.rs"
+  = note: if there is a `mod decoder` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0432]: unresolved import `crate::traits`
+ --> src\jpegls\regular_mode_context.rs:2:12
+  |
+2 | use crate::traits::bit_wise_sign;
+  |            ^^^^^^
+  |            |
+  |            unresolved import
+  |            help: a similar path exists: `jpegls::traits`
+
+error[E0433]: failed to resolve: unresolved import
+  --> src\jpegls\decoder.rs:43:39
+   |
+43 |         let mut scan_decoder = crate::scan_decoder::ScanDecoder::new(
+   |                                       ^^^^^^^^^^^^ unresolved import
+   |
+help: a similar path exists
+   |
+43 |         let mut scan_decoder = crate::jpegls::scan_decoder::ScanDecoder::new(
+   |                                       ++++++++
+help: consider importing this struct
+   |
+ 1 + use crate::jpegls::scan_decoder::ScanDecoder;
+   |
+help: if you import `ScanDecoder`, refer to it directly
+   |
+43 -         let mut scan_decoder = crate::scan_decoder::ScanDecoder::new(
+43 +         let mut scan_decoder = ScanDecoder::new(
+   |
+
+error[E0433]: failed to resolve: could not find `ColorTransformation` in the crate root
+  --> src\jpegls\encoder.rs:76:36
+   |
+76 |             transformation: crate::ColorTransformation::None,
+   |                                    ^^^^^^^^^^^^^^^^^^^ could not find `ColorTransformation` in the crate root
+   |
+help: consider importing this enum
+   |
+ 1 + use crate::jpegls::ColorTransformation;
+   |
+help: if you import `ColorTransformation`, refer to it directly
+   |
+76 -             transformation: crate::ColorTransformation::None,
+76 +             transformation: ColorTransformation::None,
+   |
+
+error[E0433]: failed to resolve: unresolved import
+   --> src\jpegls\encoder.rs:107:36
+    |
+107 |     fn encode_scan_typed<T: crate::traits::JpeglsSample>(
+    |                                    ^^^^^^ unresolved import
+    |
+help: a similar path exists
+    |
+107 |     fn encode_scan_typed<T: crate::jpegls::traits::JpeglsSample>(
+    |                                    ++++++++
+help: consider importing this module
+    |
+  1 + use crate::jpegls::traits;
+    |
+help: if you import `traits`, refer to it directly
+    |
+107 -     fn encode_scan_typed<T: crate::traits::JpeglsSample>(
+107 +     fn encode_scan_typed<T: traits::JpeglsSample>(
+    |
+
+error[E0433]: failed to resolve: unresolved import
+  --> src\jpegls\scan_decoder.rs:93:36
+   |
+93 |     fn decode_scan_typed<T: crate::traits::JpeglsSample>(
+   |                                    ^^^^^^ unresolved import
+   |
+help: a similar path exists
+   |
+93 |     fn decode_scan_typed<T: crate::jpegls::traits::JpeglsSample>(
+   |                                    ++++++++
+help: consider importing this module
+   |
+ 1 + use crate::jpegls::traits;
+   |
+help: if you import `traits`, refer to it directly
+   |
+93 -     fn decode_scan_typed<T: crate::traits::JpeglsSample>(
+93 +     fn decode_scan_typed<T: traits::JpeglsSample>(
+   |
+
+error[E0433]: failed to resolve: unresolved import
+   --> src\jpegls\scan_decoder.rs:103:31
+    |
+103 |     fn decode_lines<T: crate::traits::JpeglsSample>(
+    |                               ^^^^^^ unresolved import
+    |
+help: a similar path exists
+    |
+103 |     fn decode_lines<T: crate::jpegls::traits::JpeglsSample>(
+    |                               ++++++++
+help: consider importing this module
+    |
+  1 + use crate::jpegls::traits;
+    |
+help: if you import `traits`, refer to it directly
+    |
+103 -     fn decode_lines<T: crate::traits::JpeglsSample>(
+103 +     fn decode_lines<T: traits::JpeglsSample>(
+    |
+
+error[E0433]: failed to resolve: unresolved import
+   --> src\jpegls\scan_decoder.rs:140:37
+    |
+140 |     fn decode_sample_line<T: crate::traits::JpeglsSample>(
+    |                                     ^^^^^^ unresolved import
+    |
+help: a similar path exists
+    |
+140 |     fn decode_sample_line<T: crate::jpegls::traits::JpeglsSample>(
+    |                                     ++++++++
+help: consider importing this module
+    |
+  1 + use crate::jpegls::traits;
+    |
+help: if you import `traits`, refer to it directly
+    |
+140 -     fn decode_sample_line<T: crate::traits::JpeglsSample>(
+140 +     fn decode_sample_line<T: traits::JpeglsSample>(
+    |
+
+error[E0433]: failed to resolve: unresolved import
+   --> src\jpegls\scan_decoder.rs:182:33
+    |
+182 |     fn decode_regular<T: crate::traits::JpeglsSample>(
+    |                                 ^^^^^^ unresolved import
+    |
+help: a similar path exists
+    |
+182 |     fn decode_regular<T: crate::jpegls::traits::JpeglsSample>(
+    |                                 ++++++++
+help: consider importing this module
+    |
+  1 + use crate::jpegls::traits;
+    |
+help: if you import `traits`, refer to it directly
+    |
+182 -     fn decode_regular<T: crate::traits::JpeglsSample>(
+182 +     fn decode_regular<T: traits::JpeglsSample>(
+    |
+
+error[E0433]: failed to resolve: unresolved import
+   --> src\jpegls\scan_decoder.rs:355:34
+    |
+355 |     fn decode_run_mode<T: crate::traits::JpeglsSample>(
+    |                                  ^^^^^^ unresolved import
+    |
+help: a similar path exists
+    |
+355 |     fn decode_run_mode<T: crate::jpegls::traits::JpeglsSample>(
+    |                                  ++++++++
+help: consider importing this module
+    |
+  1 + use crate::jpegls::traits;
+    |
+help: if you import `traits`, refer to it directly
+    |
+355 -     fn decode_run_mode<T: crate::traits::JpeglsSample>(
+355 +     fn decode_run_mode<T: traits::JpeglsSample>(
+    |
+
+error[E0433]: failed to resolve: unresolved import
+   --> src\jpegls\scan_decoder.rs:410:48
+    |
+410 |     fn decode_run_interruption_pixel<T: crate::traits::JpeglsSample>(
+    |                                                ^^^^^^ unresolved import
+    |
+help: a similar path exists
+    |
+410 |     fn decode_run_interruption_pixel<T: crate::jpegls::traits::JpeglsSample>(
+    |                                                ++++++++
+help: consider importing this module
+    |
+  1 + use crate::jpegls::traits;
+    |
+help: if you import `traits`, refer to it directly
+    |
+410 -     fn decode_run_interruption_pixel<T: crate::traits::JpeglsSample>(
+410 +     fn decode_run_interruption_pixel<T: traits::JpeglsSample>(
+    |
+
+Some errors have detailed explanations: E0432, E0433, E0583.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `jpegexp-rs` (lib) due to 15 previous errors

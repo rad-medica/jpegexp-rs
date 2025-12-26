@@ -11,6 +11,8 @@ pub enum JpegMarkerCode {
 
     /// SOS: Marks the start of scan.
     StartOfScan = 0xDA,
+    /// DQT: Defines one or more quantization tables.
+    DefineQuantizationTable = 0xDB,
 
     /// DNL: Defines the number of lines in a scan.
     DefineNumberOfLines = 0xDC,
@@ -54,6 +56,11 @@ pub enum JpegMarkerCode {
     /// COM: Comment block.
     Comment = 0xFE,
 
+    /// SOF0: Start of Frame (Baseline DCT).
+    StartOfFrameBaseline = 0xC0,
+    /// DHT: Defines one or more Huffman tables.
+    DefineHuffmanTable = 0xC4,
+
     // The following markers are defined in ISO/IEC 14495-1 | ITU T.87. (JPEG-LS standard)
     /// SOF_55: Marks the start of a JPEG-LS encoded frame.
     StartOfFrameJpegls = 0xF7,
@@ -69,6 +76,9 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0xD8 => Ok(Self::StartOfImage),
             0xD9 => Ok(Self::EndOfImage),
             0xDA => Ok(Self::StartOfScan),
+            0xDB => Ok(Self::DefineQuantizationTable),
+            0xC0 => Ok(Self::StartOfFrameBaseline),
+            0xC4 => Ok(Self::DefineHuffmanTable),
             0xDC => Ok(Self::DefineNumberOfLines),
             0xDD => Ok(Self::DefineRestartInterval),
             0xE0 => Ok(Self::ApplicationData0),

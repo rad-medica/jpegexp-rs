@@ -1,8 +1,9 @@
-use crate::coding_parameters::{compute_default, compute_limit_parameter};
+use crate::jpegls::coding_parameters::{compute_default, compute_limit_parameter};
 use crate::error::JpeglsError;
 use crate::jpeg_stream_writer::JpegStreamWriter;
-use crate::scan_encoder::ScanEncoder;
-use crate::{CodingParameters, FrameInfo, InterleaveMode, JpeglsPcParameters};
+use crate::jpegls::scan_encoder::ScanEncoder;
+use crate::FrameInfo;
+use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
 
 pub struct JpeglsEncoder<'a> {
     writer: JpegStreamWriter<'a>,
@@ -72,12 +73,12 @@ impl<'a> JpeglsEncoder<'a> {
                 frame_info.component_count,
             ),
             quantized_bits_per_sample: frame_info.bits_per_sample,
-            transformation: crate::ColorTransformation::None,
+            transformation: crate::jpegls::ColorTransformation::None,
             mapping_table_id: 0,
         };
 
         self.writer.write_start_of_image()?;
-        self.writer.write_start_of_frame_segment(&frame_info)?;
+        self.writer.write_start_of_frame_jpegls(&frame_info)?;
         self.writer.write_jpegls_preset_parameters_segment(&pc)?;
 
         let component_count = frame_info.component_count;
@@ -103,7 +104,7 @@ impl<'a> JpeglsEncoder<'a> {
         Ok(self.writer.len())
     }
 
-    fn encode_scan_typed<T: crate::traits::JpeglsSample>(
+    fn encode_scan_typed<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         source: &[T],
         frame_info: &FrameInfo,

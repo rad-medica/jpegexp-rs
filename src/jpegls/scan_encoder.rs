@@ -1,10 +1,11 @@
-use crate::coding_parameters::CodingParameters;
+use crate::jpegls::coding_parameters::CodingParameters;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::JPEG_MARKER_START_BYTE;
-use crate::regular_mode_context::RegularModeContext;
-use crate::run_mode_context::RunModeContext;
-use crate::traits::JpeglsSample;
-use crate::{FrameInfo, JpeglsPcParameters};
+use crate::jpegls::regular_mode_context::RegularModeContext;
+use crate::jpegls::run_mode_context::RunModeContext;
+use crate::jpegls::traits::JpeglsSample;
+use crate::FrameInfo;
+use crate::jpegls::JpeglsPcParameters;
 
 pub struct ScanEncoder<'a> {
     frame_info: FrameInfo,
@@ -59,11 +60,11 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn apply_sign(val: i32, sign: i32) -> i32 {
-        crate::traits::apply_sign(val, sign)
+        crate::jpegls::traits::apply_sign(val, sign)
     }
 
     fn bit_wise_sign(val: i32) -> i32 {
-        crate::traits::bit_wise_sign(val)
+        crate::jpegls::traits::bit_wise_sign(val)
     }
 
     pub fn encode_scan<T: JpeglsSample>(
@@ -231,7 +232,7 @@ impl<'a> ScanEncoder<'a> {
         predicted: i32,
     ) -> Result<(), JpeglsError> {
         let sign = Self::bit_wise_sign(qs);
-        let ctx_index = crate::traits::apply_sign_for_index(qs, sign);
+        let ctx_index = crate::jpegls::traits::apply_sign_for_index(qs, sign);
 
         let limit = self.coding_parameters.limit;
         let near_lossless = self.coding_parameters.near_lossless;
