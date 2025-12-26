@@ -168,6 +168,9 @@ impl<'a> JpegStreamReader<'a> {
     }
 
     pub fn read_start_of_scan_segment_jpegls(&mut self) -> Result<(), JpeglsError> {
+        if self.read_marker()? != JpegMarkerCode::StartOfScan {
+            return Err(JpeglsError::InvalidData);
+        }
         let _length = self.read_u16()?;
         let components_in_scan = self.read_byte()? as i32;
         for _ in 0..components_in_scan {
@@ -183,6 +186,9 @@ impl<'a> JpegStreamReader<'a> {
     }
 
     pub fn read_start_of_scan_segment_jpeg1(&mut self) -> Result<(), JpeglsError> {
+        if self.read_marker()? != JpegMarkerCode::StartOfScan {
+            return Err(JpeglsError::InvalidData);
+        }
         let _length = self.read_u16()?;
         let components_in_scan = self.read_byte()? as i32;
         for _ in 0..components_in_scan {

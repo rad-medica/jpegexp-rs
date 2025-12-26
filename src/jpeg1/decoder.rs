@@ -45,7 +45,6 @@ impl<'a> Jpeg1Decoder<'a> {
                 let mut idct_result = [0.0f32; 64];
                 idct_8x8_baseline(&dequant_coeffs, &mut idct_result);
                 
-                // Copy back to destination with clamping and level-shift back (+128)
                 for y in 0..8 {
                     for x in 0..8 {
                         let py = block_y * 8 + y;
@@ -71,6 +70,7 @@ impl<'a> Jpeg1Decoder<'a> {
         let dc_diff_bits = bit_reader.read_bits(dc_category)?;
         let dc_diff = HuffmanEncoder::decode_value_bits(dc_diff_bits, dc_category);
         let dc_val = *dc_prev + dc_diff;
+        println!("DEBUG: Decoder Block DC: pref={}, diff={}, val={}", *dc_prev, dc_diff, dc_val);
         *dc_prev = dc_val;
         output[0] = dc_val;
 

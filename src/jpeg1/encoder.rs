@@ -26,6 +26,7 @@ pub struct Jpeg1Encoder {
     huffman: HuffmanEncoder,
     dc_table_lum: HuffmanTable,
     ac_table_lum: HuffmanTable,
+    pub quantization_table: [u8; 64],
 }
 
 impl Jpeg1Encoder {
@@ -34,42 +35,29 @@ impl Jpeg1Encoder {
             huffman: HuffmanEncoder::new(),
             dc_table_lum: HuffmanTable::standard_luminance_dc(),
             ac_table_lum: HuffmanTable::standard_luminance_ac(),
+            quantization_table: STD_LUMINANCE_QUANT_TABLE,
         }
     }
 
     pub fn encode_grayscale(&mut self, source: &[u8], frame_info: &FrameInfo, destination: &mut [u8]) -> Result<usize, JpeglsError> {
         let mut writer = JpegStreamWriter::new(destination);
         
-        // 1. Write Headers
         writer.write_start_of_image()?;
-        
-        // DQT
-        writer.write_dqt(0, &STD_LUMINANCE_QUANT_TABLE)?;
-        
-        // DHT (DC)
+        writer.write_dqt(0, &self.quantization_table)?;
         writer.write_dht(0, 0, &STD_LUMINANCE_DC_LENGTHS, &STD_LUMINANCE_DC_VALUES)?;
-        
-        // DHT (AC)
         writer.write_dht(1, 0, &self.ac_table_lum.lengths, &self.ac_table_lum.values)?;
-        
-        // SOF0
         writer.write_sof0_segment(frame_info)?;
-        
-        // SOS
         writer.write_sos_segment(1)?;
 
-        // 2. Entropy Coded Data
         let mut bit_writer = JpegBitWriter::new(writer.remaining_slice());
         let width = frame_info.width as usize;
         let height = frame_info.height as usize;
 
-        // Reset DC prediction
         self.huffman.dc_previous_value = [0; 4];
 
         for block_y in (0..height).step_by(8) {
             for block_x in (0..width).step_by(8) {
                 let mut block_data = [0.0f32; 64];
-                
                 for y in 0..8 {
                     for x in 0..8 {
                         let py = block_y + y;
@@ -81,7 +69,6 @@ impl Jpeg1Encoder {
                         }
                     }
                 }
-
                 self.encode_block_internal(&block_data, &mut bit_writer)?;
             }
         }
@@ -89,8 +76,6 @@ impl Jpeg1Encoder {
         bit_writer.flush()?;
         let encoded_len = bit_writer.len();
         writer.advance(encoded_len);
-
-        // 3. Write EOI
         writer.write_end_of_image()?;
 
         Ok(writer.len())
@@ -101,7 +86,7 @@ impl Jpeg1Encoder {
         fdct_8x8(block, &mut dct_coeffs);
 
         let mut quant_coeffs = [0i16; 64];
-        quantize_block(&dct_coeffs, &STD_LUMINANCE_QUANT_TABLE, &mut quant_coeffs);
+        quantize_block(&dct_coeffs, &self.quantization_table, &mut quant_coeffs);
 
         let mut zigzag_coeffs = [0i16; 64];
         for i in 0..64 {
@@ -116,7 +101,6 @@ impl Jpeg1Encoder {
         let dc_category = HuffmanEncoder::get_category(diff);
         let dc_code = self.dc_table_lum.codes[dc_category as usize];
         bit_writer.write_bits(dc_code.value, dc_code.length)?;
-        
         let (dc_bits, dc_bit_len) = HuffmanEncoder::get_diff_bits(diff, dc_category);
         bit_writer.write_bits(dc_bits, dc_bit_len)?;
 
@@ -132,29 +116,19 @@ impl Jpeg1Encoder {
                     bit_writer.write_bits(zrl_code.value, zrl_code.length)?;
                     run -= 16;
                 }
-
                 let category = HuffmanEncoder::get_category(ac_val);
                 let symbol = (run << 4) | (category as usize);
                 let ac_code = self.ac_table_lum.codes[symbol];
-                
-                if ac_code.length == 0 {
-                    return Err(JpeglsError::InvalidData);
-                }
-
                 bit_writer.write_bits(ac_code.value, ac_code.length)?;
-                
                 let (ac_bits, ac_bit_len) = HuffmanEncoder::get_diff_bits(ac_val, category);
                 bit_writer.write_bits(ac_bits, ac_bit_len)?;
-                
                 run = 0;
             }
         }
-
         if run > 0 {
             let eob_code = self.ac_table_lum.codes[0x00];
             bit_writer.write_bits(eob_code.value, eob_code.length)?;
         }
-        
         Ok(())
     }
 }
@@ -167,7 +141,10 @@ mod tests {
     fn test_encode_decode_roundtrip() {
         let width = 16;
         let height = 16;
-        let mut source = vec![128u8; width * height];
+        let mut source = vec![0u8; width * height];
+        for i in 0..source.len() {
+            source[i] = (i % 256) as u8;
+        }
 
         let frame_info = FrameInfo {
             width: width as u32,
@@ -176,8 +153,11 @@ mod tests {
             component_count: 1,
         };
 
-        let mut encoded = vec![0u8; 10000];
         let mut encoder = Jpeg1Encoder::new();
+        // Use standard quantization table (Quality 50)
+        encoder.quantization_table = STD_LUMINANCE_QUANT_TABLE;
+
+        let mut encoded = vec![0u8; 10000];
         let enc_len = encoder.encode_grayscale(&source, &frame_info, &mut encoded).expect("Encode failed");
         
         let mut decoder = crate::jpeg1::decoder::Jpeg1Decoder::new(&encoded[..enc_len]);
@@ -188,7 +168,7 @@ mod tests {
         
         for i in 0..source.len() {
             let diff = (source[i] as i32 - decoded[i] as i32).abs();
-            assert!(diff < 35, "Mismatch at {}: {} vs {} (diff {})", i, source[i], decoded[i], diff);
+            assert!(diff < 20, "Mismatch at index {}: src={} dec={} diff={}", i, source[i], decoded[i], diff);
         }
     }
 }
