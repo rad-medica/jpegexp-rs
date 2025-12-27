@@ -1,0 +1,12 @@
+[package]
+name = "jpegexp-py"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "jpegexp"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
+jpegexp-rs = { path = ".." }

@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: jpegexp-windows-x86_64.zip
+            binary: jpegexp.exe
+
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: jpegexp-linux-x86_64.tar.gz
+            binary: jpegexp
+
+          # Linux ARM64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: jpegexp-linux-arm64.tar.gz
+            binary: jpegexp
+
+          # macOS x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: jpegexp-macos-x86_64.tar.gz
+            binary: jpegexp
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: jpegexp-macos-arm64.tar.gz
+            binary: jpegexp
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: cargo build --release --bin jpegexp --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir dist
+          copy target\${{ matrix.target }}\release\${{ matrix.binary }} dist\
+          copy README.md dist\
+          copy LICENSE dist\
+          Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact }}
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
+          cp README.md dist/
+          cp LICENSE dist/
+          tar -czvf ${{ matrix.artifact }} -C dist .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            jpegexp-windows-x86_64.zip/jpegexp-windows-x86_64.zip
+            jpegexp-linux-x86_64.tar.gz/jpegexp-linux-x86_64.tar.gz
+            jpegexp-linux-arm64.tar.gz/jpegexp-linux-arm64.tar.gz
+            jpegexp-macos-x86_64.tar.gz/jpegexp-macos-x86_64.tar.gz
+            jpegexp-macos-arm64.tar.gz/jpegexp-macos-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

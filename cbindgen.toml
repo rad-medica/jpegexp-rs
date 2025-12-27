@@ -1,0 +1,26 @@
+# Configuration for cbindgen header generation
+
+[defines]
+
+[export]
+include = ["JpegExpDecoder", "JpegExpImageInfo", "JpegExpError"]
+
+[export.rename]
+
+[enum]
+rename_variants = "ScreamingSnakeCase"
+
+[fn]
+prefix = ""
+
+[struct]
+rename_fields = "None"
+
+[layout]
+# Use C layout
+packed = false
+
+[parse]
+parse_deps = false
+include = []
+extra_bindings = []

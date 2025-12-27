@@ -3,9 +3,11 @@
 **jpegexp-rs** is a high-performance, pure Rust "Universal JPEG" library. It provides native support for several JPEG standards, starting with a comprehensive port of the CharLS JPEG-LS implementation.
 
 ## Project Vision
+
 The goal of `jpegexp-rs` is to become a single, safe, and efficient library for all common JPEG variants used in medical imaging (DICOM), geospatial data, and professional photography.
 
 ### Roadmap
+
 - **Phase 1: JPEG-LS** (ISO/IEC 14495-1) - **Completed**
 - **Phase 2: JPEG 1** (ISO/IEC 10918-1) - **Completed**
   - Baseline DCT support (8-bit, interleaved/non-interleaved)
@@ -24,6 +26,7 @@ The goal of `jpegexp-rs` is to become a single, safe, and efficient library for 
   - CAP marker parsing and HT coder selection
 
 ## Core Features
+
 - **Pure Rust**: Zero unsafe code in the core logic, ensuring memory safety.
 - **JPEG-LS Support**: Lossless and near-lossless, 2-16 bit depths, SPIFF headers.
 - **JPEG 1 Support**: Baseline, Progressive, and Lossless modes.
@@ -33,12 +36,14 @@ The goal of `jpegexp-rs` is to become a single, safe, and efficient library for 
 ## Getting Started
 
 ### Installation
+
 ```toml
 [dependencies]
 jpegexp-rs = "0.1.0"
 ```
 
 ### JPEG-LS Decoding
+
 ```rust
 use jpegexp_rs::jpegls::JpeglsDecoder;
 
@@ -54,6 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ### JPEG 1 Decoding (Baseline/Progressive)
+
 ```rust
 use jpegexp_rs::jpeg1::Jpeg1Decoder;
 
@@ -67,6 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ### HTJ2K Decoding
+
 ```rust
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -82,7 +89,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ## Architecture
+
 The library is divided into several logical layers:
+
 1. **Public API**: High-level interfaces for each JPEG standard.
 2. **Stream Management**: Handles marker segments and byte-level I/O.
 3. **Transform Logic**: DCT/IDCT, DWT/IDWT, quantization.
@@ -90,5 +99,49 @@ The library is divided into several logical layers:
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed module descriptions.
 
+## API Bindings
+
+### CLI
+
+```powershell
+cargo run --bin jpegexp -- decode -i image.jpg -o output.raw
+cargo run --bin jpegexp -- encode -i pixels.raw -o image.jls -w 512 -H 512 -c jpegls
+cargo run --bin jpegexp -- transcode -i image.jpg -o image.jls -c jpegls
+cargo run --bin jpegexp -- info -i image.j2k
+cargo run --bin jpegexp -- list
+```
+
+### WASM (JavaScript)
+
+```javascript
+import init, { decode_jpeg, encode_jpeg, get_image_info } from "./jpegexp.js";
+await init();
+const pixels = decode_jpeg(jpegData);
+const info = get_image_info(data);
+```
+
+### C API
+
+```c
+#include "jpegexp.h"
+JpegExpDecoder* dec = jpegexp_decoder_new(data, len);
+jpegexp_decoder_read_header(dec, &info);
+jpegexp_decoder_decode(dec, output, output_len);
+jpegexp_decoder_free(dec);
+```
+
+### Python
+
+```python
+import jpegexp
+info = jpegexp.get_info(data)
+pixels = jpegexp.decode(data)
+encoded = jpegexp.encode_jpeg(pixels, width, height, components)
+transcoded = jpegexp.transcode(data, "jpegls")
+```
+
 ## License
-MIT OR Apache-2.0
+
+MIT License - © 2024 [Rad Medica](https://github.com/rad-medica)
+
+See [LICENSE](LICENSE) for details.

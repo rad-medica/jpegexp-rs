@@ -54,6 +54,12 @@ pub mod jpeg1;
 pub mod jpeg2000;
 pub mod jpegls;
 
+// Conditional modules
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
+pub mod ffi;
+
 pub use error::JpeglsError;
 
 /// Basic information about a compressed image frame.

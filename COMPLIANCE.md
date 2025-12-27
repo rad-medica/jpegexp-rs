@@ -61,9 +61,3 @@ This document provides a technical audit of `jpegexp-rs` compliance with interna
 | **1.2.840.10008.1.2.4.91**  | JPEG 2000                                    | **Yes**                 |
 | **1.2.840.10008.1.2.4.201** | HTJ2K Lossless                               | **Yes**                 |
 | **1.2.840.10008.1.2.4.202** | HTJ2K                                        | **Yes**                 |
-
-## Remaining Gaps
-
-### Performance
-
-- **SIMD Optimization**: DCT/IDCT and DWT could benefit from AVX2/NEON acceleration.

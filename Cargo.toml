@@ -2,7 +2,30 @@
 name = "jpegexp-rs"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Universal JPEG codec supporting JPEG, JPEG-LS, JPEG 2000, and HTJ2K"
+repository = "https://github.com/rad-medica/jpegexp-rs"
+keywords = ["jpeg", "jpeg-ls", "jpeg2000", "htj2k", "image"]
+categories = ["multimedia::images", "encoding"]
+
+[[bin]]
+name = "jpegexp"
+path = "src/bin/jpegexp.rs"
+
+[lib]
+name = "jpegexp_rs"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 num_enum = "0.7.5"
 thiserror = "2.0.17"
+clap = { version = "4.4", features = ["derive"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[features]
+default = []
+wasm = []
+ffi = []
