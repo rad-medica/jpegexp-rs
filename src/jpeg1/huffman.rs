@@ -103,8 +103,8 @@ impl HuffmanTable {
 
         let mut code = 0u16;
         let mut val_idx = 0;
-        for i in 0..16 {
-            let n = lengths[i] as usize;
+        for (i, &length) in lengths.iter().enumerate() {
+            let n = length as usize;
             if n > 0 {
                 table.min_code[i] = code as i32;
                 table.val_ptr[i] = val_idx as i32;
@@ -186,10 +186,8 @@ impl<'a> JpegBitReader<'a> {
         if self.position >= self.source.len() { return Err(JpeglsError::InvalidData); }
         let byte = self.source[self.position];
         self.position += 1;
-        if byte == 0xFF {
-            if self.position < self.source.len() && self.source[self.position] == 0x00 {
-                self.position += 1;
-            }
+        if byte == 0xFF && self.position < self.source.len() && self.source[self.position] == 0x00 {
+            self.position += 1;
         }
         Ok(byte)
     }
@@ -256,14 +254,24 @@ impl<'a> JpegBitWriter<'a> {
     }
 
     pub fn len(&self) -> usize { self.position }
+    
+    pub fn is_empty(&self) -> bool { self.position == 0 }
 }
 
 pub struct HuffmanEncoder {
     pub dc_previous_value: [i16; 4],
 }
 
+impl Default for HuffmanEncoder {
+    fn default() -> Self {
+        Self { dc_previous_value: [0; 4] }
+    }
+}
+
 impl HuffmanEncoder {
-    pub fn new() -> Self { Self { dc_previous_value: [0; 4] } }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn get_category(v: i16) -> u8 {
         if v == 0 { return 0; }
         (16 - v.abs().leading_zeros()) as u8

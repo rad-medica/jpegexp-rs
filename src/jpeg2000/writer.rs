@@ -17,6 +17,10 @@ impl<'a> J2kWriter<'a> {
     pub fn len(&self) -> usize {
         self.writer.len()
     }
+    
+    pub fn is_empty(&self) -> bool {
+        self.writer.len() == 0
+    }
 
     pub fn write_soc(&mut self) -> Result<(), JpeglsError> {
         self.writer.write_marker(JpegMarkerCode::StartOfCodestream)
@@ -40,7 +44,7 @@ impl<'a> J2kWriter<'a> {
         self.writer.write_marker(JpegMarkerCode::ImageAndTileSize)?;
 
         // Length: 2 (Rsiz) + 4(W) + 4(H) + 4(OX) + 4(OY) + 4(TW) + 4(TH) + 4(TOX) + 4(TOY) + 2(C) + 3*C
-        let length = 38 + 3 * (component_count as u16);
+        let length = 38 + 3 * component_count;
         self.writer.write_u16(length)?;
         self.writer.write_u16(0)?; // Rsiz (Capabilities) - 0 for default
         self.writer.write_u32(width)?;

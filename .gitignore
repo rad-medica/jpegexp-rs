@@ -1,2 +1,48 @@
+# Rust
 /target/
-charls-cpp/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE
+.idea/
+.vscode/*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs and temporary files
+*.txt
+*.log
+*.tmp
+*.temp
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# OS
+Thumbs.db
+desktop.ini

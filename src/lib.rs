@@ -82,7 +82,9 @@ mod tests {
 
     #[test]
     fn smoke_test() {
-        assert!(true);
+        // Placeholder test
+        // This test ensures the crate compiles
+        // Removed assert!(true) as it's optimized out
     }
 
     #[test]

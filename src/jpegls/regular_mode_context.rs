@@ -1,5 +1,4 @@
 use crate::error::JpeglsError;
-use crate::jpegls::traits::bit_wise_sign;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegularModeContext {
@@ -27,7 +26,7 @@ impl RegularModeContext {
         if k != 0 {
             return 0;
         }
-        bit_wise_sign(2 * self.b + self.n - 1)
+        if 2 * self.b + self.n - 1 < 0 { -1 } else { 0 }
     }
 
     pub fn update_variables_and_bias(

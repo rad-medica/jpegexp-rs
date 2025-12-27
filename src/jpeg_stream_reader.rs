@@ -444,9 +444,9 @@ impl<'a> JpegStreamReader<'a> {
 
             let mut lengths = [0u8; 16];
             let mut total_values = 0usize;
-            for i in 0..16 {
-                lengths[i] = self.read_u8()?;
-                total_values += lengths[i] as usize;
+            for item in &mut lengths {
+                *item = self.read_u8()?;
+                total_values += *item as usize;
             }
             remaining -= 17;
 
@@ -455,8 +455,8 @@ impl<'a> JpegStreamReader<'a> {
             }
 
             let mut values = vec![0u8; total_values];
-            for i in 0..total_values {
-                values[i] = self.read_u8()?;
+            for item in &mut values {
+                *item = self.read_u8()?;
             }
             remaining -= total_values;
 

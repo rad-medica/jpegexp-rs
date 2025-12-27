@@ -1,8 +1,8 @@
-use crate::jpegls::coding_parameters::{compute_default, compute_limit_parameter};
+use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_stream_writer::JpegStreamWriter;
+use crate::jpegls::coding_parameters::{compute_default, compute_limit_parameter};
 use crate::jpegls::scan_encoder::ScanEncoder;
-use crate::FrameInfo;
 use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
 
 pub struct JpeglsEncoder<'a> {
@@ -63,9 +63,16 @@ impl<'a> JpeglsEncoder<'a> {
             compute_default(max_sample_value, self.near_lossless)
         };
 
+        let interleave_mode =
+            if self.interleave_mode == InterleaveMode::None && frame_info.component_count > 1 {
+                InterleaveMode::Sample
+            } else {
+                self.interleave_mode
+            };
+
         let coding_parameters = CodingParameters {
             near_lossless: self.near_lossless,
-            interleave_mode: self.interleave_mode,
+            interleave_mode,
             restart_interval: 0,
             limit: compute_limit_parameter(
                 frame_info.bits_per_sample,
@@ -82,10 +89,10 @@ impl<'a> JpeglsEncoder<'a> {
         self.writer.write_jpegls_preset_parameters_segment(&pc)?;
 
         let component_count = frame_info.component_count;
-        let _ = self.writer.write_start_of_scan_segment(
+        self.writer.write_start_of_scan_segment(
             component_count,
             self.near_lossless,
-            self.interleave_mode,
+            interleave_mode,
         )?;
 
         let bytes_written = if frame_info.bits_per_sample <= 8 {
@@ -100,7 +107,6 @@ impl<'a> JpeglsEncoder<'a> {
 
         self.writer.write_end_of_image()?;
 
-        let _ = bytes_written; // Suppress unused warning if any, but better to use it if needed
         Ok(self.writer.len())
     }
 

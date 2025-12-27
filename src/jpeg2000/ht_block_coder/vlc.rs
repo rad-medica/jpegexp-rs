@@ -1,6 +1,5 @@
 /// Variable Length Coding (VLC) tables and logic for HTJ2K.
 /// Based on ISO/IEC 15444-15 Table 6 and Table 8.
-
 /// Decodes a VLC code word into a 4-pixel quad significance pattern (rho),
 /// an embedded context (emb_k) correction, and context for the next quad.
 ///
@@ -29,45 +28,46 @@ pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
         // Context 0 Table
         // 0... -> 0000 (rho=0), len=1
         if peek & 0x8000 == 0 {
-            return (0, 0, 0, 1);
-        } // 0
+            (0, 0, 0, 1)
+        } else {
+            // 10... -> 0001/0010/0100/1000 (rho=1/2/4/8), len=2?
+            // Standard says:
+            // 100 -> 1000 (rho=8), len=3
+            // 101 -> 0100 (rho=4), len=3
+            // 110 -> 0010 (rho=2), len=3
+            // 1110 -> 0001 (rho=1), len=4
+            // ...
 
-        // 10... -> 0001/0010/0100/1000 (rho=1/2/4/8), len=2?
-        // Standard says:
-        // 100 -> 1000 (rho=8), len=3
-        // 101 -> 0100 (rho=4), len=3
-        // 110 -> 0010 (rho=2), len=3
-        // 1110 -> 0001 (rho=1), len=4
-        // ...
-
-        // Let's implement a small switch for the prompt.
-        // Leading bits:
-        let top3 = (peek >> 13) & 0x7;
-        match top3 {
-            0b000 | 0b001 | 0b010 | 0b011 => return (0, 0, 0, 1), // 0xxx -> 0000
-            0b100 => return (8, 0, 0, 3),                         // 100
-            0b101 => return (4, 0, 0, 3),                         // 101
-            0b110 => return (2, 0, 0, 3),                         // 110
-            0b111 => {
-                // 111...
-                if peek & 0x1000 == 0 {
-                    // 1110
-                    return (1, 0, 0, 4);
-                } else {
-                    // 1111...
-                    // Fallback/Extenstion
-                    return (15, 1, 1, 5); // Dummy fallback for fully significant
+            // Let's implement a small switch for the prompt.
+            // Leading bits:
+            let top3 = (peek >> 13) & 0x7;
+            match top3 {
+                0..=3 => (0, 0, 0, 1), // 0xxx -> 0000
+                0b100 => (8, 0, 0, 3),                         // 100
+                0b101 => (4, 0, 0, 3),                         // 101
+                0b110 => (2, 0, 0, 3),                         // 110
+                0b111 => {
+                    // 111...
+                    if peek & 0x1000 == 0 {
+                        // 1110
+                        (1, 0, 0, 4)
+                    } else {
+                        // 1111...
+                        // Fallback/Extenstion
+                        (15, 1, 1, 5) // Dummy fallback for fully significant
+                    }
                 }
+                _ => (0, 0, 0, 1), // Should not reach
             }
-            _ => (0, 0, 0, 1), // Should not reach
         }
     } else {
         // Context 1 Table (different probabilities)
         if peek & 0x8000 == 0 {
-            return (0, 0, 0, 1);
-        } // 0
-        // Placeholder
-        (15, 1, 1, 5)
+            (0, 0, 0, 1)
+        } else {
+            // Placeholder
+            (15, 1, 1, 5)
+        }
     }
 }
 

@@ -39,16 +39,16 @@ impl<'a> JpeglsDecoder<'a> {
 
     pub fn decode(&mut self, destination: &mut [u8]) -> Result<(), JpeglsError> {
         self.reader.read_start_of_scan_segment_jpegls()?;
-        let frame_info = self.frame_info().clone();
+        let frame_info = self.frame_info();
 
         let mut scan_decoder = crate::jpegls::scan_decoder::ScanDecoder::new(
             frame_info,
-            self.reader.preset_coding_parameters(), // Need to expose this
-            self.reader.parameters(),               // Need to expose this
-            self.reader.remaining_data(),           // Need to expose this
+            self.reader.preset_coding_parameters(),
+            self.reader.parameters(),
+            self.reader.remaining_data(),
         )?;
 
-        scan_decoder.decode_scan(destination, 0)?; // stride 0 means packed? or width*bpp
+        scan_decoder.decode_scan(destination, 0)?;
         Ok(())
     }
 }

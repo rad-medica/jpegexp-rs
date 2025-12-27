@@ -29,7 +29,9 @@ impl<'a> Jpeg1Decoder<'a> {
         let frame_info = self.reader.frame_info();
         let width = frame_info.width as usize;
         let height = frame_info.height as usize;
+        #[allow(clippy::manual_div_ceil)]
         let blocks_w = (width + 7) / 8;
+        #[allow(clippy::manual_div_ceil)]
         let blocks_h = (height + 7) / 8;
         let components_count = self.reader.components.len();
 
@@ -350,8 +352,7 @@ impl<'a> Jpeg1Decoder<'a> {
                     let val = HuffmanEncoder::decode_value_bits(bits, cat);
                     block[crate::jpeg1::encoder::ZIGZAG_ORDER[k]] = val << al;
                     k += 1;
-                } else {
-                    if run < 15 {
+                } else if run < 15 {
                         let extra = bit_reader.read_bits(run as u8)?;
                         *eob_run = (1 << run) + extra - 1;
                         break;
@@ -365,9 +366,8 @@ impl<'a> Jpeg1Decoder<'a> {
             if *eob_run > 0 {
                 while k <= se as usize {
                     let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
-                    if block[idx] != 0 {
-                        if bit_reader.read_bits(1)? != 0 {
-                            if block[idx] > 0 {
+                    if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
+                        if block[idx] > 0 {
                                 block[idx] += 1 << al;
                             } else {
                                 block[idx] -= 1 << al;
@@ -411,15 +411,13 @@ impl<'a> Jpeg1Decoder<'a> {
                         block[idx] = if bits != 0 { 1 << al } else { -(1 << al) };
                         k += 1;
                     }
-                } else {
-                    if run < 15 {
+                } else if run < 15 {
                         let extra = bit_reader.read_bits(run as u8)?;
                         *eob_run = (1 << run) + extra;
                         while k <= se as usize {
                             let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
-                            if block[idx] != 0 {
-                                if bit_reader.read_bits(1)? != 0 {
-                                    if block[idx] > 0 {
+                            if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
+                                if block[idx] > 0 {
                                         block[idx] += 1 << al;
                                     } else {
                                         block[idx] -= 1 << al;

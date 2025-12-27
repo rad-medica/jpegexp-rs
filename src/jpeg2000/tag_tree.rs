@@ -35,7 +35,9 @@ impl TagTree {
 
         // Build levels up to root
         while current_w > 1 || current_h > 1 {
+            #[allow(clippy::manual_div_ceil)]
             let next_w = (current_w + 1) / 2;
+            #[allow(clippy::manual_div_ceil)]
             let next_h = (current_h + 1) / 2;
             let next_level_start = nodes.len();
 
@@ -122,11 +124,7 @@ impl TagTree {
                     break;
                 }
             }
-            if node.low >= threshold {
-                node.known = false;
-            } else {
-                node.known = true;
-            }
+            node.known = node.low < threshold;
         }
     }
 
@@ -222,10 +220,10 @@ mod tests {
         let mut reader = J2kBitReader::new(&buffer);
 
         let res1 = tt_dec.decode(&mut reader, 0, 0, 6).unwrap();
-        assert_eq!(res1, false);
+        assert!(!res1);
 
         let res2 = tt_dec.decode(&mut reader, 1, 0, 6).unwrap();
-        assert_eq!(res2, false);
+        assert!(!res2);
 
         let mut tt_enc3 = TagTree::new(1, 1);
         tt_enc3.set_value(0, 0, 5);
@@ -236,6 +234,6 @@ mod tests {
         let mut tt_dec3 = TagTree::new(1, 1);
         let mut reader3 = J2kBitReader::new(&buf3);
         let res3 = tt_dec3.decode(&mut reader3, 0, 0, 5).unwrap();
-        assert_eq!(res3, true);
+        assert!(res3);
     }
 }

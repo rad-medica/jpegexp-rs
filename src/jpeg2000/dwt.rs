@@ -27,6 +27,7 @@ impl Dwt53 {
         let mut x = signal.to_vec();
 
         // Count of low and high pass coefficients
+        #[allow(clippy::manual_div_ceil)]
         let _l_count = (len + 1) / 2;
         let _h_count = len / 2;
 
@@ -269,6 +270,7 @@ mod tests {
     fn test_dwt_53_roundtrip() {
         let input = [10, 20, 30, 40, 50, 60, 70, 80];
         let len = input.len();
+        #[allow(clippy::manual_div_ceil)]
         let l_len = (len + 1) / 2;
         let h_len = len / 2;
         let mut l = vec![0i32; l_len];
@@ -286,6 +288,7 @@ mod tests {
     fn test_dwt_53_odd_length() {
         let input = [10, 20, 30, 40, 50];
         let len = input.len();
+        #[allow(clippy::manual_div_ceil)]
         let l_len = (len + 1) / 2;
         let h_len = len / 2;
         let mut l = vec![0i32; l_len];
@@ -303,6 +306,7 @@ mod tests {
     fn test_dwt_97_roundtrip() {
         let input = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
         let len = input.len();
+        #[allow(clippy::manual_div_ceil)]
         let l_len = (len + 1) / 2;
         let h_len = len / 2;
         let mut l = vec![0.0f32; l_len];

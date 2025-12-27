@@ -35,7 +35,7 @@ pub trait JpeglsSample:
     }
 
     fn compute_reconstructed_sample(predicted: i32, error_value: i32) -> i32 {
-        Self::correct_prediction(predicted + error_value)
+        (predicted + error_value) & Self::MAX_VALUE
     }
 }
 

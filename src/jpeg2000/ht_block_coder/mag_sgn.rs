@@ -1,6 +1,5 @@
 /// Magnitude Refinement and Sign Coding (MagSgn).
 /// Handles reading and processing of raw bits for refinement and sign logic.
-
 pub struct MagSgnDecoder<'a> {
     data: &'a [u8],
     pos: usize,

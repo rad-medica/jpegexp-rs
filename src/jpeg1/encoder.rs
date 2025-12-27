@@ -29,8 +29,8 @@ pub struct Jpeg1Encoder {
     pub restart_interval: u16,
 }
 
-impl Jpeg1Encoder {
-    pub fn new() -> Self {
+impl Default for Jpeg1Encoder {
+    fn default() -> Self {
         Self {
             huffman: HuffmanEncoder::new(),
             dc_table_lum: HuffmanTable::standard_luminance_dc(),
@@ -39,6 +39,14 @@ impl Jpeg1Encoder {
             ac_table_chrom: HuffmanTable::standard_chrominance_ac(),
             quantization_table_lum: STD_LUMINANCE_QUANT_TABLE,
             quantization_table_chrom: STD_CHROMINANCE_QUANT_TABLE,
+        }
+    }
+}
+
+impl Jpeg1Encoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
             restart_interval: 0,
         }
     }
@@ -287,7 +295,7 @@ impl Jpeg1Encoder {
             // Manually write SOS here for control
 
             writer.write_marker(crate::jpeg_marker_code::JpegMarkerCode::StartOfScan)?;
-            let length = 2 + 1 + (1 * 2) + 3; // 1 component
+            let length = 2 + 1 + 2 + 3; // 1 component
             writer.write_u16(length as u16)?;
             writer.write_byte(1)?; // 1 component in this scan
 
@@ -320,6 +328,7 @@ impl Jpeg1Encoder {
             let mut mcus_encoded = 0;
             let mut next_restart_index = 0;
             // Total blocks for this component
+            #[allow(clippy::manual_div_ceil)]
             let total_blocks = ((height + 7) / 8) * ((width + 7) / 8);
 
             for block_y in (0..height).step_by(8) {

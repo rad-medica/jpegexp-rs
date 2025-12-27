@@ -25,6 +25,10 @@ impl<'a> JpegStreamWriter<'a> {
     pub fn len(&self) -> usize {
         self.position
     }
+    
+    pub fn is_empty(&self) -> bool {
+        self.position == 0
+    }
 
     pub fn write_byte(&mut self, value: u8) -> Result<(), JpeglsError> {
         if self.position >= self.destination.len() {

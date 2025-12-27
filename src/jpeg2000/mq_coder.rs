@@ -320,8 +320,8 @@ pub struct MqCoder {
     contexts: Vec<u8>,
 }
 
-impl MqCoder {
-    pub fn new() -> Self {
+impl Default for MqCoder {
+    fn default() -> Self {
         Self {
             a: 0x8000,
             c: 0,
@@ -334,6 +334,12 @@ impl MqCoder {
             src_pos: 0,
             buffer_byte: 0,
         }
+    }
+}
+
+impl MqCoder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn init_contexts(&mut self, size: usize) {
@@ -469,7 +475,7 @@ impl MqCoder {
                 self.contexts[cx] = (next_idx << 1) | next_mps;
             }
             self.renormalize_input();
-            return d;
+            d
         } else {
             // MPS occurred (V >= Qe)
             // C -= Qe (move based down to 0)
@@ -493,9 +499,9 @@ impl MqCoder {
                     self.contexts[cx] = (MQ_TABLE[idx].nmps << 1) | mps;
                 }
                 self.renormalize_input();
-                return d;
+                d
             } else {
-                return mps;
+                mps
             }
         }
     }

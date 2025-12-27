@@ -209,16 +209,19 @@ fn decode_image(
     match format {
         OutputFormat::Raw => {
             fs::write(output, &pixels)?;
+            println!(
+                "✓ Decoded {}x{} image ({} components) to {:?}",
+                width, height, components, output
+            );
         }
         OutputFormat::Ppm => {
             write_ppm(output, &pixels, width, height, components)?;
+            println!(
+                "✓ Decoded {}x{} image ({} components) to {:?} (PPM format)",
+                width, height, components, output
+            );
         }
     }
-
-    println!(
-        "✓ Decoded {}x{} image ({} components) to {:?}",
-        width, height, components, output
-    );
     Ok(())
 }
 
@@ -229,10 +232,21 @@ fn encode_image(
     height: u32,
     components: u32,
     codec: &Codec,
-    _quality: u8,
-    _near_lossless: u8,
+    quality: u8,
+    near_lossless: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pixels = fs::read(input)?;
+
+    // Validate input size
+    let expected_size = (width * height * components) as usize;
+    if pixels.len() < expected_size {
+        return Err(format!(
+            "Input file too small: expected {} bytes, got {} bytes",
+            expected_size,
+            pixels.len()
+        )
+        .into());
+    }
 
     let frame_info = jpegexp_rs::FrameInfo {
         width,
@@ -245,7 +259,20 @@ fn encode_image(
         Codec::Jpeg => {
             let mut dest = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpeg1::encoder::Jpeg1Encoder::new();
-            let len = encoder.encode(&pixels, &frame_info, &mut dest)?;
+
+            // Set quality by scaling quantization tables
+            if quality != 85 {
+                // Only scale if quality is not the default
+                use jpegexp_rs::jpeg1::quantization::{
+                    get_scaled_quant_table, STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE,
+                };
+                encoder.quantization_table_lum =
+                    get_scaled_quant_table(&STD_LUMINANCE_QUANT_TABLE, quality as u32);
+                encoder.quantization_table_chrom =
+                    get_scaled_quant_table(&STD_CHROMINANCE_QUANT_TABLE, quality as u32);
+            }
+
+            let len = encoder.encode(&pixels[..expected_size], &frame_info, &mut dest)?;
             dest.truncate(len);
             dest
         }
@@ -253,7 +280,10 @@ fn encode_image(
             let mut dest = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpegls::JpeglsEncoder::new(&mut dest);
             encoder.set_frame_info(frame_info)?;
-            let len = encoder.encode(&pixels)?;
+            if near_lossless > 0 {
+                encoder.set_near_lossless(near_lossless as i32)?;
+            }
+            let len = encoder.encode(&pixels[..expected_size])?;
             dest.truncate(len);
             dest
         }
@@ -264,9 +294,15 @@ fn encode_image(
 
     fs::write(output, &encoded)?;
     println!(
-        "✓ Encoded {}x{} image to {:?} using {:?} codec",
-        width, height, output, codec
+        "✓ Encoded {}x{} image ({} components) to {:?} using {:?} codec",
+        width, height, components, output, codec
     );
+    if matches!(codec, Codec::Jpeg) && quality != 85 {
+        println!("  Quality: {}", quality);
+    }
+    if matches!(codec, Codec::Jpegls) && near_lossless > 0 {
+        println!("  Near-lossless: {}", near_lossless);
+    }
     Ok(())
 }
 
@@ -274,7 +310,7 @@ fn transcode_image(
     input: &PathBuf,
     output: &PathBuf,
     codec: &Codec,
-    _quality: u8,
+    quality: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
     let (pixels, width, height, components) = detect_and_decode(&data)?;
@@ -290,6 +326,18 @@ fn transcode_image(
         Codec::Jpeg => {
             let mut dest = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpeg1::encoder::Jpeg1Encoder::new();
+
+            // Set quality by scaling quantization tables
+            if quality != 85 {
+                use jpegexp_rs::jpeg1::quantization::{
+                    get_scaled_quant_table, STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE,
+                };
+                encoder.quantization_table_lum =
+                    get_scaled_quant_table(&STD_LUMINANCE_QUANT_TABLE, quality as u32);
+                encoder.quantization_table_chrom =
+                    get_scaled_quant_table(&STD_CHROMINANCE_QUANT_TABLE, quality as u32);
+            }
+
             let len = encoder.encode(&pixels, &frame_info, &mut dest)?;
             dest.truncate(len);
             dest
@@ -298,6 +346,7 @@ fn transcode_image(
             let mut dest = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpegls::JpeglsEncoder::new(&mut dest);
             encoder.set_frame_info(frame_info)?;
+            // Note: quality parameter is ignored for JPEG-LS (use --near-lossless for encode command)
             let len = encoder.encode(&pixels)?;
             dest.truncate(len);
             dest
@@ -309,9 +358,12 @@ fn transcode_image(
 
     fs::write(output, &encoded)?;
     println!(
-        "✓ Transcoded {}x{} image to {:?} using {:?} codec",
-        width, height, output, codec
+        "✓ Transcoded {}x{} image ({} components) to {:?} using {:?} codec",
+        width, height, components, output, codec
     );
+    if matches!(codec, Codec::Jpeg) && quality != 85 {
+        println!("  Quality: {}", quality);
+    }
     Ok(())
 }
 
@@ -323,7 +375,11 @@ fn show_info(input: &PathBuf, extended: bool) -> Result<(), Box<dyn std::error::
     println!();
 
     if data.starts_with(&[0xFF, 0xD8]) {
-        println!("Format: JPEG 1");
+        if is_jpegls(&data) {
+            println!("Format: JPEG-LS");
+        } else {
+            println!("Format: JPEG 1");
+        }
         let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(&data);
         let mut spiff = None;
         reader.read_header(&mut spiff)?;
@@ -333,7 +389,9 @@ fn show_info(input: &PathBuf, extended: bool) -> Result<(), Box<dyn std::error::
         println!("  Components: {}", info.component_count);
         println!(
             "  Mode:       {}",
-            if reader.is_progressive {
+            if is_jpegls(&data) {
+                "JPEG-LS"
+            } else if reader.is_progressive {
                 "Progressive"
             } else if reader.is_lossless {
                 "Lossless"
@@ -427,12 +485,38 @@ fn list_codecs() -> Result<(), Box<dyn std::error::Error>> {
 
 fn detect_and_decode(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {
     if data.starts_with(&[0xFF, 0xD8]) {
-        decode_jpeg1(data)
+        if is_jpegls(data) {
+            decode_jpegls(data)
+        } else {
+            decode_jpeg1(data)
+        }
     } else if data.starts_with(&[0xFF, 0x4F]) || data.starts_with(b"\x00\x00\x00\x0CjP") {
         decode_j2k(data)
     } else {
         decode_jpegls(data)
     }
+}
+
+fn is_jpegls(data: &[u8]) -> bool {
+    // Basic marker scanner
+    let mut i = 0;
+    while i < data.len() - 1 {
+        if data[i] == 0xFF {
+            let marker = data[i + 1];
+            if marker == 0xF7 || marker == 0xF8 {
+                // SOF55 or LSE
+                return true;
+            }
+            if marker == 0xDA {
+                // SOS (Start of Scan) - stop scanning
+                break;
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {
@@ -462,7 +546,12 @@ fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::erro
     let width = image.width;
     let height = image.height;
     let components = image.component_count;
-    // J2K decoder returns metadata; full pixel reconstruction pending
+
+    // J2K decoder returns metadata; full pixel reconstruction from DWT/IDWT pending
+    // For now, return a placeholder image (gray) to allow the CLI to work
+    // TODO: Implement full IDWT and coefficient reconstruction
+    eprintln!("Warning: JPEG 2000 decoding is incomplete - returning placeholder image");
+    eprintln!("  Full pixel reconstruction from DWT coefficients is not yet implemented");
     let pixels = vec![128u8; (width * height * components) as usize];
 
     Ok((pixels, width, height, components))

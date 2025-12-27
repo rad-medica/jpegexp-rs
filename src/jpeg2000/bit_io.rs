@@ -24,9 +24,8 @@ impl<'a> J2kBitReader<'a> {
             self.pos += 1;
 
             // Byte stuffing handling for J2K Packet Headers
-            if b == 0xFF {
-                if self.pos < self.data.len() {
-                    let next = self.data[self.pos];
+            if b == 0xFF && self.pos < self.data.len() {
+                let next = self.data[self.pos];
                     if next == 0x00 {
                         self.pos += 1; // Skip stuffing
                     }
@@ -67,13 +66,19 @@ pub struct J2kBitWriter {
     bits_count: u8,
 }
 
-impl J2kBitWriter {
-    pub fn new() -> Self {
+impl Default for J2kBitWriter {
+    fn default() -> Self {
         Self {
             data: Vec::new(),
             bit_buffer: 0,
             bits_count: 0,
         }
+    }
+}
+
+impl J2kBitWriter {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn write_bit(&mut self, bit: u8) {

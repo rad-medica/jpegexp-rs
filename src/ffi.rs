@@ -42,7 +42,8 @@ struct DecoderState {
 /// # Safety
 /// `data` must be a valid pointer to `len` bytes.
 #[unsafe(no_mangle)]
-pub extern "C" fn jpegexp_decoder_new(data: *const c_uchar, len: usize) -> *mut JpegExpDecoder {
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub unsafe extern "C" fn jpegexp_decoder_new(data: *const c_uchar, len: usize) -> *mut JpegExpDecoder {
     if data.is_null() || len == 0 {
         return ptr::null_mut();
     }
@@ -61,7 +62,7 @@ pub extern "C" fn jpegexp_decoder_new(data: *const c_uchar, len: usize) -> *mut 
 /// # Safety
 /// `decoder` must be a valid handle from `jpegexp_decoder_new`.
 #[unsafe(no_mangle)]
-pub extern "C" fn jpegexp_decoder_free(decoder: *mut JpegExpDecoder) {
+pub unsafe extern "C" fn jpegexp_decoder_free(decoder: *mut JpegExpDecoder) {
     if !decoder.is_null() {
         let _ = unsafe { Box::from_raw(decoder as *mut DecoderState) };
     }
@@ -72,7 +73,8 @@ pub extern "C" fn jpegexp_decoder_free(decoder: *mut JpegExpDecoder) {
 /// # Safety
 /// `decoder` must be valid. `info` must point to a valid JpegExpImageInfo.
 #[unsafe(no_mangle)]
-pub extern "C" fn jpegexp_decoder_read_header(
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub unsafe extern "C" fn jpegexp_decoder_read_header(
     decoder: *mut JpegExpDecoder,
     info: *mut JpegExpImageInfo,
 ) -> c_int {
@@ -154,7 +156,8 @@ pub extern "C" fn jpegexp_decoder_read_header(
 /// # Safety
 /// All pointers must be valid. `output` must have at least `output_len` bytes.
 #[unsafe(no_mangle)]
-pub extern "C" fn jpegexp_decoder_decode(
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub unsafe extern "C" fn jpegexp_decoder_decode(
     decoder: *mut JpegExpDecoder,
     output: *mut c_uchar,
     output_len: usize,
@@ -207,7 +210,8 @@ pub extern "C" fn jpegexp_decoder_decode(
 /// # Safety
 /// All pointers must be valid.
 #[unsafe(no_mangle)]
-pub extern "C" fn jpegexp_encode_jpeg(
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub unsafe extern "C" fn jpegexp_encode_jpeg(
     pixels: *const c_uchar,
     width: u32,
     height: u32,
@@ -246,7 +250,8 @@ pub extern "C" fn jpegexp_encode_jpeg(
 /// # Safety
 /// All pointers must be valid.
 #[unsafe(no_mangle)]
-pub extern "C" fn jpegexp_encode_jpegls(
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub unsafe extern "C" fn jpegexp_encode_jpegls(
     pixels: *const c_uchar,
     width: u32,
     height: u32,

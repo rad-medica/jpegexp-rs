@@ -1,6 +1,5 @@
 /// Magnitude Exponent Logic (MEL) decoder state and functionality.
 /// Implements the MEL coding scheme defined in ISO/IEC 15444-15 (HTJ2K).
-
 pub struct MelDecoder<'a> {
     data: &'a [u8],
     pos: usize,
@@ -42,17 +41,15 @@ impl<'a> MelDecoder<'a> {
             // Handle 0xFF stuffing locally if needed?
             // "If a byte is 0xFF, the next byte must be < 0x90... if 0x00 it's stuffing"
             // For now assume stripped buffer or handle it.
-            if self.bits_buffer == 0xFF {
-                if self.pos < self.data.len() {
-                    let next = self.data[self.pos];
-                    if next & 0x80 == 0 {
-                        // Not a marker?
-                        // If next is > 0x8F it is a marker.
-                        // Standard byte stuffing in codestream means FF 00 -> FF.
-                    }
-                    if next == 0x00 {
-                        self.pos += 1;
-                    }
+            if self.bits_buffer == 0xFF && self.pos < self.data.len() {
+                let next = self.data[self.pos];
+                if next & 0x80 == 0 {
+                    // Not a marker?
+                    // If next is > 0x8F it is a marker.
+                    // Standard byte stuffing in codestream means FF 00 -> FF.
+                }
+                if next == 0x00 {
+                    self.pos += 1;
                 }
             }
 
@@ -138,17 +135,17 @@ mod tests {
         let data = vec![0x20];
         let mut mel = MelDecoder::new(&data);
 
-        assert_eq!(mel.decode(), false, "First bit 0 -> 0 (Run 1)");
+        assert!(!mel.decode(), "First bit 0 -> 0 (Run 1)");
         assert_eq!(mel.k, 1);
 
-        assert_eq!(mel.decode(), false, "Second bit 0 -> 0 (Run 2)");
+        assert!(!mel.decode(), "Second bit 0 -> 0 (Run 2)");
         assert_eq!(mel.k, 2);
         assert_eq!(mel.run, 1, "Remaining run should be 1");
 
-        assert_eq!(mel.decode(), false, "Inside run -> 0");
+        assert!(!mel.decode(), "Inside run -> 0");
         assert_eq!(mel.run, 0);
 
-        assert_eq!(mel.decode(), true, "Third bit 1 -> 1");
+        assert!(mel.decode(), "Third bit 1 -> 1");
         assert_eq!(mel.k, 1);
     }
 }

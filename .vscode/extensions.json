@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "vadimcn.vscode-lldb",
+    "ms-python.python",
+    "ms-python.black-formatter",
+    "ms-python.isort",
+    "tamasfe.even-better-toml",
+    "serayuzgur.crates",
+    "usernamehw.errorlens",
+    "editorconfig.editorconfig"
+  ]
+}

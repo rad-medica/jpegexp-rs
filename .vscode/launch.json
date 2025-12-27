@@ -1,0 +1,79 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'jpegexp'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=jpegexp",
+          "--package=jpegexp-rs"
+        ],
+        "filter": {
+          "name": "jpegexp",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in library 'jpegexp_rs'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=jpegexp-rs"
+        ],
+        "filter": {
+          "name": "jpegexp_rs",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in current file",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=jpegexp-rs"
+        ],
+        "filter": {
+          "name": "jpegexp_rs",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "python",
+      "request": "launch",
+      "name": "Python: Current File",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    },
+    {
+      "type": "python",
+      "request": "launch",
+      "name": "Python: Tests",
+      "program": "${workspaceFolder}/tests",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    }
+  ]
+}

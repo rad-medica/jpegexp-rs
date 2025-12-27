@@ -61,7 +61,7 @@ pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
                 // val += i_val * cu * cos_val
                 // shifts: cu(12) + cos(12) = 24. We want to keep some precision.
                 // i_val is 8+bits.
-                val += (i_val * cu >> 12) * cos_val >> 12;
+                val += (((i_val * cu) >> 12) * cos_val) >> 12;
             }
             intermediate[y * 8 + x] = val;
         }
@@ -77,7 +77,7 @@ pub fn idct_8x8_fixed_point(input: &[f32; 64], output: &mut [f32; 64]) {
                 let cos_val = (angle.cos() * 4096.0) as i32;
                 let i_val = intermediate[v * 8 + x];
 
-                val += (i_val * cv >> 12) * cos_val >> 12;
+                val += (((i_val * cv) >> 12) * cos_val) >> 12;
             }
             // Final scaling
             // We reduced shifts during accumulation to avoid overflow? No, we used >>12.

@@ -1,8 +1,8 @@
+use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::JPEG_MARKER_START_BYTE;
 use crate::jpegls::regular_mode_context::RegularModeContext;
 use crate::jpegls::run_mode_context::RunModeContext;
-use crate::FrameInfo;
 use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
 
 pub struct ScanDecoder<'a> {
@@ -69,7 +69,6 @@ impl<'a> ScanDecoder<'a> {
             _quantization_lut: Vec::new(),
         };
 
-        decoder.find_jpeg_marker_start_byte();
         decoder.fill_read_cache()?;
 
         Ok(decoder)
@@ -201,7 +200,7 @@ impl<'a> ScanDecoder<'a> {
         {
             let context = &mut self.regular_mode_contexts[ctx_index];
             if k == 0 {
-                error_value = error_value ^ context.get_error_correction(near_lossless);
+                error_value ^= context.get_error_correction(near_lossless);
             }
             let reset_threshold = self.reset_threshold;
             context.update_variables_and_bias(error_value, near_lossless, reset_threshold)?;
@@ -240,6 +239,7 @@ impl<'a> ScanDecoder<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn find_jpeg_marker_start_byte(&mut self) {
         while self.position < self.source.len()
             && self.source[self.position] != JPEG_MARKER_START_BYTE
@@ -254,14 +254,36 @@ impl<'a> ScanDecoder<'a> {
                 break;
             }
             let byte = self.source[self.position] as usize;
+
+            // Add byte to cache first
             self.read_cache = (self.read_cache << 8) | byte;
             self.valid_bits += 8;
             self.position += 1;
 
+            // Check for 0xFF marker handling
             if byte == JPEG_MARKER_START_BYTE as usize {
-                if self.position < self.source.len() && self.source[self.position] == 0 {
-                    self.position += 1;
+                if self.position < self.source.len() {
+                    let next_byte = self.source[self.position];
+                    if next_byte == 0 {
+                        // Stuffed 0xFF: the 0xFF is already in cache, skip the stuffing byte (0x00)
+                        self.position += 1;
+                        // Continue reading - the 0xFF is valid data
+                    } else if (0xD0..=0xD7).contains(&next_byte) {
+                        // Restart marker: back up, remove 0xFF from cache
+                        self.position -= 1;
+                        self.valid_bits -= 8;
+                        self.read_cache >>= 8;
+                        break;
+                    } else if next_byte != 0xFF && next_byte != 0x00 {
+                        // Real marker (not restart, not stuffing): back up, remove 0xFF from cache
+                        self.position -= 1;
+                        self.valid_bits -= 8;
+                        self.read_cache >>= 8;
+                        break;
+                    }
+                    // If next_byte is also 0xFF, treat as data and continue
                 } else {
+                    // End of data after 0xFF - keep it in cache
                     break;
                 }
             }
@@ -331,12 +353,21 @@ impl<'a> ScanDecoder<'a> {
 
     fn compute_predicted_value(&self, ra: i32, rb: i32, rc: i32) -> i32 {
         let sign = Self::bit_wise_sign(rb - ra);
-        if (sign ^ (rc - ra)) < 0 {
+        let predicted = if (sign ^ (rc - ra)) < 0 {
             rb
         } else if (sign ^ (rb - rc)) < 0 {
             ra
         } else {
             ra + rb - rc
+        };
+
+        let max_val = (1 << self.frame_info.bits_per_sample) - 1;
+        if predicted < 0 {
+            0
+        } else if predicted > max_val {
+            max_val
+        } else {
+            predicted
         }
     }
 
@@ -380,7 +411,7 @@ impl<'a> ScanDecoder<'a> {
                     break;
                 }
             } else {
-                let remainder = self.read_bits(run_index_val as i32)?;
+                let remainder = self.read_bits(run_index_val)?;
                 for i in 0..remainder {
                     let i_usize = i as usize;
                     if start_index + run_length + i_usize > width {

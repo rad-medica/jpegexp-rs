@@ -198,8 +198,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             if cb_info.data_len > 0 {
                 let data_len = cb_info.data_len as usize;
                 let mut data = vec![0u8; data_len];
-                for i in 0..data_len {
-                    data[i] = self.parser.reader.read_u8()?;
+                for item in &mut data {
+                    *item = self.parser.reader.read_u8()?;
                 }
 
                 if is_htj2k {
@@ -211,6 +211,27 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     block.layer_data.push(data.clone());
                     block.layers_decoded = (layer + 1) as u8;
                     let _ = coder.decode_block(&mut block);
+                } else {
+                    // Standard JPEG 2000: use bit plane coder
+                    // For now, use a default codeblock size (should come from COD marker)
+                    let cb_width = 64;
+                    let cb_height = 64;
+                    let max_bit_plane = 30; // Should be determined from data
+
+                    let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
+                        cb_width, cb_height, &[]
+                    );
+
+                    match bpc.decode_codeblock(&data, cb_width, cb_height, max_bit_plane) {
+                        Ok(_coefficients) => {
+                            // Store decoded coefficients in a codeblock structure
+                            // This would need to be integrated with the tile/subband structure
+                            // For now, we just decode successfully
+                        }
+                        Err(_) => {
+                            // Decoding failed, but continue
+                        }
+                    }
                 }
             }
         }

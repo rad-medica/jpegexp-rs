@@ -107,7 +107,7 @@ impl PacketHeader {
                     // This is complex. For now, we will read 16 bits as length (Mock).
                     // This allows us to inject test data easily.
                     // TODO: Implement full Lblock tag tree decoding.
-                    let data_len = reader.read_bits(16)? as u32;
+                    let data_len = reader.read_bits(16)?;
 
                     header.included_cblks.push(CodeBlockInfo {
                         x,

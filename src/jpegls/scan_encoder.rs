@@ -1,11 +1,11 @@
-use crate::jpegls::coding_parameters::CodingParameters;
+use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::JPEG_MARKER_START_BYTE;
+use crate::jpegls::JpeglsPcParameters;
+use crate::jpegls::coding_parameters::CodingParameters;
 use crate::jpegls::regular_mode_context::RegularModeContext;
 use crate::jpegls::run_mode_context::RunModeContext;
 use crate::jpegls::traits::JpeglsSample;
-use crate::FrameInfo;
-use crate::jpegls::JpeglsPcParameters;
 
 pub struct ScanEncoder<'a> {
     frame_info: FrameInfo,
@@ -85,62 +85,63 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn append_to_bit_stream(&mut self, bits: u32, bit_count: i32) {
-        debug_assert!(bit_count >= 0 && bit_count < 32);
+        if bit_count == 0 {
+            return;
+        }
+        // Clamp bit_count to prevent overflow (max 31 bits for u32 shift)
+        let bit_count = bit_count.clamp(0, 31);
 
-        self.free_bit_count -= bit_count;
-        if self.free_bit_count >= 0 {
-            self.bit_buffer |= bits << self.free_bit_count;
-        } else {
-            self.bit_buffer |= bits >> (-self.free_bit_count);
-            self.flush();
-
-            if self.free_bit_count < 0 {
-                self.bit_buffer |= bits >> (-self.free_bit_count);
-                self.flush();
+        // Handle case where bits don't fit in current buffer
+        if self.free_bit_count < bit_count {
+            // Write the high bits that fit
+            let bits_that_fit = self.free_bit_count.max(0);
+            if bits_that_fit > 0 {
+                let shift = bit_count - bits_that_fit;
+                let mask = ((1u32 << bit_count) - 1) >> shift;
+                let high_bits = (bits >> shift) & mask;
+                self.bit_buffer |= high_bits << (self.free_bit_count - bits_that_fit);
+                self.free_bit_count -= bits_that_fit;
             }
-
-            debug_assert!(self.free_bit_count >= 0);
-            self.bit_buffer |= bits << self.free_bit_count;
+            // Flush and write remaining bits
+            self.flush();
+            let remaining = bit_count - bits_that_fit;
+            if remaining > 0 && self.free_bit_count >= remaining {
+                let low_mask = (1u32 << remaining) - 1;
+                let low_bits = bits & low_mask;
+                self.bit_buffer |= low_bits << (self.free_bit_count - remaining);
+                self.free_bit_count -= remaining;
+            }
+        } else {
+            // Normal case: all bits fit
+            self.bit_buffer |= bits << (self.free_bit_count - bit_count);
+            self.free_bit_count -= bit_count;
         }
     }
 
     fn flush(&mut self) {
-        if self.free_bit_count >= 32 {
-            return;
-        }
-
-        for _ in 0..4 {
-            if self.free_bit_count >= 32 {
-                break;
-            }
-
-            let byte_val = if self.is_ff_written {
-                let val = (self.bit_buffer >> 25) as u8;
-                self.bit_buffer <<= 7;
-                self.free_bit_count += 7;
-                val
-            } else {
-                let val = (self.bit_buffer >> 24) as u8;
-                self.bit_buffer <<= 8;
-                self.free_bit_count += 8;
-                val
-            };
+        while self.free_bit_count <= 24 {
+            let byte_val = (self.bit_buffer >> 24) as u8;
+            self.bit_buffer <<= 8;
+            self.free_bit_count += 8;
 
             if self.position < self.destination.len() {
                 self.destination[self.position] = byte_val;
                 self.position += 1;
             }
 
-            self.is_ff_written = byte_val == JPEG_MARKER_START_BYTE;
+            if byte_val == JPEG_MARKER_START_BYTE && self.position < self.destination.len() {
+                self.destination[self.position] = 0x00;
+                self.position += 1;
+            }
         }
-
-        self.free_bit_count = 32;
     }
 
     fn end_scan(&mut self) {
-        self.flush();
-        if self.is_ff_written {
-            self.append_to_bit_stream(0, (self.free_bit_count - 1) % 8);
+        // Pad with 0-bits to byte alignment
+        let used_bits = 32 - self.free_bit_count;
+        let remainder = used_bits % 8;
+        if remainder != 0 {
+            self.append_to_bit_stream(0, 8 - remainder);
         }
         self.flush();
     }
@@ -287,8 +288,7 @@ impl<'a> ScanEncoder<'a> {
 
     fn map_error_value(&self, error_value: i32) -> i32 {
         let bit_count = 32;
-        let mapped = (error_value >> (bit_count - 2)) ^ (2 * error_value);
-        mapped
+        (error_value >> (bit_count - 2)) ^ (2 * error_value)
     }
 
     fn encode_mapped_value(&mut self, k: i32, mapped_error: i32, limit: i32) {
@@ -300,15 +300,22 @@ impl<'a> ScanEncoder<'a> {
                 self.append_to_bit_stream(0, 1);
             }
             self.append_to_bit_stream(1, 1);
-            self.append_to_bit_stream((mapped_error & ((1 << k) - 1)) as u32, k);
+            // Clamp k to prevent overflow
+            let k_clamped = k.min(31);
+            self.append_to_bit_stream((mapped_error & ((1i32 << k_clamped) - 1)) as u32, k_clamped);
         } else {
-            if limit - qbpp > 31 {
+            let remaining = limit - qbpp;
+            if remaining > 31 {
                 self.append_to_bit_stream(0, 31);
-                self.append_to_bit_stream(1, limit - qbpp - 31);
+                // Clamp the remaining bits to prevent overflow
+                let remaining_clamped = (remaining - 31).min(31);
+                self.append_to_bit_stream(1, remaining_clamped);
             } else {
-                self.append_to_bit_stream(1, limit - qbpp);
+                self.append_to_bit_stream(1, remaining.min(31));
             }
-            self.append_to_bit_stream(((mapped_error - 1) & ((1 << qbpp) - 1)) as u32, qbpp);
+            // Clamp qbpp to prevent overflow
+            let qbpp_clamped = qbpp.min(31);
+            self.append_to_bit_stream(((mapped_error - 1) & ((1i32 << qbpp_clamped) - 1)) as u32, qbpp_clamped);
         }
     }
 
@@ -346,12 +353,21 @@ impl<'a> ScanEncoder<'a> {
 
     fn compute_predicted_value(&self, ra: i32, rb: i32, rc: i32) -> i32 {
         let sign = Self::bit_wise_sign(rb - ra);
-        if (sign ^ (rc - ra)) < 0 {
+        let predicted = if (sign ^ (rc - ra)) < 0 {
             rb
         } else if (sign ^ (rb - rc)) < 0 {
             ra
         } else {
             ra + rb - rc
+        };
+
+        let max_val = (1 << self.frame_info.bits_per_sample) - 1;
+        if predicted < 0 {
+            0
+        } else if predicted > max_val {
+            max_val
+        } else {
+            predicted
         }
     }
 
@@ -457,6 +473,11 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn append_ones_to_bit_stream(&mut self, bit_count: i32) {
-        self.append_to_bit_stream((1 << bit_count) - 1, bit_count);
+        if bit_count == 0 {
+            return;
+        }
+        // Clamp bit_count to prevent overflow (max 31 bits for u32 shift)
+        let bit_count = bit_count.min(31);
+        self.append_to_bit_stream((1u32 << bit_count).wrapping_sub(1), bit_count);
     }
 }
