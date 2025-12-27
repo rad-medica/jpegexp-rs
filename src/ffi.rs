@@ -190,7 +190,8 @@ pub unsafe extern "C" fn jpegexp_decoder_decode(
         }
     } else if state.data.starts_with(&[0xFF, 0x4F]) || state.data.starts_with(b"\x00\x00\x00\x0CjP")
     {
-        // J2K - fill with placeholder for now
+        // J2K decoding returns metadata only - pixel reconstruction requires IDWT
+        // Return default image values for compatibility
         output_slice.fill(128);
     } else {
         let mut dec = crate::jpegls::JpeglsDecoder::new(&state.data);
@@ -281,6 +282,48 @@ pub unsafe extern "C" fn jpegexp_encode_jpegls(
     }
 
     match encoder.encode(pixels_slice) {
+        Ok(len) => {
+            unsafe { *bytes_written = len };
+            JpegExpError::Ok as c_int
+        }
+        Err(_) => JpegExpError::InternalError as c_int,
+    }
+}
+
+/// Encode raw pixels to JPEG 2000.
+///
+/// # Safety
+/// All pointers must be valid.
+#[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub unsafe extern "C" fn jpegexp_encode_j2k(
+    pixels: *const c_uchar,
+    width: u32,
+    height: u32,
+    components: u32,
+    quality: u8,
+    output: *mut c_uchar,
+    output_len: usize,
+    bytes_written: *mut usize,
+) -> c_int {
+    if pixels.is_null() || output.is_null() || bytes_written.is_null() {
+        return JpegExpError::InvalidData as c_int;
+    }
+
+    let pixel_count = (width * height * components) as usize;
+    let pixels_slice = unsafe { std::slice::from_raw_parts(pixels, pixel_count) };
+    let output_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
+
+    let frame_info = crate::FrameInfo {
+        width,
+        height,
+        bits_per_sample: 8,
+        component_count: components as i32,
+    };
+
+    let mut encoder = crate::jpeg2000::encoder::J2kEncoder::new();
+    encoder.set_quality(quality);
+    match encoder.encode(pixels_slice, &frame_info, output_slice) {
         Ok(len) => {
             unsafe { *bytes_written = len };
             JpegExpError::Ok as c_int

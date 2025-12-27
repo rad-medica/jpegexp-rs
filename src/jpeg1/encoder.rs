@@ -31,7 +31,7 @@ pub struct Jpeg1Encoder {
 
 impl Default for Jpeg1Encoder {
     fn default() -> Self {
-        Self {
+        Jpeg1Encoder {
             huffman: HuffmanEncoder::new(),
             dc_table_lum: HuffmanTable::standard_luminance_dc(),
             ac_table_lum: HuffmanTable::standard_luminance_ac(),
@@ -39,6 +39,7 @@ impl Default for Jpeg1Encoder {
             ac_table_chrom: HuffmanTable::standard_chrominance_ac(),
             quantization_table_lum: STD_LUMINANCE_QUANT_TABLE,
             quantization_table_chrom: STD_CHROMINANCE_QUANT_TABLE,
+            restart_interval: 0,
         }
     }
 }
@@ -46,9 +47,6 @@ impl Default for Jpeg1Encoder {
 impl Jpeg1Encoder {
     pub fn new() -> Self {
         Self::default()
-    }
-            restart_interval: 0,
-        }
     }
 
     pub fn set_restart_interval(&mut self, interval: u16) {

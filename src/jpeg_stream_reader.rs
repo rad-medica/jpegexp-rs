@@ -252,19 +252,46 @@ impl<'a> JpegStreamReader<'a> {
     }
 
     pub fn read_start_of_scan_segment_jpegls(&mut self) -> Result<(), JpeglsError> {
+        eprintln!(
+            "DEBUG: Entering read_start_of_scan_segment_jpegls pos={}",
+            self.position
+        );
         if self.read_marker()? != JpegMarkerCode::StartOfScan {
+            eprintln!("DEBUG: SOS Marker NOT FOUND");
             return Err(JpeglsError::InvalidData);
         }
-        let _length = self.read_u16()?;
+        let length = self.read_u16()?;
+        let mut consumed = 2; // Length field itself (2 bytes)
+
         let components_in_scan = self.read_u8()? as i32;
+        consumed += 1;
+        eprintln!("DEBUG: SOS components_in_scan={}", components_in_scan);
         for _ in 0..components_in_scan {
             let _id = self.read_u8()?;
             let _mapping = self.read_u8()?;
+            consumed += 2;
         }
         self.parameters.near_lossless = self.read_u8()? as i32;
         self.parameters.interleave_mode = InterleaveMode::try_from(self.read_u8()?)?;
         let _point_transform = self.read_u8()?;
+        consumed += 3;
 
+        eprintln!("DEBUG: SOS parsed. Len={} Consumed={}", length, consumed);
+        if (length as i32) > consumed {
+            let skip = (length as i32) - consumed;
+            eprintln!("DEBUG: SOS skipping {} bytes", skip);
+            self.advance(skip as usize);
+        } else if (length as i32) < consumed {
+            eprintln!(
+                "DEBUG: SOS length mismatch! Len={} Consumed={}",
+                length, consumed
+            );
+        }
+
+        eprintln!(
+            "DEBUG: SOS complete. near={}, ilv={:?}",
+            self.parameters.near_lossless, self.parameters.interleave_mode
+        );
         self.state = JpegStreamReaderState::ScanSection;
         Ok(())
     }
@@ -370,7 +397,9 @@ impl<'a> JpegStreamReader<'a> {
         self.position += count;
     }
 
-    // Helper to align (No-op in byte stream)
+    // Helper to align to the next byte boundary.
+    // Since this reader operates on a byte slice, it is always byte-aligned.
+    // This is a no-op for now but kept for API compatibility with bit-stream readers.
     pub fn align_to_byte(&mut self) {}
 
     // JPEG 1 Headers

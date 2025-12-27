@@ -11,14 +11,14 @@ use crate::jpeg_stream_reader::JpegStreamReader;
 /// A parser that transforms raw J2K marker segments into structured metadata.
 pub struct J2kParser<'a, 'b> {
     pub reader: &'b mut JpegStreamReader<'a>,
-    pub image: J2kImage,
+    pub image: Box<J2kImage>,
 }
 
 impl<'a, 'b> J2kParser<'a, 'b> {
     pub fn new(reader: &'b mut JpegStreamReader<'a>) -> Self {
         Self {
             reader,
-            image: J2kImage::default(),
+            image: Box::new(J2kImage::default()),
         }
     }
 
@@ -31,32 +31,32 @@ impl<'a, 'b> J2kParser<'a, 'b> {
 
         loop {
             // Read next marker (FFxx)
-            // JpegStreamReader might need a generic `read_marker` that handles 0xFF stuffing or just aligned reads.
-            // J2K doesn't use 0xFF stuffing in headers same way as J1 entropy, but code stream does.
-
-            // Allow reader to skip padding
             self.reader.align_to_byte();
 
-            // Peek or read marker
             if self.reader.remaining_data().len() < 2 {
-                // Should at least be able to see potential EOI or SOT start
-                // If we run out of data before EOI, it's an issue but here we just loop
-                // until we hit SOT or invalid.
                 if self.reader.remaining_data().is_empty() {
-                    // EOF unexpected
-                    panic!(
-                        "EOF unexpected at pos {}",
-                        self.reader.remaining_data().len()
-                    );
+                    return Err(JpeglsError::InvalidData);
                 }
             }
             let b1 = self.reader.read_u8()?;
+            eprintln!(
+                "DEBUG: J2K Loop b1={:02X} at {}",
+                b1,
+                self.reader.position()
+            );
             if b1 != 0xFF {
-                // Should be marker start
+                eprintln!("DEBUG: Expected 0xFF, got {:02X}", b1);
                 return Err(JpeglsError::InvalidData);
             }
             let b2 = self.reader.read_u8()?;
+            eprintln!("DEBUG: J2K Loop b2={:02X}", b2);
             let marker = JpegMarkerCode::try_from(b2)?;
+            eprintln!(
+                "DEBUG: J2K Parse Marker: {:?} ({:02X}) at {}",
+                marker,
+                b2,
+                self.reader.position()
+            );
 
             match marker {
                 JpegMarkerCode::ImageAndTileSize => self.parse_siz()?,
@@ -64,10 +64,18 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 JpegMarkerCode::QuantizationDefault => self.parse_qcd()?,
                 JpegMarkerCode::StartOfTile => {
                     // SOT indicates end of main header
+                    eprintln!("DEBUG: parse_main_header FOUND SOT - Breaking Loop");
                     return Ok(JpegMarkerCode::StartOfTile);
                 }
                 JpegMarkerCode::Capability => self.parse_cap()?,
                 JpegMarkerCode::RegionOfInterest => self.parse_rgn()?,
+                JpegMarkerCode::J2kComment => {
+                    let len = self.reader.read_u16()?;
+                    if len < 2 {
+                        return Err(JpeglsError::InvalidData);
+                    }
+                    self.reader.advance((len - 2) as usize);
+                }
                 _ => {
                     // Skip unknown segment
                     let len = self.reader.read_u16()?;
@@ -80,7 +88,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         }
     }
 
-    fn parse_siz(&mut self) -> Result<(), JpeglsError> {
+    pub fn parse_siz(&mut self) -> Result<(), JpeglsError> {
         let _len = self.reader.read_u16()?;
         let _caps = self.reader.read_u16()?; // RSiz
         self.image.width = self.reader.read_u32()?;
@@ -105,7 +113,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         Ok(())
     }
 
-    fn parse_cod(&mut self) -> Result<(), JpeglsError> {
+    pub fn parse_cod(&mut self) -> Result<(), JpeglsError> {
         // COD marker parsing
         // Length includes the length field itself
         let len = self.reader.read_u16()?;
@@ -140,13 +148,15 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         Ok(())
     }
 
-    fn parse_qcd(&mut self) -> Result<(), JpeglsError> {
+    pub fn parse_qcd(&mut self) -> Result<(), JpeglsError> {
         // QCD marker parsing
         let len = self.reader.read_u16()?;
+        eprintln!("DEBUG: parse_qcd len={}", len);
         if len < 3 {
             return Err(JpeglsError::InvalidData);
         }
         let sqcd = self.reader.read_u8()?; // quantization style flags
+        eprintln!("DEBUG: parse_qcd sqcd={:02X}", sqcd);
 
         // Remaining in the marker segment
         // len includes 2 bytes for len.
@@ -160,6 +170,10 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             step_sizes.push(step);
             bytes_left -= 2;
         }
+        eprintln!(
+            "DEBUG: parse_qcd steps={:?} leftover={}",
+            step_sizes, bytes_left
+        );
         // Skip any leftover bytes (e.g. if odd length, though unlikely for u16 steps)
         if bytes_left > 0 {
             self.reader.advance(bytes_left);
@@ -171,7 +185,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         Ok(())
     }
 
-    fn parse_cap(&mut self) -> Result<(), JpeglsError> {
+    pub fn parse_cap(&mut self) -> Result<(), JpeglsError> {
         // CAP marker (0xFF50)
         let len = self.reader.read_u16()?;
         if len < 6 {
@@ -203,7 +217,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         Ok(())
     }
 
-    fn parse_rgn(&mut self) -> Result<(), JpeglsError> {
+    pub fn parse_rgn(&mut self) -> Result<(), JpeglsError> {
         // RGN marker (0xFF5E) - Region of Interest
         let len = self.reader.read_u16()?;
         if len < 5 {
@@ -229,36 +243,46 @@ impl<'a, 'b> J2kParser<'a, 'b> {
     }
 
     /// Parses a Tile-Part.
-    /// Returns the length of the data (header + bitstream) as indicated by Psot.
-    /// - If Psot == 0, it means until EOC.
-    /// - If Psot > 0, it includes SOT marker length (2) + SOT header length (10) + optional markers length + bitstream length.
-    pub fn parse_tile_part_header(&mut self) -> Result<u32, JpeglsError> {
+    /// Returns (Psot, Isot).
+    /// - Psot: Length of the data.
+    /// - Isot: Tile index.
+    pub fn parse_tile_part_header(&mut self) -> Result<(u32, u16), JpeglsError> {
         // Assume SOT marker (FF90) has been consumed (or we are inside SOT segment).
+        eprintln!(
+            "DEBUG: parse_tile_part_header entry pos={}",
+            self.reader.position()
+        );
 
         let _lsot = self.reader.read_u16()?;
-        let _isot = self.reader.read_u16()?;
+        let isot = self.reader.read_u16()?;
         let psot = self.reader.read_u32()?;
         let _tpsot = self.reader.read_u8()?;
         let _tnsot = self.reader.read_u8()?;
+
+        eprintln!("DEBUG: SOT isot={} psot={}", isot, psot);
 
         // Loop for other markers until SOD
         loop {
             // Check for potential markers
             if self.reader.remaining_data().len() < 2 {
+                eprintln!("DEBUG: SOT Loop EOF");
                 return Err(JpeglsError::InvalidData);
             }
 
             let b1 = self.reader.read_u8()?;
             if b1 != 0xFF {
+                eprintln!("DEBUG: SOT Loop expected FF, got {:02X}", b1);
                 return Err(JpeglsError::InvalidData);
             }
             let b2 = self.reader.read_u8()?;
             if b2 == 0x93 {
                 // SOD
+                eprintln!("DEBUG: Found SOD");
                 break;
             }
 
             let marker = JpegMarkerCode::try_from(b2)?;
+            eprintln!("DEBUG: Tile Marker {:?} ({:02X})", marker, b2);
 
             match marker {
                 JpegMarkerCode::CodingStyleDefault => self.parse_cod()?,
@@ -276,7 +300,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         }
 
         // At this point we are at the start of bitstream.
-        Ok(psot)
+        Ok((psot, isot))
     }
 
     /// Parses the entire codestream (Main Header + All Tiles).
@@ -290,7 +314,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
 
             if marker == JpegMarkerCode::StartOfTile {
                 // Parse tile part
-                let psot = self.parse_tile_part_header()?;
+                let (psot, _isot) = self.parse_tile_part_header()?;
 
                 // Read Tile Data (packets)
                 if psot == 0 {

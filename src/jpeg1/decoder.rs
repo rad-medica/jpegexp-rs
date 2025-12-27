@@ -353,12 +353,11 @@ impl<'a> Jpeg1Decoder<'a> {
                     block[crate::jpeg1::encoder::ZIGZAG_ORDER[k]] = val << al;
                     k += 1;
                 } else if run < 15 {
-                        let extra = bit_reader.read_bits(run as u8)?;
-                        *eob_run = (1 << run) + extra - 1;
-                        break;
-                    } else {
-                        k += 16;
-                    }
+                    let extra = bit_reader.read_bits(run as u8)?;
+                    *eob_run = (1 << run) + extra - 1;
+                    break;
+                } else {
+                    k += 16;
                 }
             }
         } else {
@@ -368,10 +367,9 @@ impl<'a> Jpeg1Decoder<'a> {
                     let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
                     if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
                         if block[idx] > 0 {
-                                block[idx] += 1 << al;
-                            } else {
-                                block[idx] -= 1 << al;
-                            }
+                            block[idx] += 1 << al;
+                        } else {
+                            block[idx] -= 1 << al;
                         }
                     }
                     k += 1;
@@ -412,39 +410,37 @@ impl<'a> Jpeg1Decoder<'a> {
                         k += 1;
                     }
                 } else if run < 15 {
-                        let extra = bit_reader.read_bits(run as u8)?;
-                        *eob_run = (1 << run) + extra;
-                        while k <= se as usize {
-                            let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
-                            if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
-                                if block[idx] > 0 {
-                                        block[idx] += 1 << al;
-                                    } else {
-                                        block[idx] -= 1 << al;
-                                    }
-                                }
-                            }
-                            k += 1;
-                        }
-                        *eob_run -= 1;
-                        break;
-                    } else {
-                        let mut r = 16;
-                        while k <= se as usize && r > 0 {
-                            let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
-                            if block[idx] != 0 {
-                                if bit_reader.read_bits(1)? != 0 {
-                                    if block[idx] > 0 {
-                                        block[idx] += 1 << al;
-                                    } else {
-                                        block[idx] -= 1 << al;
-                                    }
-                                }
+                    let extra = bit_reader.read_bits(run as u8)?;
+                    *eob_run = (1 << run) + extra;
+                    while k <= se as usize {
+                        let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
+                        if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
+                            if block[idx] > 0 {
+                                block[idx] += 1 << al;
                             } else {
-                                r -= 1;
+                                block[idx] -= 1 << al;
                             }
-                            k += 1;
                         }
+                        k += 1;
+                    }
+                    *eob_run -= 1;
+                    break;
+                } else {
+                    let mut r = 16;
+                    while k <= se as usize && r > 0 {
+                        let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
+                        if block[idx] != 0 {
+                            if bit_reader.read_bits(1)? != 0 {
+                                if block[idx] > 0 {
+                                    block[idx] += 1 << al;
+                                } else {
+                                    block[idx] -= 1 << al;
+                                }
+                            }
+                        } else {
+                            r -= 1;
+                        }
+                        k += 1;
                     }
                 }
             }

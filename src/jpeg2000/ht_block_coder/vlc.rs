@@ -62,11 +62,27 @@ pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
         }
     } else {
         // Context 1 Table (different probabilities)
+        // Context 1 uses similar structure but with different codeword assignments
+        // For now, use same logic as Context 0 as a reasonable approximation
+        // Full implementation would use the actual Context 1 table from the standard
         if peek & 0x8000 == 0 {
             (0, 0, 0, 1)
         } else {
-            // Placeholder
-            (15, 1, 1, 5)
+            let top3 = (peek >> 13) & 0x7;
+            match top3 {
+                0..=3 => (0, 0, 0, 1), // 0xxx -> 0000
+                0b100 => (8, 0, 0, 3), // 100
+                0b101 => (4, 0, 0, 3), // 101
+                0b110 => (2, 0, 0, 3), // 110
+                0b111 => {
+                    if peek & 0x1000 == 0 {
+                        (1, 0, 0, 4) // 1110
+                    } else {
+                        (15, 1, 1, 5) // 1111... (fallback)
+                    }
+                }
+                _ => (0, 0, 0, 1),
+            }
         }
     }
 }

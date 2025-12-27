@@ -104,6 +104,10 @@ impl<'a> ScanDecoder<'a> {
         destination: &mut [u8],
         stride: usize,
     ) -> Result<(), JpeglsError> {
+        eprintln!(
+            "DEBUG: decode_lines start. W={} H={}",
+            self.frame_info.width, self.frame_info.height
+        );
         let width = self.frame_info.width as usize;
         let height = self.frame_info.height as usize;
         let pixel_stride = width + 2;
@@ -219,6 +223,7 @@ impl<'a> ScanDecoder<'a> {
             bit_count += 1;
             self.skip_bits(1)?;
             if bit_count > 32 {
+                eprintln!("Invalid Golomb code: bit_count > 32 (k={})", k);
                 return Err(JpeglsError::InvalidData);
             }
         }
@@ -251,9 +256,11 @@ impl<'a> ScanDecoder<'a> {
     fn fill_read_cache(&mut self) -> Result<(), JpeglsError> {
         while self.valid_bits <= (std::mem::size_of::<usize>() * 8 - 16) as i32 {
             if self.position >= self.source.len() {
+                eprintln!("Fill cache: EOF (pos {})", self.position);
                 break;
             }
             let byte = self.source[self.position] as usize;
+            // eprintln!("Read byte: {:02X} at {}", byte, self.position);
 
             // Add byte to cache first
             self.read_cache = (self.read_cache << 8) | byte;
@@ -270,12 +277,28 @@ impl<'a> ScanDecoder<'a> {
                         // Continue reading - the 0xFF is valid data
                     } else if (0xD0..=0xD7).contains(&next_byte) {
                         // Restart marker: back up, remove 0xFF from cache
+                        eprintln!(
+                            "DEBUG: Restart marker {:02X} at {}",
+                            next_byte, self.position
+                        );
                         self.position -= 1;
                         self.valid_bits -= 8;
                         self.read_cache >>= 8;
                         break;
                     } else if next_byte != 0xFF && next_byte != 0x00 {
+                        // Generic Skip for Unknown Markers (to handle padding/garbage/extensions)
+                        // Should technically be an error, but we want to survive.
+                        eprintln!(
+                            "DEBUG: Skipping Unknown Marker {:02X} at {} (Not RST/EOI/Stuffing)",
+                            next_byte, self.position
+                        );
+                        self.position += 1;
+                        continue;
                         // Real marker (not restart, not stuffing): back up, remove 0xFF from cache
+                        eprintln!(
+                            "DEBUG: Real marker {:02X} at {} Bits={} Cache={:X}",
+                            next_byte, self.position, self.valid_bits, self.read_cache
+                        );
                         self.position -= 1;
                         self.valid_bits -= 8;
                         self.read_cache >>= 8;
@@ -399,6 +422,11 @@ impl<'a> ScanDecoder<'a> {
                 for i in 0..length {
                     let i_usize = i as usize;
                     if start_index + run_length + i_usize > width {
+                        eprintln!(
+                            "Run mode overflow (Run 1): index {} > width {}",
+                            start_index + run_length + i_usize,
+                            width
+                        );
                         return Err(JpeglsError::InvalidData);
                     }
                     curr_line[start_index + run_length + i_usize] = curr_line[start_index - 1];
@@ -415,6 +443,11 @@ impl<'a> ScanDecoder<'a> {
                 for i in 0..remainder {
                     let i_usize = i as usize;
                     if start_index + run_length + i_usize > width {
+                        eprintln!(
+                            "Run mode overflow (Run Rem): index {} > width {}",
+                            start_index + run_length + i_usize,
+                            width
+                        );
                         return Err(JpeglsError::InvalidData);
                     }
                     curr_line[start_index + run_length + i_usize] = curr_line[start_index - 1];

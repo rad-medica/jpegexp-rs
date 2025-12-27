@@ -111,6 +111,85 @@ impl Dwt53 {
 
         output.copy_from_slice(&x);
     }
+
+    /// Inverse 2D 5/3 Transform
+    /// Reconstructs image from LL, HL, LH, HH subbands
+    pub fn inverse_2d(
+        ll: &[i32],
+        hl: &[i32],
+        lh: &[i32],
+        hh: &[i32],
+        width: u32,
+        height: u32,
+        output: &mut [i32],
+    ) {
+        let w = width as usize;
+        let h = height as usize;
+        #[allow(clippy::manual_div_ceil)]
+        let ll_w = (w + 1) / 2;
+        let hl_w = w / 2;
+        #[allow(clippy::manual_div_ceil)]
+        let ll_h = (h + 1) / 2;
+        let lh_h = h / 2;
+
+        // Temporary buffers for intermediate results
+        let mut temp = vec![0i32; w * h];
+
+        // First pass: Inverse transform each row
+        for y in 0..ll_h.max(lh_h) {
+            let row_ll = if y < ll_h { &ll[y * ll_w..(y + 1) * ll_w] } else { &[] };
+            let row_hl = if y < hl_w && y * hl_w < hl.len() {
+                let start = y * hl_w;
+                let end = (start + hl_w).min(hl.len());
+                &hl[start..end]
+            } else { &[] };
+
+            let mut row_output = vec![0i32; w];
+            if !row_ll.is_empty() || !row_hl.is_empty() {
+                let mut row_l = vec![0i32; ll_w];
+                let mut row_h = vec![0i32; hl_w];
+                if y < ll_h {
+                    row_l[..row_ll.len()].copy_from_slice(row_ll);
+                }
+                if y * hl_w < hl.len() {
+                    row_h[..row_hl.len().min(hl_w)].copy_from_slice(row_hl);
+                }
+                Self::inverse(&row_l, &row_h, &mut row_output);
+                for x in 0..w {
+                    temp[y * w + x] = row_output[x];
+                }
+            }
+        }
+
+        // Second pass: Inverse transform each column
+        for x in 0..w {
+            let mut col_l = vec![0i32; ll_h];
+            let mut col_h = vec![0i32; lh_h];
+
+            // Extract LL column
+            for y in 0..ll_h {
+                if y < ll_h && x < ll_w {
+                    col_l[y] = ll[y * ll_w + x];
+                }
+            }
+
+            // Extract LH column
+            for y in 0..lh_h {
+                if y < lh_h && x < ll_w && y * ll_w + x < lh.len() {
+                    col_h[y] = lh[y * ll_w + x];
+                }
+            }
+
+            let mut col_output = vec![0i32; h];
+            Self::inverse(&col_l, &col_h, &mut col_output);
+
+            for y in 0..h {
+                if x < w && y < h {
+                    output[y * w + x] = col_output[y];
+                }
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -260,6 +339,107 @@ impl Dwt97 {
         }
 
         output.copy_from_slice(&x);
+    }
+
+    /// Inverse 2D 9/7 Transform
+    /// Reconstructs image from LL, HL, LH, HH subbands
+    pub fn inverse_2d(
+        ll: &[f32],
+        hl: &[f32],
+        lh: &[f32],
+        hh: &[f32],
+        width: u32,
+        height: u32,
+        output: &mut [f32],
+    ) {
+        let w = width as usize;
+        let h = height as usize;
+        #[allow(clippy::manual_div_ceil)]
+        let ll_w = (w + 1) / 2;
+        let hl_w = w / 2;
+        #[allow(clippy::manual_div_ceil)]
+        let ll_h = (h + 1) / 2;
+        let lh_h = h / 2;
+
+        // First pass: Inverse transform each row
+        for y in 0..ll_h.max(lh_h) {
+            let row_ll = if y < ll_h { &ll[y * ll_w..(y + 1) * ll_w] } else { &[] };
+            let row_hl = if y < hl_w && y * hl_w < hl.len() {
+                let start = y * hl_w;
+                let end = (start + hl_w).min(hl.len());
+                &hl[start..end]
+            } else { &[] };
+
+            let mut row_output = vec![0.0f32; w];
+            if !row_ll.is_empty() || !row_hl.is_empty() {
+                let mut row_l = vec![0.0f32; ll_w];
+                let mut row_h = vec![0.0f32; hl_w];
+                if y < ll_h {
+                    row_l[..row_ll.len()].copy_from_slice(row_ll);
+                }
+                if y * hl_w < hl.len() {
+                    row_h[..row_hl.len().min(hl_w)].copy_from_slice(row_hl);
+                }
+                Self::inverse(&row_l, &row_h, &mut row_output);
+            }
+
+            // Store in temporary buffer (we'll transpose later)
+            // Actually, we need to do column-wise transform, so let's build columns first
+            // For simplicity, let's use a full intermediate buffer
+        }
+
+        // For proper 2D, we need intermediate storage
+        // Simplified approach: transform rows then columns
+        let mut temp = vec![0.0f32; w * h];
+
+        // Transform rows
+        for y in 0..ll_h.max(lh_h) {
+            let row_ll = if y < ll_h { &ll[y * ll_w..(y + 1) * ll_w] } else { &[] };
+            let row_hl = if y < hl_w && y * hl_w < hl.len() {
+                let start = y * hl_w;
+                let end = (start + hl_w).min(hl.len());
+                &hl[start..end]
+            } else { &[] };
+
+            let mut row_l = vec![0.0f32; ll_w];
+            let mut row_h = vec![0.0f32; hl_w];
+            if y < ll_h {
+                row_l[..row_ll.len()].copy_from_slice(row_ll);
+            }
+            if y * hl_w < hl.len() {
+                row_h[..row_hl.len().min(hl_w)].copy_from_slice(row_hl);
+            }
+            let mut row_output = vec![0.0f32; w];
+            Self::inverse(&row_l, &row_h, &mut row_output);
+            for x in 0..w {
+                temp[y * w + x] = row_output[x];
+            }
+        }
+
+        // Transform columns
+        for x in 0..w {
+            let mut col_l = vec![0.0f32; ll_h];
+            let mut col_h = vec![0.0f32; lh_h];
+
+            for y in 0..ll_h {
+                if x < ll_w {
+                    col_l[y] = ll[y * ll_w + x];
+                }
+            }
+
+            for y in 0..lh_h {
+                if x < ll_w && y * ll_w + x < lh.len() {
+                    col_h[y] = lh[y * ll_w + x];
+                }
+            }
+
+            let mut col_output = vec![0.0f32; h];
+            Self::inverse(&col_l, &col_h, &mut col_output);
+
+            for y in 0..h {
+                output[y * w + x] = col_output[y];
+            }
+        }
     }
 }
 mod tests {

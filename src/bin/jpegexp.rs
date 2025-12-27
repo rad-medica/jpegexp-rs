@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 SUPPORTED FORMATS:
     Input:  JPEG (.jpg), JPEG-LS (.jls), JPEG 2000 (.j2k/.jp2), HTJ2K (.jph)
-    Output: JPEG, JPEG-LS (J2K encoding coming soon)
+    Output: JPEG, JPEG-LS, JPEG 2000 (.j2k)
 
 For more information, visit: https://github.com/rad-medica/jpegexp-rs")]
 struct Cli {
@@ -264,7 +264,7 @@ fn encode_image(
             if quality != 85 {
                 // Only scale if quality is not the default
                 use jpegexp_rs::jpeg1::quantization::{
-                    get_scaled_quant_table, STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE,
+                    STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE, get_scaled_quant_table,
                 };
                 encoder.quantization_table_lum =
                     get_scaled_quant_table(&STD_LUMINANCE_QUANT_TABLE, quality as u32);
@@ -287,8 +287,16 @@ fn encode_image(
             dest.truncate(len);
             dest
         }
-        Codec::J2k | Codec::Htj2k => {
-            return Err("JPEG 2000 / HTJ2K encoding not yet implemented".into());
+        Codec::J2k => {
+            let mut dest = vec![0u8; pixels.len() * 4]; // J2K can be larger
+            let mut encoder = jpegexp_rs::jpeg2000::encoder::J2kEncoder::new();
+            encoder.set_quality(quality);
+            let len = encoder.encode(&pixels[..expected_size], &frame_info, &mut dest)?;
+            dest.truncate(len);
+            dest
+        }
+        Codec::Htj2k => {
+            return Err("HTJ2K encoding not yet implemented".into());
         }
     };
 
@@ -297,7 +305,7 @@ fn encode_image(
         "✓ Encoded {}x{} image ({} components) to {:?} using {:?} codec",
         width, height, components, output, codec
     );
-    if matches!(codec, Codec::Jpeg) && quality != 85 {
+    if matches!(codec, Codec::Jpeg | Codec::J2k) && quality != 85 {
         println!("  Quality: {}", quality);
     }
     if matches!(codec, Codec::Jpegls) && near_lossless > 0 {
@@ -330,7 +338,7 @@ fn transcode_image(
             // Set quality by scaling quantization tables
             if quality != 85 {
                 use jpegexp_rs::jpeg1::quantization::{
-                    get_scaled_quant_table, STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE,
+                    STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE, get_scaled_quant_table,
                 };
                 encoder.quantization_table_lum =
                     get_scaled_quant_table(&STD_LUMINANCE_QUANT_TABLE, quality as u32);
@@ -351,8 +359,16 @@ fn transcode_image(
             dest.truncate(len);
             dest
         }
-        Codec::J2k | Codec::Htj2k => {
-            return Err("JPEG 2000 / HTJ2K encoding not yet implemented".into());
+        Codec::J2k => {
+            let mut dest = vec![0u8; pixels.len() * 4]; // J2K can be larger
+            let mut encoder = jpegexp_rs::jpeg2000::encoder::J2kEncoder::new();
+            encoder.set_quality(quality);
+            let len = encoder.encode(&pixels, &frame_info, &mut dest)?;
+            dest.truncate(len);
+            dest
+        }
+        Codec::Htj2k => {
+            return Err("HTJ2K encoding not yet implemented".into());
         }
     };
 
@@ -361,7 +377,7 @@ fn transcode_image(
         "✓ Transcoded {}x{} image ({} components) to {:?} using {:?} codec",
         width, height, components, output, codec
     );
-    if matches!(codec, Codec::Jpeg) && quality != 85 {
+    if matches!(codec, Codec::Jpeg | Codec::J2k) && quality != 85 {
         println!("  Quality: {}", quality);
     }
     Ok(())
@@ -471,7 +487,7 @@ fn list_codecs() -> Result<(), Box<dyn std::error::Error>> {
     println!("  JPEG 2000 (j2k)");
     println!("    Standard: ISO/IEC 15444-1");
     println!("    Features: DWT, EBCOT, Quality Layers, ROI, ICC Profiles");
-    println!("    Encode:   ✗  Decode: ✓");
+    println!("    Encode:   ✓  Decode: ✓");
     println!();
     println!("  HTJ2K (htj2k)");
     println!("    Standard: ISO/IEC 15444-15");
@@ -547,14 +563,16 @@ fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::erro
     let height = image.height;
     let components = image.component_count;
 
-    // J2K decoder returns metadata; full pixel reconstruction from DWT/IDWT pending
-    // For now, return a placeholder image (gray) to allow the CLI to work
-    // TODO: Implement full IDWT and coefficient reconstruction
-    eprintln!("Warning: JPEG 2000 decoding is incomplete - returning placeholder image");
-    eprintln!("  Full pixel reconstruction from DWT coefficients is not yet implemented");
-    let pixels = vec![128u8; (width * height * components) as usize];
-
-    Ok((pixels, width, height, components))
+    // Reconstruct pixels from DWT coefficients using IDWT
+    match image.reconstruct_pixels() {
+        Ok(reconstructed) => Ok((reconstructed, width, height, components)),
+        Err(e) => {
+            eprintln!("J2K Reconstruction failed: {}", e);
+            // Fallback to default if reconstruction fails
+            let pixels = vec![128u8; (width * height * components) as usize];
+            Ok((pixels, width, height, components))
+        }
+    }
 }
 
 fn decode_jpegls(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {

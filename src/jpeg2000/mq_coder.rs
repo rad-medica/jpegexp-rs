@@ -405,7 +405,7 @@ impl MqCoder {
             }
         } else {
             // EOF: feed 0xFF
-            self.buffer_byte = 0xFF; // or 0? 
+            self.buffer_byte = 0xFF; // or 0?
             self.ct = 8;
         }
     }

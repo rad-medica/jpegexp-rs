@@ -95,7 +95,7 @@ impl<'a> JpeglsEncoder<'a> {
             interleave_mode,
         )?;
 
-        let bytes_written = if frame_info.bits_per_sample <= 8 {
+        let _bytes_written = if frame_info.bits_per_sample <= 8 {
             self.encode_scan_typed::<u8>(source, &frame_info, pc, coding_parameters)?
         } else {
             let (head, body, tail) = unsafe { source.align_to::<u16>() };

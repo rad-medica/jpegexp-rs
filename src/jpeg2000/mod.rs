@@ -16,6 +16,7 @@ pub mod bit_io;
 pub mod bit_plane_coder;
 pub mod decoder;
 pub mod dwt;
+pub mod encoder;
 pub mod ht_block_coder;
 pub mod image;
 pub mod jp2;

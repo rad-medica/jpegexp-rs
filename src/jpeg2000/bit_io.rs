@@ -26,9 +26,8 @@ impl<'a> J2kBitReader<'a> {
             // Byte stuffing handling for J2K Packet Headers
             if b == 0xFF && self.pos < self.data.len() {
                 let next = self.data[self.pos];
-                    if next == 0x00 {
-                        self.pos += 1; // Skip stuffing
-                    }
+                if next == 0x00 {
+                    self.pos += 1; // Skip stuffing
                 }
             }
 

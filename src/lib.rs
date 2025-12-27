@@ -82,13 +82,12 @@ mod tests {
 
     #[test]
     fn smoke_test() {
-        // Placeholder test
-        // This test ensures the crate compiles
-        // Removed assert!(true) as it's optimized out
+        // Smoke test to ensure the crate compiles and basic structures are accessible
+        let _reader = JpegStreamReader::new(&[]);
+        let _decoder = J2kDecoder::new(&mut JpegStreamReader::new(&[]));
     }
 
     #[test]
-    #[ignore = "Requires complex mock data alignment - see decode_tile_data improvements"]
     fn test_decoder_htj2k_integration_final() {
         // Mock stream with SOC, CAP (HTJ2K), SIZ, COD, QCD, SOT, SOD, data, EOC
         let data = vec![
@@ -113,11 +112,13 @@ mod tests {
             0xFF, 0x5C, 0x00, 0x05, 0x00, 0x00, 0x10, // SOT marker
             0xFF, 0x90, 0x00, 0x0A, // Lsot = 10
             0x00, 0x00, // Isot (tile index)
-            0x00, 0x00, 0x00, 0x00, // Psot = 0 (until EOC)
+            0x00, 0x00, 0x00, 0x14, // Psot = 20 (10 header + 2 SOD + 8 data)
             0x00, // TPsot = 0
             0x01, // TNsot = 1
             // SOD
-            0xFF, 0x93, 0x00, // Empty Packet (Packet header 0 bit)
+            0xFF, 0x93, // SOD Marker
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, // 8 bytes of data (Empty Packet + padding)
             // EOC
             0xFF, 0xD9,
         ];

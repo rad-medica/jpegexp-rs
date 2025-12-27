@@ -25,7 +25,7 @@ impl<'a> JpegStreamWriter<'a> {
     pub fn len(&self) -> usize {
         self.position
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.position == 0
     }

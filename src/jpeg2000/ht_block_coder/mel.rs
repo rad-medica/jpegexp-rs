@@ -21,33 +21,20 @@ impl<'a> MelDecoder<'a> {
         }
     }
 
-    /// Read a single bit from the bitstream.
-    fn read_bit(&mut self) -> Option<u8> {
+    /// Read a single raw bit from the bitstream (bypasses MEL state machine).
+    /// This is used for VLC decoding which shares the same bitstream.
+    pub fn read_raw_bit(&mut self) -> Option<u8> {
         if self.bits_left == 0 {
             if self.pos >= self.data.len() {
                 return None; // EOF
             }
-            // Byte stuffing handling? HTJ2K usually sits inside J2K packets,
-            // which do byte stuffing (FF 00).
-            // But MEL stream is raw bits from the *end* of the packet usually?
-            // "The MEL bitstream ... is read from the MR/MEL byte stream."
-            // Standard says MEL and VLC are interleaved or separate?
-            // We'll implement raw read for now, J2K byte stuffing might be handled by caller or wrapper.
-            // Assuming raw buffer here.
 
             self.bits_buffer = self.data[self.pos];
             self.pos += 1;
 
-            // Handle 0xFF stuffing locally if needed?
-            // "If a byte is 0xFF, the next byte must be < 0x90... if 0x00 it's stuffing"
-            // For now assume stripped buffer or handle it.
+            // Handle 0xFF stuffing
             if self.bits_buffer == 0xFF && self.pos < self.data.len() {
                 let next = self.data[self.pos];
-                if next & 0x80 == 0 {
-                    // Not a marker?
-                    // If next is > 0x8F it is a marker.
-                    // Standard byte stuffing in codestream means FF 00 -> FF.
-                }
                 if next == 0x00 {
                     self.pos += 1;
                 }
@@ -59,6 +46,38 @@ impl<'a> MelDecoder<'a> {
         let bit = (self.bits_buffer >> (self.bits_left - 1)) & 1;
         self.bits_left -= 1;
         Some(bit)
+    }
+
+    /// Read a single bit from the bitstream (through MEL state machine).
+    fn read_bit(&mut self) -> Option<u8> {
+        self.read_raw_bit()
+    }
+
+    /// Peek at the next N bits without consuming them.
+    /// This is needed for VLC decoding which shares the same bitstream.
+    pub fn peek_bits(&self, count: u8) -> u16 {
+        let mut peek_value = 0u16;
+        let mut temp_pos = self.pos;
+        let mut temp_buffer = self.bits_buffer;
+        let mut temp_left = self.bits_left;
+
+        for _ in 0..count.min(16) {
+            if temp_left == 0 {
+                if temp_pos >= self.data.len() {
+                    break;
+                }
+                temp_buffer = self.data[temp_pos];
+                temp_pos += 1;
+                if temp_buffer == 0xFF && temp_pos < self.data.len() && self.data[temp_pos] == 0x00 {
+                    temp_pos += 1;
+                }
+                temp_left = 8;
+            }
+            let bit = (temp_buffer >> (temp_left - 1)) & 1;
+            peek_value = (peek_value << 1) | (bit as u16);
+            temp_left -= 1;
+        }
+        peek_value
     }
 
     /// Decode a MEL symbol (0 or 1).

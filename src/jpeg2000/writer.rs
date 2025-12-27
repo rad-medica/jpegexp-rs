@@ -17,7 +17,7 @@ impl<'a> J2kWriter<'a> {
     pub fn len(&self) -> usize {
         self.writer.len()
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.writer.len() == 0
     }
@@ -85,7 +85,7 @@ impl<'a> J2kWriter<'a> {
         // SGcod
         self.writer.write_byte(cod.progression_order)?;
         self.writer.write_u16(cod.number_of_layers)?;
-        self.writer.write_byte(0)?; // MCT enabled? 
+        self.writer.write_byte(0)?; // MCT enabled?
 
         // SPcod
         self.writer.write_byte(5)?; // Number of decomposition levels (default 5 or struct field?)

@@ -174,6 +174,36 @@ fn encode_jpegls(
     Ok(PyBytes::new(py, &dest).into())
 }
 
+/// Encode raw pixels to JPEG 2000.
+#[pyfunction]
+fn encode_j2k(
+    py: Python<'_>,
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    components: u32,
+    quality: Option<u8>,
+) -> PyResult<Py<PyBytes>> {
+    let frame_info = jpegexp_rs::FrameInfo {
+        width,
+        height,
+        bits_per_sample: 8,
+        component_count: components as i32,
+    };
+
+    let mut dest = vec![0u8; pixels.len() * 4];
+    let mut encoder = jpegexp_rs::jpeg2000::encoder::J2kEncoder::new();
+    if let Some(q) = quality {
+        encoder.set_quality(q);
+    }
+    let len = encoder
+        .encode(pixels, &frame_info, &mut dest)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
+    dest.truncate(len);
+
+    Ok(PyBytes::new(py, &dest).into())
+}
+
 /// Transcode between formats.
 #[pyfunction]
 fn transcode(py: Python<'_>, data: &[u8], target: &str) -> PyResult<Py<PyBytes>> {
@@ -190,6 +220,7 @@ fn transcode(py: Python<'_>, data: &[u8], target: &str) -> PyResult<Py<PyBytes>>
     match target {
         "jpeg" => encode_jpeg(py, &pixels, width, height, components),
         "jpegls" => encode_jpegls(py, &pixels, width, height, components),
+        "j2k" | "jpeg2000" => encode_j2k(py, &pixels, width, height, components, None),
         _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
             "Unsupported target format: {}",
             target
@@ -283,6 +314,7 @@ fn jpegexp(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_info, m)?)?;
     m.add_function(wrap_pyfunction!(encode_jpeg, m)?)?;
     m.add_function(wrap_pyfunction!(encode_jpegls, m)?)?;
+    m.add_function(wrap_pyfunction!(encode_j2k, m)?)?;
     m.add_function(wrap_pyfunction!(transcode, m)?)?;
     Ok(())
 }

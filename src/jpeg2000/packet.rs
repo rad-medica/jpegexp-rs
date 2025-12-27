@@ -1,28 +1,46 @@
 use super::bit_io::J2kBitReader;
 use super::tag_tree::TagTree;
 
-/// Represents the state of a Precinct during parsing.
-pub struct PrecinctState {
+pub struct SubbandState {
     pub inclusion_tree: TagTree,
     pub zero_bp_tree: TagTree,
     pub lblock_tree: TagTree,
 }
 
-impl PrecinctState {
+impl SubbandState {
     pub fn new(w: usize, h: usize) -> Self {
-        let mut state = Self {
+        Self {
             inclusion_tree: TagTree::new(w, h),
             zero_bp_tree: TagTree::new(w, h),
             lblock_tree: TagTree::new(w, h),
-        };
-        state.reset();
-        state
+        }
     }
 
     pub fn reset(&mut self) {
         self.inclusion_tree.reset();
         self.zero_bp_tree.reset();
         self.lblock_tree.reset();
+    }
+}
+
+/// Represents the state of a Precinct during parsing.
+pub struct PrecinctState {
+    /// Trees for each subband (resolution 0 has 1, others have 3)
+    pub subbands: Vec<SubbandState>,
+}
+
+impl PrecinctState {
+    pub fn new(w: usize, h: usize) -> Self {
+        // Initialize with capacity appropriate for most cases
+        let mut subbands = Vec::with_capacity(3);
+        // It will be populated on demand or we can pre-populate if we knew subbands count
+        Self { subbands }
+    }
+
+    pub fn reset(&mut self) {
+        for sb in &mut self.subbands {
+            sb.reset();
+        }
     }
 }
 
@@ -37,6 +55,7 @@ pub struct PacketHeader {
 pub struct CodeBlockInfo {
     pub x: usize,
     pub y: usize,
+    pub subband_index: u8,
     pub included: bool,
     pub num_passes: u8,
     pub data_len: u32,
@@ -51,6 +70,7 @@ impl PacketHeader {
         layer: u32,
         grid_width: usize,
         grid_height: usize,
+        num_subbands: usize,
     ) -> Result<Self, ()> {
         let mut header = PacketHeader {
             packet_seq_num: 0,
@@ -68,55 +88,45 @@ impl PacketHeader {
         }
 
         // 2. Code-block inclusion and header info
-        // Iterate in raster order (for now)
-        for y in 0..grid_height {
-            for x in 0..grid_width {
-                // Determine inclusion
-                // TagTree::decode returns true if "low >= threshold" (i.e. NOT included logic for inclusion tree).
-                // If decode returns false, it means "low < threshold", which implies it found the value is <= layer.
-                // So include = !decode(...)
-                // Threshold is (layer + 1).
-                let not_included_yet =
-                    state
+        for s in 0..num_subbands {
+            eprintln!("DEBUG: Packet S{} L{}", s, layer);
+            // Ensure state has trees for this subband
+            if state.subbands.len() <= s {
+                state
+                    .subbands
+                    .push(SubbandState::new(grid_width, grid_height));
+            }
+            let subband_state = &mut state.subbands[s];
+
+            for y in 0..grid_height {
+                for x in 0..grid_width {
+                    // Determine inclusion
+                    let threshold = (layer + 1) as i32;
+                    let not_included_yet = subband_state
                         .inclusion_tree
-                        .decode(reader, x, y, (layer + 1) as i32)?;
-                let included = !not_included_yet;
+                        .decode(reader, x, y, threshold)?;
+                    let included = !not_included_yet;
 
-                if included {
-                    let zero_bp = 0;
-                    // First time inclusion?
-                    // Check if already included in previous layers?
-                    // Current TagTree doesn't persistently store "included".
-                    // We need PrecinctState to track which blocks are already included.
-                    // For now, assume simple case (1 layer).
+                    if included {
+                        eprintln!("DEBUG: Included CB {},{} in S{}", x, y, s);
+                        let zero_bp = 0;
+                        let num_passes = 1;
 
-                    // IF first time included:
-                    //   Decode Zero Bit Planes (tag tree)
-                    //   state.zero_bp_tree.decode(...)
-                    //   zero_bp = ...
+                        // Data Length
+                        let _has_lblock =
+                            subband_state.lblock_tree.decode(reader, x, y, threshold)?;
+                        let data_len = reader.read_bits(16)?;
 
-                    // Number of passes
-                    // Standard J2K: 1 bit for 1 pass, 2 bits...
-                    // HTJ2K: logic might differ or use same packet headers.
-                    // HTJ2K typically puts everything in one packet -> 1 pass?
-                    // Let's assume 1 pass for now to unblock integration.
-                    let num_passes = 1;
-
-                    // Data Length
-                    // Lblock coding:
-                    // This is complex. For now, we will read 16 bits as length (Mock).
-                    // This allows us to inject test data easily.
-                    // TODO: Implement full Lblock tag tree decoding.
-                    let data_len = reader.read_bits(16)?;
-
-                    header.included_cblks.push(CodeBlockInfo {
-                        x,
-                        y,
-                        included,
-                        num_passes,
-                        data_len,
-                        zero_bp,
-                    });
+                        header.included_cblks.push(CodeBlockInfo {
+                            x,
+                            y,
+                            subband_index: s as u8,
+                            included,
+                            num_passes,
+                            data_len,
+                            zero_bp,
+                        });
+                    }
                 }
             }
         }
@@ -131,6 +141,7 @@ impl PacketHeader {
         state: &mut PrecinctState,
         grid_width: usize,
         grid_height: usize,
+        num_subbands: usize,
     ) {
         // 1. Zero-length packet bit
         if self.empty {
@@ -140,78 +151,87 @@ impl PacketHeader {
         writer.write_bit(1);
 
         // 2. Code-block inclusion and header info
-        for y in 0..grid_height {
-            for x in 0..grid_width {
-                // Check if codeblock is included in this packet
-                let cb_info = self.included_cblks.iter().find(|c| c.x == x && c.y == y);
+        for s in 0..num_subbands {
+            // Ensure state has trees for this subband
+            if state.subbands.len() <= s {
+                state
+                    .subbands
+                    .push(SubbandState::new(grid_width, grid_height));
+            }
+            let subband_state = &mut state.subbands[s];
 
-                let included_now = cb_info.is_some() && cb_info.unwrap().included;
+            for y in 0..grid_height {
+                for x in 0..grid_width {
+                    // Check if codeblock is included in this packet
+                    let cb_info = self
+                        .included_cblks
+                        .iter()
+                        .find(|c| c.x == x && c.y == y && c.subband_index == s as u8);
 
-                // Tag tree encode:
-                // If not included yet (state check), encode inclusion.
-                // We need to know the *actual* layer it is first included.
-                // If included now, 'val' = layer_idx + 1 ?
-                // Or layer_idx ?
-                // Let's assume passed threshold logic:
-                // Encode(writer, x, y, threshold)
-                // If val < threshold, we found it.
-                // Here threshold = layer + 1.
-                // If included, we assume value < threshold.
+                    let included_now = cb_info.is_some() && cb_info.unwrap().included;
 
-                // Simplified: Just encode inclusion "1" if included now?
-                // Tag trees work by revealing if value < threshold.
-                // If we want to say "Included", we ensure the tree encodes that Value <= Layer.
+                    if included_now {
+                        // Tag tree encode:
+                        subband_state.inclusion_tree.encode(
+                            writer,
+                            x,
+                            y,
+                            (self.layer_index + 1) as i32,
+                        );
 
-                // For writing, we need to manipulate the Tag Tree nodes to set the value?
-                // Or the TagTree::encode simply writes bits based on preset values?
-                // TagTree::encode uses `node.value`.
-                // We MUST set `node.value` for this (x,y) to `self.layer_index` (or similar) if included.
+                        // Zero BP, passes, length...
+                        let cb = cb_info.unwrap();
 
-                // Current hack: Assume single layer or simple logic.
-                // If included, we perform encode.
+                        // Zero Bit Planes (Tag Tree)
+                        subband_state
+                            .zero_bp_tree
+                            .set_value(x, y, cb.zero_bp as i32);
+                        subband_state.zero_bp_tree.encode(
+                            writer,
+                            x,
+                            y,
+                            (self.layer_index + 1) as i32,
+                        );
 
-                if included_now {
-                    // Update inclusion tree with current layer.
-                    // But TagTree::encode reads from `self.nodes`.
-                    // We accept that `PacketHeader` is just a struct, `PrecinctState` holds the trees.
+                        // Number of Passes
+                        let num_passes = cb.num_passes.max(1); // Ensure at least 1
+                        for _ in 0..(num_passes - 1) {
+                            writer.write_bit(1);
+                        }
+                        writer.write_bit(0); // Terminate unary encoding
 
-                    // We'll trust `state.inclusion_tree.encode` handles it if we set the value correctly?
-                    // Actually `TagTree` implementation: `encode` checks `node.value` vs `threshold`.
-                    // So we MUST set `node.value` for this (x,y) to `self.layer_index` (or similar) if included.
-
-                    // Issue: TagTree nodes are flat vector.
-                    // We need a helper to set value?
-                    // `state.inclusion_tree.set_value(x, y, layer_index)`?
-                    // TagTree doesn't have `set_value` public?
-                    // It has `nodes`.
-
-                    // For this task, we will just call `encode` assuming values are correct or mocked?
-                    // Or add `set_value` to TagTree?
-                    // Tag Tree rewrite in previous step didn't add `set_value`.
-
-                    // Let's stick to the protocol logic:
-                    // We call encode with threshold (layer + 1).
-                    // If the node value < threshold, it emits bits to prove it.
-
-                    state
-                        .inclusion_tree
-                        .encode(writer, x, y, (self.layer_index + 1) as i32);
-
-                    // Zero BP, passes, length...
-                    // if included...
-                    let _cb = cb_info.unwrap();
-                    // Zero BP (Tag Tree)
-                    // state.zero_bp_tree.encode(...)
-
-                    // Num Passes
-                    // Unary or other?
-                    // Placeholder: Write 1 bit
-                    writer.write_bit(0); // Mock
-                } else {
-                    // Not included
-                    state
-                        .inclusion_tree
-                        .encode(writer, x, y, (self.layer_index + 1) as i32);
+                        // Data Length (Lblock encoding)
+                        if cb.data_len > 0 {
+                            subband_state
+                                .lblock_tree
+                                .set_value(x, y, cb.data_len as i32);
+                            subband_state.lblock_tree.encode(
+                                writer,
+                                x,
+                                y,
+                                (self.layer_index + 1) as i32,
+                            );
+                            // Write the actual data length value (16 bits for simplified encoding)
+                            writer.write_bits(cb.data_len, 16);
+                        } else {
+                            // No data length - tag tree encodes absence
+                            subband_state.lblock_tree.set_value(x, y, 0);
+                            subband_state.lblock_tree.encode(
+                                writer,
+                                x,
+                                y,
+                                (self.layer_index + 1) as i32,
+                            );
+                        }
+                    } else {
+                        // Not included
+                        subband_state.inclusion_tree.encode(
+                            writer,
+                            x,
+                            y,
+                            (self.layer_index + 1) as i32,
+                        );
+                    }
                 }
             }
         }
@@ -227,7 +247,7 @@ mod tests {
         let mut reader = J2kBitReader::new(&data);
         let mut state = PrecinctState::new(2, 2);
 
-        let header = PacketHeader::read(&mut reader, &mut state, 0, 2, 2).unwrap();
+        let header = PacketHeader::read(&mut reader, &mut state, 0, 2, 2, 1).unwrap();
         assert!(header.empty);
     }
 }
