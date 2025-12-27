@@ -19,6 +19,12 @@ pub struct J2kImage {
     pub cap: Option<J2kCap>,
     /// List of tiles that make up the image.
     pub tiles: Vec<J2kTile>,
+    /// Optional Region of Interest information.
+    pub roi: Option<J2kRoi>,
+    /// Optional ICC color profile extracted from JP2 container.
+    pub icc_profile: Option<Vec<u8>>,
+    /// Number of quality layers decoded (for progressive quality).
+    pub decoded_layers: u32,
 }
 
 /// A single tile-part or tile within a J2K codestream.
@@ -96,6 +102,12 @@ pub struct J2kCodeBlock {
     pub zero_bit_planes: u8,
     /// Number of coding passes included in the packet.
     pub coding_passes: u8,
+    /// Layer contributions: each entry contains data for a specific quality layer.
+    pub layer_data: Vec<Vec<u8>>,
+    /// Number of layers that have contributed to this codeblock.
+    pub layers_decoded: u8,
+    /// Decoded coefficient values (accumulated across layers).
+    pub coefficients: Vec<i32>,
 }
 /// Coding Style Default (COD) marker information
 #[derive(Debug, Clone, Default)]
@@ -126,4 +138,15 @@ pub struct J2kCap {
 // Extend J2kImage with optional COD and QCD information
 impl J2kImage {
     // Existing fields remain unchanged; we add optional fields via struct definition below
+}
+
+/// Region of Interest (ROI) marker information.
+#[derive(Debug, Clone, Default)]
+pub struct J2kRoi {
+    /// Component index affected by ROI.
+    pub component_index: u8,
+    /// ROI style (0 = implicit, 1 = explicit).
+    pub roi_style: u8,
+    /// Shift value for ROI coefficients (SPrgn).
+    pub shift_value: u8,
 }

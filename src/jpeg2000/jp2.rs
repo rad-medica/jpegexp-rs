@@ -38,6 +38,38 @@ impl<'a> Jp2Reader<'a> {
         Ok(None)
     }
 
+    /// Finds and extracts the ICC profile from the JP2 colr box.
+    /// Returns None if no ICC profile is present or the file is not a JP2 container.
+    pub fn find_icc_profile(&mut self) -> Result<Option<Vec<u8>>, JpeglsError> {
+        // Reset position
+        self.position = 0;
+
+        // JP2 signature box check
+        if self.data.len() < 12 {
+            return Ok(None);
+        }
+        if &self.data[0..12] != b"\x00\x00\x00\x0CjP  \r\n\x87\n" {
+            return Ok(None);
+        }
+
+        // Look for the colr box
+        while let Some(b) = self.read_box()? {
+            if b.box_type == *b"colr" {
+                let box_data = &self.data[b.data_range.clone()];
+                if box_data.len() < 3 {
+                    continue;
+                }
+                let method = box_data[0];
+                // Method 2 = ICC profile
+                if method == 2 && box_data.len() > 3 {
+                    let icc_data = box_data[3..].to_vec();
+                    return Ok(Some(icc_data));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn read_box(&mut self) -> Result<Option<Jp2Box>, JpeglsError> {
         if self.position + 8 > self.data.len() {
             return Ok(None);

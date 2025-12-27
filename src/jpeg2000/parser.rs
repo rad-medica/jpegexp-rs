@@ -67,6 +67,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                     return Ok(JpegMarkerCode::StartOfTile);
                 }
                 JpegMarkerCode::Capability => self.parse_cap()?,
+                JpegMarkerCode::RegionOfInterest => self.parse_rgn()?,
                 _ => {
                     // Skip unknown segment
                     let len = self.reader.read_u16()?;
@@ -198,6 +199,31 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         }
 
         self.image.cap = Some(J2kCap { pcap, ccap });
+
+        Ok(())
+    }
+
+    fn parse_rgn(&mut self) -> Result<(), JpeglsError> {
+        // RGN marker (0xFF5E) - Region of Interest
+        let len = self.reader.read_u16()?;
+        if len < 5 {
+            return Err(JpeglsError::InvalidData);
+        }
+        let component_index = self.reader.read_u8()?;
+        let roi_style = self.reader.read_u8()?;
+        let shift_value = self.reader.read_u8()?;
+
+        // Skip remaining bytes if any
+        let remaining = (len as usize).saturating_sub(5);
+        if remaining > 0 {
+            self.reader.advance(remaining);
+        }
+
+        self.image.roi = Some(super::image::J2kRoi {
+            component_index,
+            roi_style,
+            shift_value,
+        });
 
         Ok(())
     }

@@ -31,11 +31,19 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             jp2_reader.find_codestream()?
         };
 
+        // Extract ICC profile if JP2 container
+        let icc_profile = {
+            let mut jp2_reader =
+                crate::jpeg2000::jp2::Jp2Reader::new(self.parser.reader.remaining_data());
+            jp2_reader.find_icc_profile()?
+        };
+
         if let Some(cs) = codestream {
             let mut sub_reader = JpegStreamReader::new(cs);
             let mut sub_parser = J2kParser::new(&mut sub_reader);
             sub_parser.parse_main_header()?;
             self.parser.image = sub_parser.image.clone();
+            self.parser.image.icc_profile = icc_profile;
         }
 
         // 1. Parse Main Header
@@ -185,6 +193,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
         self.parser.reader.advance(consumed);
 
+        // Track layer contributions for quality layer support
         for cb_info in header.included_cblks {
             if cb_info.data_len > 0 {
                 let data_len = cb_info.data_len as usize;
@@ -198,10 +207,20 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         &data, &data, 64, 64,
                     );
                     let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
+                    // Store layer data for accumulation
+                    block.layer_data.push(data.clone());
+                    block.layers_decoded = (layer + 1) as u8;
                     let _ = coder.decode_block(&mut block);
                 }
             }
         }
+
+        // Update global decoded_layers counter
+        let current = self.parser.image.decoded_layers;
+        if (layer as u32 + 1) > current {
+            self.parser.image.decoded_layers = (layer + 1) as u32;
+        }
+
         Ok(())
     }
 }

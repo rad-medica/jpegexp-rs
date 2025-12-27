@@ -106,6 +106,8 @@ pub enum JpegMarkerCode {
     QuantizationDefault = 0x5C,
     /// QCC: Quantization component
     QuantizationComponent = 0x5D,
+    /// RGN: Region of Interest
+    RegionOfInterest = 0x5E,
     /// SOT: Start of Tile
     StartOfTile = 0x90,
     /// SOP: Start of Packet
@@ -167,6 +169,7 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0x53 => Ok(Self::CodingStyleComponent),
             0x5C => Ok(Self::QuantizationDefault),
             0x5D => Ok(Self::QuantizationComponent),
+            0x5E => Ok(Self::RegionOfInterest),
             0x90 => Ok(Self::StartOfTile),
             0x91 => Ok(Self::StartOfPacket),
             0x92 => Ok(Self::EndOfPacketHeader),
