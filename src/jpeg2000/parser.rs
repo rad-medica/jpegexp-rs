@@ -1,8 +1,14 @@
+//! JPEG 2000 Codestream Parser.
+//!
+//! Handles the parsing of Main Headers (SOC, SIZ, COD, QCD, CAP) and
+//! Tile-Part Headers (SOT, SOD).
+
 use super::image::{J2kCap, J2kCod, J2kImage, J2kQcd};
 use crate::JpeglsError;
 use crate::jpeg_marker_code::JpegMarkerCode;
 use crate::jpeg_stream_reader::JpegStreamReader;
 
+/// A parser that transforms raw J2K marker segments into structured metadata.
 pub struct J2kParser<'a, 'b> {
     pub reader: &'b mut JpegStreamReader<'a>,
     pub image: J2kImage,

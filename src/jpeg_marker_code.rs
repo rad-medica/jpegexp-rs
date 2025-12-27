@@ -75,6 +75,12 @@ pub enum JpegMarkerCode {
 
     /// SOF0: Start of Frame (Baseline DCT).
     StartOfFrameBaseline = 0xC0,
+    /// SOF1: Start of Frame (Extended Sequential DCT).
+    StartOfFrameExtendedSequential = 0xC1,
+    /// SOF2: Start of Frame (Progressive DCT).
+    StartOfFrameProgressive = 0xC2,
+    /// SOF3: Start of Frame (Lossless).
+    StartOfFrameLossless = 0xC3,
     /// DHT: Defines one or more Huffman tables.
     DefineHuffmanTable = 0xC4,
 
@@ -127,6 +133,9 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0xDA => Ok(Self::StartOfScan),
             0xDB => Ok(Self::DefineQuantizationTable),
             0xC0 => Ok(Self::StartOfFrameBaseline),
+            0xC1 => Ok(Self::StartOfFrameExtendedSequential),
+            0xC2 => Ok(Self::StartOfFrameProgressive),
+            0xC3 => Ok(Self::StartOfFrameLossless),
             0xC4 => Ok(Self::DefineHuffmanTable),
             0xDC => Ok(Self::DefineNumberOfLines),
             0xDD => Ok(Self::DefineRestartInterval),

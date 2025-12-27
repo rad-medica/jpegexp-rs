@@ -1,3 +1,8 @@
+//! JPEG Codestream Reader utilities.
+//!
+//! This module provides the `JpegStreamReader` which handles the sequential
+//! reading of JPEG markers and segments (DQT, DHT, SOF, SOS, etc.).
+
 use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
@@ -5,17 +10,26 @@ use crate::jpegls::coding_parameters::{CodingParameters, JpeglsPcParameters};
 use crate::jpegls::{InterleaveMode, SpiffHeader};
 use std::convert::{TryFrom, TryInto};
 
+/// Metadata for an individual image component (e.g. Y, Cb, Cr).
 #[derive(Debug, Clone, Default)]
 pub struct JpegComponent {
+    /// Component ID (typically 1, 2, 3).
     pub id: u8,
+    /// Horizontal sampling factor (1-4).
     pub h_samp_factor: u8,
+    /// Vertical sampling factor (1-4).
     pub v_samp_factor: u8,
+    /// Quantization table destination selector (0-3).
     pub quant_table_dest: u8,
+    /// DC Huffman table destination selector (0-3).
     pub dc_table_dest: u8,
+    /// AC Huffman table destination selector (0-3).
     pub ac_table_dest: u8,
+    /// DC prediction state (used during scan decoding).
     pub dc_pred: i16,
 }
 
+/// Internal state of the stream reader.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JpegStreamReaderState {
     BeforeStartOfImage,
@@ -24,6 +38,7 @@ pub enum JpegStreamReaderState {
     EndOfImage,
 }
 
+/// A reader for JPEG/JLS codestreams that manages marker parsing and segment state.
 pub struct JpegStreamReader<'a> {
     source: &'a [u8],
     position: usize,
@@ -38,6 +53,14 @@ pub struct JpegStreamReader<'a> {
     pub components: Vec<JpegComponent>,
     pub restart_interval: u16,
     pub scan_component_indices: Vec<usize>,
+    pub is_lossless: bool,
+    pub is_progressive: bool,
+    pub lossless_predictor_selection: u8,
+    pub point_transform: u8,
+    pub ss: u8,
+    pub se: u8,
+    pub ah: u8,
+    pub al: u8,
 }
 
 impl<'a> JpegStreamReader<'a> {
@@ -56,6 +79,14 @@ impl<'a> JpegStreamReader<'a> {
             components: Vec::new(),
             restart_interval: 0,
             scan_component_indices: Vec::new(),
+            is_lossless: false,
+            is_progressive: false,
+            lossless_predictor_selection: 0,
+            point_transform: 0,
+            ss: 0,
+            se: 63,
+            ah: 0,
+            al: 0,
         }
     }
 
@@ -112,6 +143,12 @@ impl<'a> JpegStreamReader<'a> {
                 }
                 JpegMarkerCode::StartOfFrameBaseline => {
                     self.read_sof0_segment()?;
+                }
+                JpegMarkerCode::StartOfFrameProgressive => {
+                    self.read_sof2_segment()?;
+                }
+                JpegMarkerCode::StartOfFrameLossless => {
+                    self.read_sof3_segment()?;
                 }
                 JpegMarkerCode::DefineQuantizationTable => {
                     self.read_dqt_segment()?;
@@ -255,9 +292,19 @@ impl<'a> JpegStreamReader<'a> {
                 }
             }
         }
-        let _ss = self.read_u8()?;
-        let _se = self.read_u8()?;
-        let _ah_al = self.read_u8()?;
+        let ss = self.read_u8()?;
+        let se = self.read_u8()?;
+        let ah_al = self.read_u8()?;
+
+        self.ss = ss;
+        self.se = se;
+        self.ah = ah_al >> 4;
+        self.al = ah_al & 0x0F;
+
+        if self.is_lossless {
+            self.lossless_predictor_selection = ss;
+            self.point_transform = self.al;
+        }
 
         self.state = JpegStreamReaderState::ScanSection;
         Ok(())
@@ -351,6 +398,19 @@ impl<'a> JpegStreamReader<'a> {
             });
         }
         Ok(())
+    }
+
+    fn read_sof3_segment(&mut self) -> Result<(), JpeglsError> {
+        // SOF3 is syntactically identical to SOF0 in terms of header structure,
+        // but it implies lossless process.
+        self.is_lossless = true;
+        self.read_sof0_segment()
+    }
+
+    fn read_sof2_segment(&mut self) -> Result<(), JpeglsError> {
+        // SOF2 is Progressive DCT.
+        self.is_progressive = true;
+        self.read_sof0_segment()
     }
 
     pub fn read_dqt_segment(&mut self) -> Result<(), JpeglsError> {

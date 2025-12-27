@@ -1,3 +1,14 @@
+//! JPEG-LS Implementation (ISO/IEC 14495-1 / ITU-T T.87)
+//!
+//! JPEG-LS is a low-complexity, high-performance lossless and near-lossless
+//! image compression standard. It is particularly effective for medical
+//! images and synthetic graphics.
+//!
+//! This module provides:
+//! - `JpeglsEncoder`: Support for encoding images with custom LSE parameters.
+//! - `JpeglsDecoder`: Capability to decode scans with multiple interleave modes (None, Line, Sample).
+//! - `SPIFF`: Full support for the Still Picture Interchange File Format header.
+
 pub mod coding_parameters;
 pub mod decoder;
 pub mod encoder;

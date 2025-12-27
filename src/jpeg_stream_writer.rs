@@ -1,8 +1,14 @@
+//! JPEG Codestream Writer utilities.
+//!
+//! This module provides the `JpegStreamWriter` which handles the generation
+//! of JPEG markers and segments (SOI, EOI, SOF, SOD, etc.) for various standards.
+
+use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
 use crate::jpegls::{InterleaveMode, JpeglsPcParameters};
-use crate::FrameInfo;
 
+/// A writer for JPEG/JLS codestreams that manages marker emission and byte stuffing.
 pub struct JpegStreamWriter<'a> {
     destination: &'a mut [u8],
     position: usize,
@@ -90,7 +96,13 @@ impl<'a> JpegStreamWriter<'a> {
         Ok(())
     }
 
-    pub fn write_dht(&mut self, table_class: u8, table_id: u8, lengths: &[u8; 16], values: &[u8]) -> Result<(), JpeglsError> {
+    pub fn write_dht(
+        &mut self,
+        table_class: u8,
+        table_id: u8,
+        lengths: &[u8; 16],
+        values: &[u8],
+    ) -> Result<(), JpeglsError> {
         self.write_marker(JpegMarkerCode::DefineHuffmanTable)?;
         let length = 2 + 1 + 16 + values.len();
         self.write_u16(length as u16)?;
@@ -118,7 +130,7 @@ impl<'a> JpegStreamWriter<'a> {
             self.write_byte(0x11)?; // Sampling factors 1x1
             // Use Quantization Table 0 for Y (component 0), Table 1 for Cb/Cr (components 1, 2)
             let q_table_id = if i == 0 { 0 } else { 1 };
-            self.write_byte(q_table_id)?; 
+            self.write_byte(q_table_id)?;
         }
         Ok(())
     }

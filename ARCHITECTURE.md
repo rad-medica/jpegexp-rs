@@ -6,66 +6,97 @@ This document describes the internal design and data flow of the `jpegexp-rs` li
 
 ```mermaid
 graph TD
-    API[Public API: JpeglsEncoder/Decoder]
-    Stream[Stream Layer: JpegStreamWriter/Reader]
-    Scan[Scan Layer: ScanEncoder/Decoder]
-    Logic[Core Logic: Predictive Coding & Entropy]
-    State[State: Context Modelling]
+    subgraph "Public API"
+        JPEGLS[JpeglsEncoder/Decoder]
+        JPEG1[Jpeg1Encoder/Decoder]
+        J2K[J2kDecoder]
+    end
     
-    API --> Stream
-    API --> Scan
-    Scan --> Logic
-    Logic --> State
+    subgraph "Stream Layer"
+        Reader[JpegStreamReader]
+        Writer[JpegStreamWriter]
+        JP2[Jp2Reader]
+    end
+    
+    subgraph "JPEG-LS Core"
+        ScanLS[ScanEncoder/Decoder]
+        ContextLS[Context Modelling]
+    end
+    
+    subgraph "JPEG 1 Core"
+        DCT[DCT/IDCT]
+        Quant[Quantization]
+        Huffman[Huffman Coding]
+        Lossless[Lossless Predictors]
+    end
+    
+    subgraph "JPEG 2000 Core"
+        DWT[DWT/IDWT]
+        MQ[MQ Coder]
+        TagTree[Tag Trees]
+        HTCoder[HT Block Coder]
+        Packet[Packet Parser]
+    end
+    
+    JPEGLS --> Reader --> ScanLS --> ContextLS
+    JPEG1 --> Reader --> DCT --> Huffman
+    JPEG1 --> Lossless
+    J2K --> Reader --> JP2
+    J2K --> DWT --> MQ
+    J2K --> HTCoder
+    J2K --> Packet --> TagTree
 ```
 
-### 1. Public API Layer (`encoder.rs`, `decoder.rs`)
-These modules provide the primary entry points for users. They manage the high-level orchestration:
-- Opening buffers.
-- Dispatching to typed encoding/decoding based on bit-depth.
-- Managing overall frame metadata.
+## Module Descriptions
 
-### 2. Stream Layer (`jpeg_stream_writer.rs`, `jpeg_stream_reader.rs`)
-Responsible for the JPEG-LS file format structure:
-- Writing/reading markers (SOI, SOF, SOS, etc.).
-- Handling SPIFF headers.
-- Byte-level encapsulation of compressed scans.
+### 1. Public API Layer
+- **`jpegls/encoder.rs`, `jpegls/decoder.rs`**: JPEG-LS encoding/decoding.
+- **`jpeg1/encoder.rs`, `jpeg1/decoder.rs`**: JPEG 1 Baseline, Progressive, and Lossless.
+- **`jpeg2000/decoder.rs`**: JPEG 2000 and HTJ2K decoding with JP2 container support.
 
-### 3. Scan Layer (`scan_encoder.rs`, `scan_decoder.rs`)
-The heart of the JPEG-LS algorithm. It implements:
-- Predictive coding loop (line-by-line, pixel-by-pixel).
-- Run-mode detection and handling.
-- Bit-stream packing/unpacking (including FF00 stuffing).
-- Generic support for `u8` and `u16` samples via traits.
+### 2. Stream Layer
+- **`jpeg_stream_reader.rs`**: Parses JPEG markers (SOI, SOF, SOS, DQT, DHT, DRI, etc.).
+- **`jpeg_stream_writer.rs`**: Writes JPEG markers and segment data.
+- **`jpeg2000/jp2.rs`**: Parses JP2 container boxes (Annex I), extracts codestream.
 
-### 4. Context Modelling (`regular_mode_context.rs`, `run_mode_context.rs`)
-Maintains the statistical models used by the Golomb coding:
-- `A`, `B`, `C`, `N` variables for predictive bias and Golomb parameter estimation.
-- `update_variables` logic for adapting to local image statistics.
+### 3. JPEG-LS Core (`jpegls/`)
+- **`scan_encoder.rs`, `scan_decoder.rs`**: JPEG-LS predictive coding loop.
+- **`regular_mode_context.rs`, `run_mode_context.rs`**: Golomb-Rice context models.
 
-## Data Flow (Encoding)
+### 4. JPEG 1 Core (`jpeg1/`)
+- **`dct.rs`**: Forward/Inverse DCT (8x8 blocks).
+- **`quantization.rs`**: Quantization/dequantization with standard tables.
+- **`huffman.rs`**: Huffman encoding/decoding, standard DC/AC tables.
+- **`lossless.rs`**: Process 14 predictors (1-7) for lossless JPEG.
 
-1. User provides raw pixel data and metadata.
-2. `JpeglsEncoder` writes JPEG markers to the destination buffer.
-3. `ScanEncoder` is initialized with the raw source.
-4. For each sample:
-    - Determine if in Run Mode or Regular Mode.
-    - **Regular Mode**: Predict value based on neighbors -> Compute error -> Golomb encode.
-    - **Run Mode**: Count identical pixels -> Encode run length -> Handle interruption pixel.
-5. Bit-stream is packed into bytes and written to the writer.
+### 5. JPEG 2000 Core (`jpeg2000/`)
+- **`dwt.rs`**: 5-3 reversible and 9-7 irreversible wavelet transforms.
+- **`mq_coder.rs`**: MQ arithmetic coder for EBCOT.
+- **`bit_plane_coder.rs`**: Context modeling for significance/refinement passes.
+- **`tag_tree.rs`**: Hierarchical tree for inclusion/zero bit-plane coding.
+- **`packet.rs`**: Packet header parsing and PrecinctState management.
+- **`parser.rs`**: Main header parsing (SOC, SIZ, COD, QCD, CAP).
+- **`ht_block_coder/`**: HTJ2K non-iterative block coder (MEL, VLC, MagSgn).
 
-## Data Flow (Decoding)
+## Data Flow
 
-1. `JpeglsDecoder` reads markers from the source buffer.
-2. Frame and scan parameters are parsed.
-3. `ScanDecoder` is initialized with the remaining bit-stream.
-4. For each sample:
-    - Predict next value -> Determine mode.
-    - Golomb decode error or run length.
-    - Reconstruct final pixel value.
-5. Decompressed pixels are written to the user-provided slice.
+### JPEG-LS Encoding
+1. User provides raw pixels → `JpeglsEncoder` writes markers.
+2. `ScanEncoder` processes line-by-line: predict → compute error → Golomb encode.
+3. Bit-stream packed with FF00 stuffing.
+
+### JPEG 1 Decoding (Baseline/Progressive)
+1. `Jpeg1Decoder` reads SOF0/SOF2/SOF3 → determines mode.
+2. For Progressive: accumulate coefficients in `coefficient_buffers` across scans.
+3. Apply IDCT → color conversion → output pixels.
+
+### JPEG 2000/HTJ2K Decoding
+1. `J2kDecoder` checks for JP2 container → extracts codestream.
+2. `J2kParser` parses main header (SIZ, COD, QCD, CAP).
+3. For each tile: `decode_tile_data` iterates packets in progression order (LRCP/RPCL).
+4. Block coder (MQ or HT) recovers coefficients → IDWT → output.
 
 ## Generic Sample Handling
-To avoid duplicating logic for 8-bit and 16-bit images, the library relies on the `JpeglsSample` trait:
+The `JpeglsSample` trait enables efficient handling of 8-bit and 16-bit samples:
 - Defines numerical operations and conversions.
-- Specializes certain edge-case math for different bit-depths.
-- Allows the compiler to generate optimized machine code for both cases while maintaining a single implementation.
+- Allows compiler to generate optimized code for both bit depths.

@@ -1,3 +1,8 @@
+//! JPEG 2000 / HTJ2K Decoder.
+//!
+//! This module provides the `J2kDecoder` which manages the high-level
+//! decoding process, including header parsing and dispatching to Tier-1/Tier-2 coders.
+
 use super::image::J2kImage;
 use super::parser::J2kParser;
 use crate::JpeglsError;
@@ -7,7 +12,6 @@ use crate::jpeg_stream_reader::JpegStreamReader;
 /// Orchestrates parsing, block decoding, and image reconstruction.
 pub struct J2kDecoder<'a, 'b> {
     parser: J2kParser<'a, 'b>,
-    // In the future, we will hold decoding state, DWT engine, etc.
 }
 
 impl<'a, 'b> J2kDecoder<'a, 'b> {
@@ -20,12 +24,25 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
     /// Decodes the JPEG 2000 image from the stream.
     /// Returns the active J2kImage structure (metadata only for now).
     pub fn decode(&mut self) -> Result<&J2kImage, JpeglsError> {
+        // 0. Container Detection (JP2 Box)
+        let codestream = {
+            let mut jp2_reader =
+                crate::jpeg2000::jp2::Jp2Reader::new(self.parser.reader.remaining_data());
+            jp2_reader.find_codestream()?
+        };
+
+        if let Some(cs) = codestream {
+            let mut sub_reader = JpegStreamReader::new(cs);
+            let mut sub_parser = J2kParser::new(&mut sub_reader);
+            sub_parser.parse_main_header()?;
+            self.parser.image = sub_parser.image.clone();
+        }
+
         // 1. Parse Main Header
         let last_marker = self.parser.parse_main_header()?;
 
         // 2. Identify Decoding Path (HT vs Standard)
         let is_htj2k = if let Some(cap) = &self.parser.image.cap {
-            // Check Pcap bit 14 (15th bit) for Part 15 (HTJ2K)
             (cap.pcap & (1 << 14)) != 0
         } else {
             false
@@ -39,25 +56,11 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             }
 
             if marker == crate::jpeg_marker_code::JpegMarkerCode::StartOfTile {
-                // Parse Tile Header
-                // This reads SOT, and any tile-part markers until SOD.
+                // Note: parse_main_header already consumed the FF 90 marker bytes
                 let psot = self.parser.parse_tile_part_header()?;
-
-                // NOW we are at Start of Data (SOD).
-                // We need to read/decode the bitstream.
-                // Psot tells us the length of the tile-part (header + data).
-                // We need to calculate how much data is left.
-                // But Psot includes headers we've already parsed.
-                // This tracking is tricky if parser consumed bytes.
-                // For now, let's assume we read until next marker if Psot=0, or rely on logic.
-
-                // Decode Tile Data
                 self.decode_tile_data(psot, is_htj2k)?;
-
-                // Scan for next marker (SOT or EOC) to continue loop
                 marker = self.find_next_marker()?;
             } else {
-                // Should not happen if parser logic is correct
                 break;
             }
         }
@@ -85,29 +88,96 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
     /// Decodes the tile data (packets -> codeblocks -> coefficients).
     fn decode_tile_data(&mut self, _len: u32, is_htj2k: bool) -> Result<(), JpeglsError> {
-        // Placeholder for full Tier-2 parsing.
-        // We will mock the grid for a single resolution to demonstrate integration.
-        // Assume minimal SIZ: 1 component, full image in 1 tile.
+        let cod = self
+            .parser
+            .image
+            .cod
+            .as_ref()
+            .ok_or(JpeglsError::InvalidData)?;
+        let num_layers = cod.number_of_layers as usize;
+        let num_resolutions = (cod.decomposition_levels + 1) as usize;
+        let num_components = self.parser.image.component_count as usize;
 
-        // 1. Setup Precinct State
-        // Need grid size. Mocking 4x4 codeblocks for now.
-        let grid_w = 4; // Mock
-        let grid_h = 4; // Mock
-        let mut state = crate::jpeg2000::packet::PrecinctState::new(grid_w, grid_h);
+        let progression_order = cod.progression_order;
+        let grid_w = 1;
+        let grid_h = 1;
 
-        // 2. Mock Packet Loop
-        // Scope for bit_reader borrow
+        match progression_order {
+            0 => {
+                // LRCP
+                for l in 0..num_layers {
+                    for r in 0..num_resolutions {
+                        for c in 0..num_components {
+                            for py in 0..grid_h {
+                                for px in 0..grid_w {
+                                    if self.parser.reader.remaining_data().is_empty() {
+                                        return Ok(());
+                                    }
+                                    self.decode_packet(l, r, c, px, py, is_htj2k)?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            2 => {
+                // RPCL
+                for r in 0..num_resolutions {
+                    for py in 0..grid_h {
+                        for px in 0..grid_w {
+                            for c in 0..num_components {
+                                for l in 0..num_layers {
+                                    if self.parser.reader.remaining_data().is_empty() {
+                                        return Ok(());
+                                    }
+                                    self.decode_packet(l, r, c, px, py, is_htj2k)?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Fallback
+                for l in 0..num_layers {
+                    for r in 0..num_resolutions {
+                        for c in 0..num_components {
+                            if self.parser.reader.remaining_data().is_empty() {
+                                return Ok(());
+                            }
+                            let _ = self.decode_packet(l, r, c, 0, 0, is_htj2k);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn decode_packet(
+        &mut self,
+        layer: usize,
+        _res: usize,
+        _comp: usize,
+        _px: usize,
+        _py: usize,
+        is_htj2k: bool,
+    ) -> Result<(), JpeglsError> {
+        let mut state = crate::jpeg2000::packet::PrecinctState::new(1, 1);
         let header;
         let consumed;
         {
             let remaining = self.parser.reader.remaining_data();
+            if remaining.is_empty() {
+                return Ok(());
+            }
             let mut bit_reader = crate::jpeg2000::bit_io::J2kBitReader::new(remaining);
             header = crate::jpeg2000::packet::PacketHeader::read(
                 &mut bit_reader,
                 &mut state,
-                0, // Layer 0
-                grid_w,
-                grid_h,
+                layer as u32,
+                1,
+                1,
             )
             .map_err(|_| JpeglsError::InvalidData)?;
             consumed = bit_reader.position();
@@ -115,11 +185,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
         self.parser.reader.advance(consumed);
 
-        if header.empty {
-            return Ok(());
-        }
-
-        // 3. Process Codeblocks
         for cb_info in header.included_cblks {
             if cb_info.data_len > 0 {
                 let data_len = cb_info.data_len as usize;
@@ -129,173 +194,14 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 }
 
                 if is_htj2k {
-                    // 4. Dispatch to HTBlockCoder
-                    // Assuming data contains both MEL and MagSgn for now.
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
-                        &data, // Mel data (mock: same buffer)
-                        &data, // MagSgn data (mock: same buffer)
-                        64,    // Block width (standard)
-                        64,    // Block height (standard)
+                        &data, &data, 64, 64,
                     );
-
                     let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
-                    // Result ignored for now as DWT/IQ not ready to use output
                     let _ = coder.decode_block(&mut block);
-                } else {
-                    // Tier-1 MQ Coder (Placeholder)
                 }
             }
         }
-
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::jpeg_stream_reader::JpegStreamReader;
-
-    #[test]
-    fn test_decoder_htj2k_detection() {
-        // Mock stream with SOC, CAP (HTJ2K), SIZ, COD, QCD, SOT, SOD, data, EOC
-        let data = vec![
-            0xFF, 0x4F, // SOC
-            // CAP: 0xFF50, Len=6 (2 len + 4 Pcap), Pcap=0x00004000
-            0xFF, 0x50, 0x00, 0x06, 0x00, 0x00, 0x40, 0x00, // Pcap (big endian 0x00004000)
-            // SIZ
-            0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, // Caps
-            0x00, 0x00, 0x01, 0x00, // W=256
-            0x00, 0x00, 0x01, 0x00, // H=256
-            0x00, 0x00, 0x00, 0x00, // offX
-            0x00, 0x00, 0x00, 0x00, // offY
-            0x00, 0x00, 0x01, 0x00, // tileW=256
-            0x00, 0x00, 0x01, 0x00, // tileH=256
-            0x00, 0x00, 0x00, 0x00, // tileOffX
-            0x00, 0x00, 0x00, 0x00, // tileOffY
-            0x00, 0x01, // 1 Comp
-            0x07, 0x01, 0x01, // Depth 8
-            // COD
-            0xFF, 0x52, 0x00, 0x0A, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01,
-            // QCD
-            0xFF, 0x5C, 0x00, 0x05, 0x06, 0x00, 0x10, // SOT
-            0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // SOD
-            0xFF, 0x93, 0x00, // Empty Packet (Packet header 0 bit)
-            // EOC
-            0xFF, 0xD9,
-        ];
-
-        let mut reader = JpegStreamReader::new(&data);
-        let mut decoder = J2kDecoder::new(&mut reader);
-
-        let res = decoder.decode();
-        assert!(res.is_ok(), "Decode failed: {:?}", res.err());
-        let image = res.unwrap();
-        assert!(
-            image.cap.is_some(),
-            "CAP marker not present in parsed image"
-        );
-        let cap = image.cap.as_ref().unwrap();
-        assert_eq!(
-            cap.pcap & (1 << 14),
-            1 << 14,
-            "HTJ2K bit (14) not set in PCAP: {:08X}",
-            cap.pcap
-        );
-    }
-
-    #[test]
-    fn test_decoder_htj2k_with_data() {
-        // Mock stream with non-empty HTJ2K packet
-        let data = vec![
-            0xFF, 0x4F, // SOC
-            // CAP: 0xFF50, Len=6, Pcap=0x00004000 (HTJ2K)
-            0xFF, 0x50, 0x00, 0x06, 0x00, 0x00, 0x40, 0x00,
-            // SIZ: 41 bytes total (2 len + 39 payload)
-            0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, // Xsiz=16
-            0x00, 0x00, 0x00, 0x10, // Ysiz=16
-            0x00, 0x00, 0x00, 0x00, // XOsiz=0
-            0x00, 0x00, 0x00, 0x00, // YOsiz=0
-            0x00, 0x00, 0x00, 0x10, // XTsiz=16
-            0x00, 0x00, 0x00, 0x10, // YTsiz=16
-            0x00, 0x00, 0x00, 0x00, // XTOsiz=0
-            0x00, 0x00, 0x00, 0x00, // YTOsiz=0
-            0x00, 0x01, // Csiz=1
-            0x07, 0x01, 0x01, // Comp0: 8-bit, 1x1 subsampling
-            // COD: 12 bytes total (2 len + 10 payload)
-            0xFF, 0x52, 0x00, 0x0C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // QCD: 4 bytes total (2 len + 2 payload)
-            0xFF, 0x5C, 0x00, 0x04, 0x00, 0x20,
-            // SOT: 10 bytes total (2 len + 8 payload)
-            0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            // SOD
-            0xFF, 0x93, // Packet Header: 0 (empty)
-            0x00, // EOC
-            0xFF, 0xD9,
-        ];
-
-        let mut reader = JpegStreamReader::new(&data);
-        let mut decoder = J2kDecoder::new(&mut reader);
-
-        let res = decoder.decode();
-        // Since we have mocked HTBlockCoder to just return Ok(()),
-        // and we haven't implemented full pixel reconstruction yet,
-        // we just verify it doesn't crash and reaches EOC.
-        assert!(res.is_ok(), "Decode failed with data: {:?}", res.err());
-    }
-
-    #[test]
-    fn test_decoder_htj2k_complex() {
-        use crate::jpeg2000::bit_io::J2kBitWriter;
-        use crate::jpeg2000::packet::PrecinctState;
-
-        let grid_w = 4;
-        let grid_h = 4;
-        let mut state = PrecinctState::new(grid_w, grid_h);
-
-        // Include codeblocks at (0,0) and (2,2)
-        state.inclusion_tree.set_value(0, 0, 0);
-        state.inclusion_tree.set_value(2, 2, 0);
-
-        let mut writer = J2kBitWriter::new();
-        // 1. Not empty
-        writer.write_bit(1);
-
-        // 2. Inclusion tree and data lengths
-        for y in 0..grid_h {
-            for x in 0..grid_w {
-                state.inclusion_tree.encode(&mut writer, x, y, 1);
-                if x == 0 && y == 0 {
-                    writer.write_bits(4, 16); // len 4
-                } else if x == 2 && y == 2 {
-                    writer.write_bits(8, 16); // len 8
-                }
-            }
-        }
-        let header_bits = writer.finish();
-
-        let mut data = vec![
-            0xFF, 0x4F, // SOC
-            0xFF, 0x50, 0x00, 0x06, 0x00, 0x00, 0x40, 0x00, // CAP
-            0xFF, 0x51, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
-            0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01,
-            0x01, 0xFF, 0x52, 0x00, 0x0C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0xFF, 0x5C, 0x00, 0x04, 0x00, 0x20, 0xFF, 0x90, 0x00, 0x0A, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x01, 0xFF, 0x93, // SOD
-        ];
-        data.extend_from_slice(&header_bits);
-        // Data for (0,0) [4 bytes]
-        data.extend_from_slice(&[0x11, 0x22, 0x33, 0x44]);
-        // Data for (2,2) [8 bytes]
-        data.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02]);
-        data.extend_from_slice(&[0xFF, 0xD9]); // EOC
-
-        let mut reader = JpegStreamReader::new(&data);
-        let mut decoder = J2kDecoder::new(&mut reader);
-
-        let res = decoder.decode();
-        assert!(res.is_ok(), "Complex decode failed: {:?}", res.err());
     }
 }

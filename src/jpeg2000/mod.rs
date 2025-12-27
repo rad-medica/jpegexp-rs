@@ -18,6 +18,7 @@ pub mod decoder;
 pub mod dwt;
 pub mod ht_block_coder;
 pub mod image;
+pub mod jp2;
 pub mod mq_coder;
 pub mod packet;
 pub mod parser;
