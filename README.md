@@ -1,147 +1,118 @@
 # jpegexp-rs
 
-**jpegexp-rs** is a high-performance, pure Rust "Universal JPEG" library. It provides native support for several JPEG standards, starting with a comprehensive port of the CharLS JPEG-LS implementation.
+`jpegexp-rs` is a high-performance, pure Rust library for encoding and decoding various JPEG standards.
+It provides a unified, memory-safe interface for JPEG-LS, JPEG 1, JPEG 2000, and HTJ2K.
 
-## Project Vision
+## Supported Standards
 
-The goal of `jpegexp-rs` is to become a single, safe, and efficient library for all common JPEG variants used in medical imaging (DICOM), geospatial data, and professional photography.
+*   **JPEG-LS (ISO/IEC 14495-1)**: Lossless and near-lossless compression. Supports Grayscale and RGB (via Planar or Interleaved encoding).
+*   **JPEG 1 (ISO/IEC 10918-1)**: Classic baseline JPEG (DCT/Huffman).
+*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. Supports Reversible (Lossless) and Irreversible (Lossy) transforms, and Multi-Component Transforms (MCT).
+*   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000.
 
-### Roadmap
+## Installation
 
-- **Phase 1: JPEG-LS** (ISO/IEC 14495-1) - **Completed**
-- **Phase 2: JPEG 1** (ISO/IEC 10918-1) - **Completed**
-  - Baseline DCT support (8-bit, interleaved/non-interleaved)
-  - **Progressive Mode** support (spectral selection + successive approximation)
-  - **Lossless Mode (Process 14)** with predictors 1-7
-  - Huffman coding, DQT/DHT/SOF0/SOF2/SOF3/SOS, Restart Markers
-- **Phase 3: JPEG 2000** (ISO/IEC 15444-1) - **Completed**
-  - Tier-1 Coding: MQ Coder, Context Modeling (Bitplane Coding)
-  - Tier-2 Coding: Tag Trees, Packet Header Parsing/Writing
-  - Codestream: SOC, SIZ, COD, QCD, SOT, SOD, EOC
-  - Wavelet Transform: DWT/IDWT 5-3 and 9-7
-  - **JP2 Container Support** (box parsing, codestream extraction)
-  - **LRCP/RPCL Progression Orders**
-- **Phase 4: HTJ2K** (ISO/IEC 15444-15) - **Completed**
-  - High-Throughput block coder (Cleanup, SigProp, MagRef passes)
-  - CAP marker parsing and HT coder selection
-
-## Core Features
-
-- **Pure Rust**: Zero unsafe code in the core logic, ensuring memory safety.
-- **JPEG-LS Support**: Lossless and near-lossless, 2-16 bit depths, SPIFF headers.
-- **JPEG 1 Support**: Baseline, Progressive, and Lossless modes.
-- **JPEG 2000/HTJ2K Support**: Full codestream parsing, DWT, and block coding.
-- **Generic Pixel API**: Uses Rust traits to handle `u8` and `u16` samples.
-
-## Getting Started
-
-### Installation
+Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 jpegexp-rs = "0.1.0"
 ```
 
-### JPEG-LS Decoding
+## Usage Examples
+
+### Decoding an Image
 
 ```rust
-use jpegexp_rs::jpegls::JpeglsDecoder;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let source_data = std::fs::read("image.jls")?;
-    let mut decoder = JpeglsDecoder::new(&source_data);
-    decoder.read_header()?;
-    let info = decoder.frame_info();
-    let mut destination = vec![0u8; (info.width * info.height) as usize];
-    decoder.decode(&mut destination)?;
-    Ok(())
-}
-```
-
-### JPEG 1 Decoding (Baseline/Progressive)
-
-```rust
-use jpegexp_rs::jpeg1::Jpeg1Decoder;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let source_data = std::fs::read("image.jpg")?;
-    let mut decoder = Jpeg1Decoder::new(&source_data);
-    decoder.read_header()?;
-    // Decode to RGB buffer...
-    Ok(())
-}
-```
-
-### HTJ2K Decoding
-
-```rust
-use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
+use jpegexp_rs::jpegls::JpeglsDecoder;
+use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let source_data = std::fs::read("image.jph")?;  // or .jp2
-    let mut reader = JpegStreamReader::new(&source_data);
-    let mut decoder = J2kDecoder::new(&mut reader);
-    let image = decoder.decode()?;
-    println!("Image: {}x{}", image.width, image.height);
-    Ok(())
+fn decode(data: &[u8]) -> Vec<u8> {
+    if data.starts_with(&[0xFF, 0xD8]) {
+        // JPEG 1
+        let mut decoder = jpegexp_rs::jpeg1::decoder::Jpeg1Decoder::new(data);
+        decoder.read_header().unwrap();
+        let mut pixels = vec![0u8; (decoder.width * decoder.height * decoder.components as u32) as usize];
+        decoder.decode(&mut pixels).unwrap();
+        pixels
+    } else if data.starts_with(&[0xFF, 0x4F]) {
+        // JPEG 2000
+        let mut reader = JpegStreamReader::new(data);
+        let mut decoder = J2kDecoder::new(&mut reader);
+        let image = decoder.decode().unwrap();
+        image.reconstruct_pixels().unwrap()
+    } else {
+        // JPEG-LS
+        let mut decoder = JpeglsDecoder::new(data);
+        decoder.read_header().unwrap();
+        let info = decoder.frame_info();
+        let mut pixels = vec![0u8; (info.width * info.height * info.component_count as u32) as usize];
+        decoder.decode(&mut pixels).unwrap();
+        pixels
+    }
 }
 ```
 
-## Architecture
+### Encoding JPEG-LS
 
-The library is divided into several logical layers:
+```rust
+use jpegexp_rs::{FrameInfo, jpegls::JpeglsEncoder};
 
-1. **Public API**: High-level interfaces for each JPEG standard.
-2. **Stream Management**: Handles marker segments and byte-level I/O.
-3. **Transform Logic**: DCT/IDCT, DWT/IDWT, quantization.
-4. **Entropy Coding**: Huffman, MQ, Golomb-Rice, HT block coder.
+fn encode_jpegls(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut buffer = vec![0u8; pixels.len() * 2]; // Allocate sufficient buffer
+    let mut encoder = JpeglsEncoder::new(&mut buffer);
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed module descriptions.
+    let info = FrameInfo {
+        width,
+        height,
+        bits_per_sample: 8,
+        component_count: 3, // RGB
+    };
+    encoder.set_frame_info(info).unwrap();
 
-## API Bindings
+    // For RGB, the encoder uses Planar mode (3 scans) by default for compatibility.
+    // Ensure your pixels are interleaved (RGBRGB...) as the encoder handles de-interleaving if needed.
+    let len = encoder.encode(pixels).unwrap();
 
-### CLI
-
-```powershell
-cargo run --bin jpegexp -- decode -i image.jpg -o output.raw
-cargo run --bin jpegexp -- encode -i pixels.raw -o image.jls -w 512 -H 512 -c jpegls
-cargo run --bin jpegexp -- transcode -i image.jpg -o image.jls -c jpegls
-cargo run --bin jpegexp -- info -i image.j2k
-cargo run --bin jpegexp -- list
+    buffer.truncate(len);
+    buffer
+}
 ```
 
-### WASM (JavaScript)
+## Python Bindings
 
-```javascript
-import init, { decode_jpeg, encode_jpeg, get_image_info } from "./jpegexp.js";
-await init();
-const pixels = decode_jpeg(jpegData);
-const info = get_image_info(data);
+This library includes Python bindings via `pyo3`.
+
+```bash
+cd python
+maturin develop
 ```
-
-### C API
-
-```c
-#include "jpegexp.h"
-JpegExpDecoder* dec = jpegexp_decoder_new(data, len);
-jpegexp_decoder_read_header(dec, &info);
-jpegexp_decoder_decode(dec, output, output_len);
-jpegexp_decoder_free(dec);
-```
-
-### Python
 
 ```python
 import jpegexp
-info = jpegexp.get_info(data)
-pixels = jpegexp.decode(data)
-encoded = jpegexp.encode_jpeg(pixels, width, height, components)
-transcoded = jpegexp.transcode(data, "jpegls")
+
+# Decode
+pixels = jpegexp.decode(jpeg_bytes)
+info = jpegexp.get_info(jpeg_bytes)
+print(f"Image: {info.width}x{info.height} {info.format}")
+
+# Encode
+jls_bytes = jpegexp.encode_jpegls(raw_pixels, width, height, components=3)
 ```
 
-## License
+## CLI Utility
 
-MIT License - © 2024 [Rad Medica](https://github.com/rad-medica)
+The crate provides a CLI tool `jpegexp`.
 
-See [LICENSE](LICENSE) for details.
+```bash
+cargo run --release --bin jpegexp -- help
+```
+
+Commands:
+*   `decode`: Decode a JPEG/JLS/J2K file to raw pixel data.
+*   `encode`: Encode raw pixel data to JPEG/JLS/J2K.
+
+## Compliance
+
+See [COMPLIANCE.md](COMPLIANCE.md) for details on conformance testing against standard reference implementations like `libjpeg-turbo`, `CharLS`, and `OpenJPEG`.
