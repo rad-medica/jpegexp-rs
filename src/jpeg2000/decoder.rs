@@ -180,7 +180,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         parser: &mut J2kParser,
         _len: u32,
         isot: u16,
-        is_htj2k: bool,
+        _is_htj2k: bool,
         tile_states: &mut Vec<TileState>,
     ) -> Result<(), JpeglsError> {
         let tile_idx = isot as usize;
@@ -198,13 +198,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             .as_ref()
             .ok_or(JpeglsError::InvalidData)?
             .clone();
-        let num_layers = cod.number_of_layers as usize;
+        let _num_layers = cod.number_of_layers as usize;
         let num_resolutions = (cod.decomposition_levels + 1) as usize;
         let num_components = parser.image.component_count as usize;
 
-        let progression_order = cod.progression_order;
-        let cb_w = 1 << (cod.codeblock_width_exp + 2);
-        let cb_h = 1 << (cod.codeblock_height_exp + 2);
+        let _progression_order = cod.progression_order;
+        let _cb_w = 1 << (cod.codeblock_width_exp + 2);
+        let _cb_h = 1 << (cod.codeblock_height_exp + 2);
 
         // Coordinate calculation logic based on ISO/IEC 15444-1 Annex B
         // 1. Determine Tile Grid indices (p, q)
@@ -413,11 +413,11 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 // Read strict
                                 let marker = parser.reader.read_u16().unwrap_or(0);
                                 if marker == 0xFF91 {
-                                    eprintln!("DEBUG: Found SOP marker at {}", pos);
+                                    // eprintln!("DEBUG: Found SOP marker at {}", pos);
                                     let _lsop = parser.reader.read_u16().unwrap_or(0);
                                     let _nsop = parser.reader.read_u16().unwrap_or(0);
                                 } else {
-                                    eprintln!("DEBUG: Expected SOP at {}, got {:04X}", pos, marker);
+                                    // eprintln!("DEBUG: Expected SOP at {}, got {:04X}", pos, marker);
                                     return Err(JpeglsError::InvalidData);
                                 }
                             }
@@ -456,15 +456,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 // EPH Marker Handling
                                 if (cod.coding_style & 0x04) != 0 {
                                     // EPH: FF 92 (2 bytes)
-                                    let pos = parser.reader.position();
                                     let marker = parser.reader.read_u16().unwrap_or(0);
                                     if marker == 0xFF92 {
-                                        eprintln!("DEBUG: Found EPH marker at {}", pos);
+                                        // eprintln!("DEBUG: Found EPH marker at {}", pos);
                                     } else {
-                                        eprintln!(
-                                            "DEBUG: Expected EPH at {}, got {:04X}",
-                                            pos, marker
-                                        );
                                         // If EPH is mandatory and missing, error.
                                         return Err(JpeglsError::InvalidData);
                                     }
@@ -599,21 +594,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     } else {
                         guard_bits + epsilon_b - 1
                     };
-                    eprintln!(
-                        "DEBUG: Res={} Sub={} Trans={} Style={:02X} G={} Epsilon={} Depth={} M_b={}",
-                        res,
-                        subband_idx,
-                        cod.transformation,
-                        qcd.quant_style,
-                        guard_bits,
-                        epsilon_b,
-                        if comp < parser.image.components.len() {
-                            parser.image.components[comp].depth
-                        } else {
-                            0
-                        },
-                        m_b
-                    );
                     let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);
 
                     let cb_idx = subband
@@ -623,10 +603,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                     if let Some(idx) = cb_idx {
                         let block = &mut subband.codeblocks[idx];
-                        eprintln!(
-                            "DEBUG: Update Block ({}, {}) Passes: {}",
-                            block.x, block.y, cb_info.num_passes
-                        );
                         block.layer_data.push(data.clone());
                         block.layers_decoded = (layer + 1) as u8;
 
@@ -658,11 +634,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         block.layers_decoded = (layer + 1) as u8;
                         block.coding_passes = 0;
 
-                        eprintln!(
-                            "DEBUG: New Block ({}, {}) Passes={} MaxBP={}",
-                            block.x, block.y, cb_info.num_passes, max_bit_plane
-                        );
-
                         let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
                             cb_width as u32,
                             cb_height as u32,
@@ -687,7 +658,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
     fn calculate_grid_dimensions(
         parser: &J2kParser,
-        comp: usize,
+        _comp: usize,
         res: usize,
         cod: &crate::jpeg2000::image::J2kCod,
     ) -> Result<(u32, u32), JpeglsError> {
@@ -725,13 +696,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         Ok((grid_w, grid_h))
     }
 
-    fn calculate_precinct_cb_dimensions(
-        parser: &J2kParser,
-        comp: usize,
-        res: usize,
-        px: u32,
-        py: u32,
-        cod: &crate::jpeg2000::image::J2kCod,
+    fn _calculate_precinct_cb_dimensions(
+        _parser: &J2kParser,
+        _comp: usize,
+        _res: usize,
+        _px: u32,
+        _py: u32,
+        _cod: &crate::jpeg2000::image::J2kCod,
     ) -> Result<(usize, usize), JpeglsError> {
         Ok((1, 1))
     }

@@ -39,24 +39,12 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 }
             }
             let b1 = self.reader.read_u8()?;
-            eprintln!(
-                "DEBUG: J2K Loop b1={:02X} at {}",
-                b1,
-                self.reader.position()
-            );
             if b1 != 0xFF {
-                eprintln!("DEBUG: Expected 0xFF, got {:02X}", b1);
+                // eprintln!("DEBUG: Expected 0xFF, got {:02X}", b1);
                 return Err(JpeglsError::InvalidData);
             }
             let b2 = self.reader.read_u8()?;
-            eprintln!("DEBUG: J2K Loop b2={:02X}", b2);
             let marker = JpegMarkerCode::try_from(b2)?;
-            eprintln!(
-                "DEBUG: J2K Parse Marker: {:?} ({:02X}) at {}",
-                marker,
-                b2,
-                self.reader.position()
-            );
 
             match marker {
                 JpegMarkerCode::ImageAndTileSize => self.parse_siz()?,
@@ -64,7 +52,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 JpegMarkerCode::QuantizationDefault => self.parse_qcd()?,
                 JpegMarkerCode::StartOfTile => {
                     // SOT indicates end of main header
-                    eprintln!("DEBUG: parse_main_header FOUND SOT - Breaking Loop");
+                    // eprintln!("DEBUG: parse_main_header FOUND SOT - Breaking Loop");
                     return Ok(JpegMarkerCode::StartOfTile);
                 }
                 JpegMarkerCode::Capability => self.parse_cap()?,
@@ -105,16 +93,12 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         self.image.component_count = comps as u32;
 
         // Components info follows... (Precision, Subsamp) - Skip for now or store
-        for c in 0..comps {
+        for _c in 0..comps {
             let depth_byte = self.reader.read_u8()?;
             let depth = (depth_byte & 0x7F) + 1;
             let is_signed = (depth_byte & 0x80) != 0;
             let sub_x = self.reader.read_u8()?;
             let sub_y = self.reader.read_u8()?;
-            eprintln!(
-                "DEBUG: Component {} Depth={} Signed={} Sub=({},{})",
-                c, depth, is_signed, sub_x, sub_y
-            );
             self.image.components.push(J2kComponentInfo {
                 depth,
                 is_signed,
@@ -135,7 +119,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             return Err(JpeglsError::InvalidData);
         }
         let scod = self.reader.read_u8()?; // coding style flags
-        eprintln!("DEBUG: parse_cod scod={:02X}", scod);
         let sprog = self.reader.read_u8()?; // progression order
         let nlayers = self.reader.read_u16()?; // number of layers
         let mct = self.reader.read_u8()?; // multi-component transform flag
@@ -181,12 +164,12 @@ impl<'a, 'b> J2kParser<'a, 'b> {
     pub fn parse_qcd(&mut self) -> Result<(), JpeglsError> {
         // QCD marker parsing
         let len = self.reader.read_u16()?;
-        eprintln!("DEBUG: parse_qcd len={}", len);
+        // eprintln!("DEBUG: parse_qcd len={}", len);
         if len < 3 {
             return Err(JpeglsError::InvalidData);
         }
         let sqcd = self.reader.read_u8()?; // quantization style flags
-        eprintln!("DEBUG: parse_qcd sqcd={:02X}", sqcd);
+        // eprintln!("DEBUG: parse_qcd sqcd={:02X}", sqcd);
 
         // Remaining in the marker segment
         // len includes 2 bytes for len.
@@ -211,10 +194,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             step_sizes.push(step);
             bytes_left -= step_size_len as usize;
         }
-        eprintln!(
-            "DEBUG: parse_qcd steps={:?} leftover={}",
-            step_sizes, bytes_left
-        );
         // Skip any leftover bytes (e.g. if odd length, though unlikely for u16 steps)
         if bytes_left > 0 {
             self.reader.advance(bytes_left);
@@ -289,10 +268,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
     /// - Isot: Tile index.
     pub fn parse_tile_part_header(&mut self) -> Result<(u32, u16), JpeglsError> {
         // Assume SOT marker (FF90) has been consumed (or we are inside SOT segment).
-        eprintln!(
-            "DEBUG: parse_tile_part_header entry pos={}",
-            self.reader.position()
-        );
 
         let _lsot = self.reader.read_u16()?;
         let isot = self.reader.read_u16()?;
@@ -300,30 +275,30 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let _tpsot = self.reader.read_u8()?;
         let _tnsot = self.reader.read_u8()?;
 
-        eprintln!("DEBUG: SOT isot={} psot={}", isot, psot);
+        // eprintln!("DEBUG: SOT isot={} psot={}", isot, psot);
 
         // Loop for other markers until SOD
         loop {
             // Check for potential markers
             if self.reader.remaining_data().len() < 2 {
-                eprintln!("DEBUG: SOT Loop EOF");
+                // eprintln!("DEBUG: SOT Loop EOF");
                 return Err(JpeglsError::InvalidData);
             }
 
             let b1 = self.reader.read_u8()?;
             if b1 != 0xFF {
-                eprintln!("DEBUG: SOT Loop expected FF, got {:02X}", b1);
+                // eprintln!("DEBUG: SOT Loop expected FF, got {:02X}", b1);
                 return Err(JpeglsError::InvalidData);
             }
             let b2 = self.reader.read_u8()?;
             if b2 == 0x93 {
                 // SOD
-                eprintln!("DEBUG: Found SOD");
+                // eprintln!("DEBUG: Found SOD");
                 break;
             }
 
             let marker = JpegMarkerCode::try_from(b2)?;
-            eprintln!("DEBUG: Tile Marker {:?} ({:02X})", marker, b2);
+            // eprintln!("DEBUG: Tile Marker {:?} ({:02X})", marker, b2);
 
             match marker {
                 JpegMarkerCode::CodingStyleDefault => self.parse_cod()?,
@@ -524,9 +499,9 @@ mod tests {
             0x00, // transformation
             // QCD marker
             0xFF, 0x5C, // QCD
-            0x00, 0x05, // length 5
+            0x00, 0x04, // length 4
             0x06, // sqcd
-            0x00, 0x10, // step size
+            0x10, // step size
             // SOT marker
             0xFF, 0x90, // SOT
             0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

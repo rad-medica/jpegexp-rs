@@ -49,7 +49,7 @@ impl J2kEncoder {
     /// Encode pixel data to JPEG 2000 codestream
     pub fn encode(
         &mut self,
-        pixels: &[u8],
+        _pixels: &[u8],
         frame_info: &FrameInfo,
         destination: &mut [u8],
     ) -> Result<usize, JpeglsError> {
@@ -163,7 +163,7 @@ impl J2kEncoder {
     }
 
     /// Encode a single component
-    fn encode_component(
+    fn _encode_component(
         &mut self,
         _writer: &mut J2kWriter,
         pixels: &[u8],
@@ -177,11 +177,11 @@ impl J2kEncoder {
         // Apply 2D DWT (simplified: single level for now)
         if self.use_irreversible {
             // Use 9-7 transform
-            self.apply_dwt_2d_97(&mut image_data, width, height)?;
+            self._apply_dwt_2d_97(&mut image_data, width, height)?;
         } else {
             // Use 5-3 transform (convert to i32 first)
             let mut int_data: Vec<i32> = pixels.iter().map(|&p| p as i32).collect();
-            self.apply_dwt_2d_53(&mut int_data, width, height)?;
+            self._apply_dwt_2d_53(&mut int_data, width, height)?;
             image_data = int_data.iter().map(|&x| x as f32).collect();
         }
 
@@ -206,7 +206,7 @@ impl J2kEncoder {
     }
 
     /// Apply 2D DWT using 9-7 filter
-    fn apply_dwt_2d_97(
+    fn _apply_dwt_2d_97(
         &self,
         data: &mut [f32],
         width: usize,
@@ -239,7 +239,7 @@ impl J2kEncoder {
     }
 
     /// Apply 2D DWT using 5-3 filter
-    fn apply_dwt_2d_53(
+    fn _apply_dwt_2d_53(
         &self,
         data: &mut [i32],
         width: usize,

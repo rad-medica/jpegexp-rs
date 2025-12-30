@@ -30,8 +30,8 @@ pub struct PrecinctState {
 }
 
 impl PrecinctState {
-    pub fn new(w: usize, h: usize) -> Self {
-        let mut subbands = Vec::with_capacity(3);
+    pub fn new(_w: usize, _h: usize) -> Self {
+        let subbands = Vec::with_capacity(3);
         Self { subbands }
     }
 
@@ -70,10 +70,6 @@ impl PacketHeader {
         grid_height: usize,
         num_subbands: usize,
     ) -> Result<Self, ()> {
-        eprintln!(
-            "DEBUG: PacketHeader::read layer={}, res_subbands={}",
-            layer, num_subbands
-        );
         let mut header = PacketHeader {
             packet_seq_num: 0,
             empty: false,
@@ -84,7 +80,7 @@ impl PacketHeader {
         // 1. Zero-length packet bit
         let bit = reader.read_bit()?;
         if bit == 0 {
-            eprintln!("DEBUG: Packet Empty bit=0");
+            // eprintln!("DEBUG: Packet Empty bit=0");
             header.empty = true;
             return Ok(header);
         }
@@ -120,7 +116,22 @@ impl PacketHeader {
                     }
 
                     if process_block {
-                        eprintln!("DEBUG: CB {},{} included in subband {}", x, y, s);
+                        /*
+                        eprintln!(
+                            "DEBUG: LBlock val={}, reading {} bits. New LBlock={}",
+                            lbits - 3, lbits,
+                            state.lblock[s][cb_idx]
+                        );
+                        */
+                        /*
+                        eprintln!("DEBUG: LBlock val={}, reading {} bits", lbits - 3, lbits);
+                        */
+                        /*
+                        eprintln!(
+                            "DEBUG: CB {},{} included in subband {}",
+                            x, y, s
+                        );
+                        */
 
                         // Decode Zero Bit Planes
                         // Only present if this is the first time included
@@ -136,13 +147,8 @@ impl PacketHeader {
                         // Decode LBlock parameter with arbitrary threshold (32)
                         let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
                         let lbits = subband_state.lblock_tree.get_current_value(x, y) + 3;
-                        eprintln!("DEBUG: LBlock val={}, reading {} bits", lbits - 3, lbits);
 
                         let data_len = reader.read_bits(lbits as u8)?;
-                        eprintln!(
-                            "DEBUG: Data len read: {} (Passes: {}, ZBP: {})",
-                            data_len, num_passes, zero_bp
-                        );
 
                         header.included_cblks.push(CodeBlockInfo {
                             x,
@@ -164,26 +170,26 @@ impl PacketHeader {
     /// Reads the number of coding passes using J2K codeword table (Table B.4).
     fn read_coding_passes(reader: &mut J2kBitReader) -> Result<u8, ()> {
         if reader.read_bit()? == 0 {
-            eprintln!("DEBUG: passes codework 0 -> 1");
+            // eprintln!("DEBUG: passes codework 0 -> 1");
             return Ok(1);
         }
         if reader.read_bit()? == 0 {
-            eprintln!("DEBUG: passes codework 10 -> 2");
+            // eprintln!("DEBUG: passes codework 10 -> 2");
             return Ok(2);
         }
         let bits = reader.read_bits(2)?;
         if bits < 3 {
-            eprintln!("DEBUG: passes codeword 11{} -> {}", bits, 3 + bits);
+            // eprintln!("DEBUG: passes codeword 11{} -> {}", bits, 3 + bits);
             return Ok((3 + bits) as u8);
         }
         let bits = reader.read_bits(5)?;
         if bits < 31 {
-            eprintln!("DEBUG: passes codeword 1111{} -> {}", bits, 6 + bits);
+            // eprintln!("DEBUG: passes codeword 1111{} -> {}", bits, 6 + bits);
             return Ok((6 + bits) as u8);
         }
         // Extension: 32 + 5 bits... (Very rare for typical images)
         let bits2 = reader.read_bits(5)?;
-        eprintln!("DEBUG: passes codeword extension -> {}", 37 + bits2);
+        // eprintln!("DEBUG: passes codeword extension -> {}", 37 + bits2);
         Ok((37 + bits2) as u8)
     }
 

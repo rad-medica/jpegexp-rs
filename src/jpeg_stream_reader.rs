@@ -257,7 +257,7 @@ impl<'a> JpegStreamReader<'a> {
             self.position
         );
         if self.read_marker()? != JpegMarkerCode::StartOfScan {
-            eprintln!("DEBUG: SOS Marker NOT FOUND");
+            // eprintln!("DEBUG: SOS Marker NOT FOUND");
             return Err(JpeglsError::InvalidData);
         }
         let length = self.read_u16()?;
@@ -265,7 +265,7 @@ impl<'a> JpegStreamReader<'a> {
 
         let components_in_scan = self.read_u8()? as i32;
         consumed += 1;
-        eprintln!("DEBUG: SOS components_in_scan={}", components_in_scan);
+        // eprintln!("DEBUG: SOS components_in_scan={}", components_in_scan);
         for _ in 0..components_in_scan {
             let _id = self.read_u8()?;
             let _mapping = self.read_u8()?;
@@ -276,10 +276,10 @@ impl<'a> JpegStreamReader<'a> {
         let _point_transform = self.read_u8()?;
         consumed += 3;
 
-        eprintln!("DEBUG: SOS parsed. Len={} Consumed={}", length, consumed);
+        // eprintln!("DEBUG: SOS parsed. Len={} Consumed={}", length, consumed);
         if (length as i32) > consumed {
             let skip = (length as i32) - consumed;
-            eprintln!("DEBUG: SOS skipping {} bytes", skip);
+            // eprintln!("DEBUG: SOS skipping {} bytes", skip);
             self.advance(skip as usize);
         } else if (length as i32) < consumed {
             eprintln!(

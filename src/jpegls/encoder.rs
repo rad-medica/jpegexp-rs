@@ -66,7 +66,7 @@ impl<'a> JpeglsEncoder<'a> {
         // Fallback to Planar (None) if InterleaveMode is None but we have components > 1.
         let interleave_mode = self.interleave_mode;
 
-        let mut coding_parameters = CodingParameters {
+        let coding_parameters = CodingParameters {
             near_lossless: self.near_lossless,
             interleave_mode,
             restart_interval: 0,
@@ -91,7 +91,7 @@ impl<'a> JpeglsEncoder<'a> {
                 self.writer.write_start_of_scan_segment_planar(
                     c as u8 + 1, // Component ID (1-based)
                     self.near_lossless,
-                    InterleaveMode::None
+                    InterleaveMode::None,
                 )?;
 
                 // Extract component data
@@ -107,7 +107,13 @@ impl<'a> JpeglsEncoder<'a> {
                     for i in 0..pixel_count {
                         plane_data[i] = source[i * total_components + component_index];
                     }
-                    self.encode_scan_typed::<u8>(&plane_data, &frame_info, pc, coding_parameters, true)?;
+                    self.encode_scan_typed::<u8>(
+                        &plane_data,
+                        &frame_info,
+                        pc,
+                        coding_parameters,
+                        true,
+                    )?;
                 } else {
                     let (head, body, tail) = unsafe { source.align_to::<u16>() };
                     if !head.is_empty() || !tail.is_empty() {
@@ -118,7 +124,13 @@ impl<'a> JpeglsEncoder<'a> {
                     for i in 0..pixel_count {
                         plane_data[i] = body[i * total_components + component_index];
                     }
-                    self.encode_scan_typed::<u16>(&plane_data, &frame_info, pc, coding_parameters, true)?;
+                    self.encode_scan_typed::<u16>(
+                        &plane_data,
+                        &frame_info,
+                        pc,
+                        coding_parameters,
+                        true,
+                    )?;
                 }
             }
         } else {

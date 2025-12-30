@@ -118,7 +118,7 @@ impl Dwt53 {
         ll: &[i32],
         hl: &[i32],
         lh: &[i32],
-        hh: &[i32],
+        _hh: &[i32],
         width: u32,
         height: u32,
         output: &mut [i32],
