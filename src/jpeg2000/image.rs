@@ -265,15 +265,24 @@ impl J2kImage {
             if !is_reversible {
                 let qcd = self.qcd.as_ref().ok_or("No QCD for Irreversible")?;
                 let guard_bits = (qcd.quant_style >> 5) & 0x07;
-                let decode_step = |val: u16| -> f32 {
+                // Helper to decode step size
+                let depth = if self.components.len() > comp_idx {
+                    self.components[comp_idx].depth
+                } else {
+                    8
+                };
+
+                let calc_step = |exp: u16, mant: u16, log2_gain: u8| -> f32 {
+                    let rb = depth + guard_bits + log2_gain;
+                    (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(rb as i32 - exp as i32)
+                };
+
+                // Decode base step size (LL subband), gain=1 (log2=0)
+                let step_ll = if !qcd.step_sizes.is_empty() {
+                    let val = qcd.step_sizes[0];
                     let exp = (val >> 11) & 0x1F;
                     let mant = val & 0x7FF;
-                    let rb = 8 + guard_bits;
-                    let s = (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(exp as i32 - rb as i32);
-                    s
-                };
-                let step_ll = if !qcd.step_sizes.is_empty() {
-                    decode_step(qcd.step_sizes[0])
+                    calc_step(exp, mant, 0)
                 } else {
                     1.0
                 };
@@ -325,15 +334,15 @@ impl J2kImage {
                         8
                     };
 
-                    let calc_step = |exp: u16, mant: u16, is_hh: bool| -> f32 {
-                        // Table E.1: HL/LH gain=1 (log2=1), HH gain=2 (log2=2).
-                        let log2_gain = if is_hh { 2 } else { 1 };
+                    let calc_step = |exp: u16, mant: u16, log2_gain: u8| -> f32 {
+                        // Table E.1: HL/LH gain=1 (log2=0), HH gain=2 (log2=1).
                         let rb = depth + guard_bits + log2_gain;
                         (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(rb as i32 - exp as i32)
                     };
 
                     let decode_step_val = |val: u16, is_hh: bool| -> f32 {
-                        calc_step((val >> 11) & 0x1F, val & 0x7FF, is_hh)
+                        let log2_gain = if is_hh { 1 } else { 0 };
+                        calc_step((val >> 11) & 0x1F, val & 0x7FF, log2_gain)
                     };
 
                     // Determine step sizes for HL, LH, HH
@@ -345,11 +354,25 @@ impl J2kImage {
                             let base = qcd.step_sizes[0];
                             let base_exp = (base >> 11) & 0x1F;
                             let base_mant = base & 0x7FF;
+
+                            let base_step_ll = calc_step(base_exp, base_mant, 0); // Gain=1, log2=0
+
+                            // Derived formula:
+                            // Delta_b = Delta_0 * 2^(exp_0 - exp_b) * gain_correction
+                            // exp_b = exp_0 + (r - 1)
+                            // So exp_0 - exp_b = -(r - 1) = 1 - r
                             let derived_exp = base_exp + (r as u16) - 1;
+
+                            // Gain correction:
+                            // HL/LH (log2=0): gain_correction = 2^(0-0) = 1
+                            // HH (log2=1): gain_correction = 2^(1-0) = 2
+
+                            let factor_common = 2.0f32.powi(base_exp as i32 - derived_exp as i32);
+
                             (
-                                calc_step(derived_exp, base_mant, false),
-                                calc_step(derived_exp, base_mant, false),
-                                calc_step(derived_exp, base_mant, true),
+                                base_step_ll * factor_common, // HL
+                                base_step_ll * factor_common, // LH
+                                base_step_ll * factor_common * 2.0, // HH
                             )
                         }
                     } else {
