@@ -137,12 +137,18 @@ impl Dwt53 {
 
         // First pass: Inverse transform each row
         for y in 0..ll_h.max(lh_h) {
-            let row_ll = if y < ll_h { &ll[y * ll_w..(y + 1) * ll_w] } else { &[] };
+            let row_ll = if y < ll_h {
+                &ll[y * ll_w..(y + 1) * ll_w]
+            } else {
+                &[]
+            };
             let row_hl = if y < hl_w && y * hl_w < hl.len() {
                 let start = y * hl_w;
                 let end = (start + hl_w).min(hl.len());
                 &hl[start..end]
-            } else { &[] };
+            } else {
+                &[]
+            };
 
             let mut row_output = vec![0i32; w];
             if !row_ll.is_empty() || !row_hl.is_empty() {
@@ -361,83 +367,88 @@ impl Dwt97 {
         let ll_h = (h + 1) / 2;
         let lh_h = h / 2;
 
-        // First pass: Inverse transform each row
-        for y in 0..ll_h.max(lh_h) {
-            let row_ll = if y < ll_h { &ll[y * ll_w..(y + 1) * ll_w] } else { &[] };
-            let row_hl = if y < hl_w && y * hl_w < hl.len() {
-                let start = y * hl_w;
-                let end = (start + hl_w).min(hl.len());
-                &hl[start..end]
-            } else { &[] };
-
-            let mut row_output = vec![0.0f32; w];
-            if !row_ll.is_empty() || !row_hl.is_empty() {
-                let mut row_l = vec![0.0f32; ll_w];
-                let mut row_h = vec![0.0f32; hl_w];
-                if y < ll_h {
-                    row_l[..row_ll.len()].copy_from_slice(row_ll);
-                }
-                if y * hl_w < hl.len() {
-                    row_h[..row_hl.len().min(hl_w)].copy_from_slice(row_hl);
-                }
-                Self::inverse(&row_l, &row_h, &mut row_output);
-            }
-
-            // Store in temporary buffer (we'll transpose later)
-            // Actually, we need to do column-wise transform, so let's build columns first
-            // For simplicity, let's use a full intermediate buffer
-        }
-
-        // For proper 2D, we need intermediate storage
-        // Simplified approach: transform rows then columns
         let mut temp = vec![0.0f32; w * h];
 
-        // Transform rows
-        for y in 0..ll_h.max(lh_h) {
-            let row_ll = if y < ll_h { &ll[y * ll_w..(y + 1) * ll_w] } else { &[] };
-            let row_hl = if y < hl_w && y * hl_w < hl.len() {
+        // 1. Row Inverse Transform
+        // Process Low-Vertical band (LL + HL -> L)
+        for y in 0..ll_h {
+            let row_ll = &ll[y * ll_w..(y + 1) * ll_w];
+            let row_hl = if y * hl_w < hl.len() {
                 let start = y * hl_w;
                 let end = (start + hl_w).min(hl.len());
                 &hl[start..end]
-            } else { &[] };
+            } else {
+                &[]
+            };
 
+            // We need full length buffers for inverse
             let mut row_l = vec![0.0f32; ll_w];
             let mut row_h = vec![0.0f32; hl_w];
-            if y < ll_h {
-                row_l[..row_ll.len()].copy_from_slice(row_ll);
-            }
-            if y * hl_w < hl.len() {
-                row_h[..row_hl.len().min(hl_w)].copy_from_slice(row_hl);
-            }
-            let mut row_output = vec![0.0f32; w];
-            Self::inverse(&row_l, &row_h, &mut row_output);
+            row_l[..row_ll.len()].copy_from_slice(row_ll);
+            row_h[..row_hl.len()].copy_from_slice(row_hl);
+
+            let mut row_out = vec![0.0f32; w];
+            Self::inverse(&row_l, &row_h, &mut row_out);
+
+            // Store in top half of temp
             for x in 0..w {
-                temp[y * w + x] = row_output[x];
+                temp[y * w + x] = row_out[x];
             }
         }
 
-        // Transform columns
+        // Process High-Vertical band (LH + HH -> H)
+        for y in 0..lh_h {
+            let row_lh = if y * ll_w < lh.len() {
+                let start = y * ll_w;
+                let end = (start + ll_w).min(lh.len());
+                &lh[start..end]
+            } else {
+                &[]
+            };
+
+            let row_hh = if y * hl_w < hh.len() {
+                let start = y * hl_w;
+                let end = (start + hl_w).min(hh.len());
+                &hh[start..end]
+            } else {
+                &[]
+            };
+
+            // We need full length buffers for inverse
+            let mut row_l = vec![0.0f32; ll_w]; // Input L is LH (Low X)
+            let mut row_h = vec![0.0f32; hl_w]; // Input H is HH (High X)
+            row_l[..row_lh.len()].copy_from_slice(row_lh);
+            row_h[..row_hh.len()].copy_from_slice(row_hh);
+
+            let mut row_out = vec![0.0f32; w];
+            Self::inverse(&row_l, &row_h, &mut row_out);
+
+            // Store in bottom half of temp
+            // Offset y by ll_h
+            for x in 0..w {
+                temp[(ll_h + y) * w + x] = row_out[x];
+            }
+        }
+
+        // 2. Column Inverse Transform
         for x in 0..w {
             let mut col_l = vec![0.0f32; ll_h];
             let mut col_h = vec![0.0f32; lh_h];
 
+            // Extract L from top half of temp
             for y in 0..ll_h {
-                if x < ll_w {
-                    col_l[y] = ll[y * ll_w + x];
-                }
+                col_l[y] = temp[y * w + x];
             }
-
+            // Extract H from bottom half of temp
             for y in 0..lh_h {
-                if x < ll_w && y * ll_w + x < lh.len() {
-                    col_h[y] = lh[y * ll_w + x];
-                }
+                col_h[y] = temp[(ll_h + y) * w + x];
             }
 
-            let mut col_output = vec![0.0f32; h];
-            Self::inverse(&col_l, &col_h, &mut col_output);
+            let mut col_out = vec![0.0f32; h];
+            Self::inverse(&col_l, &col_h, &mut col_out);
 
             for y in 0..h {
-                output[y * w + x] = col_output[y];
+                output[y * w + x] = col_out[y];
             }
         }
     }

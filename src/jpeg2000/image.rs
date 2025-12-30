@@ -25,6 +25,21 @@ pub struct J2kImage {
     pub icc_profile: Option<Vec<u8>>,
     /// Number of quality layers decoded (for progressive quality).
     pub decoded_layers: u32,
+    /// Component information (depth, signedness, subsampling) from SIZ marker.
+    pub components: Vec<J2kComponentInfo>,
+}
+
+/// Metadata for a single component from the SIZ marker.
+#[derive(Debug, Clone, Default)]
+pub struct J2kComponentInfo {
+    /// bit depth (e.g. 8, 12, 16)
+    pub depth: u8,
+    /// true if signed, false if unsigned
+    pub is_signed: bool,
+    /// Horizontal subsampling factor
+    pub dx: u8,
+    /// Vertical subsampling factor
+    pub dy: u8,
 }
 
 /// A single tile-part or tile within a J2K codestream.
@@ -94,6 +109,10 @@ pub enum SubbandOrientation {
 pub struct J2kCodeBlock {
     /// Compressed bitstream for the code-block.
     pub compressed_data: Vec<u8>,
+    /// Horizontal index of the code-block in the subband.
+    pub x: u32,
+    /// Vertical index of the code-block in the subband.
+    pub y: u32,
     /// Width of the code-block.
     pub width: u32,
     /// Height of the code-block.
@@ -108,6 +127,8 @@ pub struct J2kCodeBlock {
     pub layers_decoded: u8,
     /// Decoded coefficient values (accumulated across layers).
     pub coefficients: Vec<i32>,
+    /// Internal state of the entropy coder (significance, visited, etc.)
+    pub state: Vec<u8>,
 }
 /// Coding Style Default (COD) marker information
 #[derive(Debug, Clone, Default)]
@@ -119,6 +140,10 @@ pub struct J2kCod {
     pub decomposition_levels: u8,
     pub codeblock_width_exp: u8,
     pub codeblock_height_exp: u8,
+    pub transformation: u8,
+    /// Precinct sizes if defined (Scod bit 0 set).
+    /// One byte per resolution level (PPx + PPy<<4).
+    pub precinct_sizes: Vec<u8>,
 }
 
 /// Quantization Default (QCD) marker information
@@ -141,148 +166,316 @@ impl J2kImage {
     /// Returns a vector of pixel values (u8) for the image
     pub fn reconstruct_pixels(&self) -> Result<Vec<u8>, String> {
         if self.tiles.is_empty() {
+            eprintln!("DEBUG: reconstruct_pixels - No tiles!");
             return Err("No tiles in image".to_string());
         }
+        eprintln!("DEBUG: reconstruct_pixels - Tiles: {}", self.tiles.len());
 
         let mut pixels = vec![0u8; (self.width * self.height * self.component_count) as usize];
         let pixels_per_component = (self.width * self.height) as usize;
 
         // For now, handle single tile case
         let tile = &self.tiles[0];
+        eprintln!("DEBUG: Tile 0 Components: {}", tile.components.len());
 
-        for (comp_idx, component) in tile.components.iter().enumerate() {
-            // Retrieve coefficients from resolutions/subbands -> form a subband buffer for IDWT
-            // For simplified "single resolution / LL only" reconstruction:
+        let cod = self.cod.as_ref().ok_or("No COD marker")?;
+        let nom_w = 1 << (cod.codeblock_width_exp + 2);
+        let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
-            // Need at least one resolution
-            if component.resolutions.is_empty() {
-                continue;
+        let get_subband_data = |res: &J2kResolution, orientation: SubbandOrientation| -> Vec<f32> {
+            let mut found = None;
+            for sb in &res.subbands {
+                if sb.orientation == orientation {
+                    found = Some(sb);
+                    break;
+                }
             }
+            if let Some(sb) = found {
+                let sb_w = sb.width;
+                let sb_h = sb.height;
+                let cap = (sb_w * sb_h) as usize;
+                let mut sb_data = vec![0.0f32; cap]; // Zero initialized
 
-            // Assume single-level decomposition IDWT expecting 4 subbands data (LL, HL, LH, HH)
-            // Or just LL if decompostion=0?
-            let cod = self.cod.as_ref().ok_or("No COD marker")?;
-            let _decomposition_levels = cod.decomposition_levels;
-            let is_reversible = (cod.coding_style & 0x01) == 0;
+                eprintln!(
+                    "DEBUG: Retrieving subband Res=? Ori={:?} Blocks={}",
+                    orientation,
+                    sb.codeblocks.len()
+                );
+                for cb in &sb.codeblocks {
+                    let start_x = cb.x * nom_w as u32;
+                    let start_y = cb.y * nom_h as u32;
 
-            // Gather coefficients from codeblocks
-            // Flatten codeblocks into subband buffers
-            // This is complex for full implementation.
-            // For verify script's generated images (likely fitting in one codeblock or simple tiling),
-            // let's grab the first codeblock from LL subband of resolution 0?
-            // Actually usually Res 0 is LL. Res 1 adds HL, LH, HH.
-            // If decomposition = 1, we have Res 0 (LL) and Res 1 (HL, LH, HH).
-            // The IDWT function expects one flat buffer `component_data` containing all subbands?
-            // The existing code expected `component.data` (Vec<f32>) to be full.
+                    let nz = cb.coefficients.iter().filter(|&&c| c != 0).count();
+                    eprintln!(
+                        "DEBUG: CB ({}, {}) w={} h={} coeffs={} (Non-zero: {})",
+                        cb.x,
+                        cb.y,
+                        cb.width,
+                        cb.height,
+                        cb.coefficients.len(),
+                        nz
+                    );
 
-            // Let's reconstruct `component_data` from `resolutions`.
-            // Calculate size
-            let mut component_data = vec![0.0f32; pixels_per_component];
+                    for cy in 0..cb.height {
+                        for cx in 0..cb.width {
+                            let src_idx = (cy * cb.width + cx) as usize;
+                            if src_idx < cb.coefficients.len() {
+                                let val = cb.coefficients[src_idx];
+                                let dest_x = start_x + cx;
+                                let dest_y = start_y + cy;
 
-            // Fill from available codeblocks
-            // Current `decode_packet` implementation appends codeblocks to `subband.codeblocks`.
-            // We need to place them in the `component_data` grid.
-            // For now, just copy the first available codeblock's coefficients to start of buffer?
-            // Or loop them.
-
-            // Warning: `codeblock.coefficients` are `i32`. `component_data` is `f32`.
-
-            if let Some(res) = component.resolutions.get(0) {
-                if let Some(sb) = res.subbands.get(0) {
-                    // LL subband
-                    // Copy data
-                    let mut offset = 0;
-                    for cb in &sb.codeblocks {
-                        for &coeff in &cb.coefficients {
-                            if offset < component_data.len() {
-                                component_data[offset] = coeff as f32;
-                                offset += 1;
+                                if dest_x < sb_w && dest_y < sb_h {
+                                    let dest_idx = (dest_y * sb_w + dest_x) as usize;
+                                    sb_data[dest_idx] = val as f32;
+                                }
                             }
                         }
                     }
                 }
-            }
-
-            // Calculate subband sizes for single level
-            #[allow(clippy::manual_div_ceil)]
-            let ll_w = ((self.width as usize) + 1) / 2;
-            let hl_w = (self.width as usize) / 2;
-            #[allow(clippy::manual_div_ceil)]
-            let ll_h = ((self.height as usize) + 1) / 2;
-            let lh_h = (self.height as usize) / 2;
-
-            let ll_size = ll_w * ll_h;
-            let hl_size = hl_w * ll_h;
-            let lh_size = ll_w * lh_h;
-            let hh_size = hl_w * lh_h;
-
-            if component_data.len() < (ll_size + hl_size + lh_size + hh_size) {
-                // Not enough data (maybe just LL?)
-                // If we have LL, we can just upscale/transform?
-                // Or if decomposition=0, LL is the image.
-                // If IDWT is hardcoded for 4 subbands, we might fail.
-                // existing code checks:
-                // if component_data.len() < (ll_size + hl_size + lh_size + hh_size) { continue; }
-
-                // If we only have LL data, maybe fill others with 0?
-                // component_data is already 0.0 initialized.
-                // If we populated LL part, we are good to go provided len is correct.
-            }
-
-            // ... (rest of IDWT logic uses component_data) ...
-
-            let ll = &component_data[0..ll_size];
-            let hl = &component_data[ll_size..ll_size + hl_size];
-            let lh = &component_data[ll_size + hl_size..ll_size + hl_size + lh_size];
-            let hh =
-                &component_data[ll_size + hl_size + lh_size..ll_size + hl_size + lh_size + hh_size];
-
-            let mut output = vec![0.0f32; (self.width * self.height) as usize];
-
-            if is_reversible {
-                // 5/3 reversible transform uses integers
-                let ll_i32: Vec<i32> = ll.iter().map(|&f| f as i32).collect();
-                let hl_i32: Vec<i32> = hl.iter().map(|&f| f as i32).collect();
-                let lh_i32: Vec<i32> = lh.iter().map(|&f| f as i32).collect();
-                let hh_i32: Vec<i32> = hh.iter().map(|&f| f as i32).collect();
-                let mut output_i32 = vec![0i32; (self.width * self.height) as usize];
-
-                crate::jpeg2000::dwt::Dwt53::inverse_2d(
-                    &ll_i32,
-                    &hl_i32,
-                    &lh_i32,
-                    &hh_i32,
-                    self.width,
-                    self.height,
-                    &mut output_i32,
-                );
-
-                for i in 0..output_i32.len() {
-                    output[i] = output_i32[i] as f32;
-                }
+                sb_data
             } else {
-                // 9/7 irreversible transform
-                crate::jpeg2000::dwt::Dwt97::inverse_2d(
-                    ll,
-                    hl,
-                    lh,
-                    hh,
-                    self.width,
-                    self.height,
-                    &mut output,
+                let w = if orientation == SubbandOrientation::LL
+                    || orientation == SubbandOrientation::HL
+                {
+                    (res.width as usize + 1) / 2
+                } else {
+                    res.width as usize / 2
+                };
+                let h = if orientation == SubbandOrientation::LL
+                    || orientation == SubbandOrientation::LH
+                {
+                    (res.height as usize + 1) / 2
+                } else {
+                    res.height as usize / 2
+                };
+                vec![0.0f32; w * h]
+            }
+        };
+
+        for (comp_idx, component) in tile.components.iter().enumerate() {
+            eprintln!("DEBUG: Reconstructing Component {}", comp_idx);
+            if component.resolutions.is_empty() {
+                continue;
+            }
+
+            // Start with LL from Resolution 0
+            let mut current_ll =
+                get_subband_data(&component.resolutions[0], SubbandOrientation::LL);
+            eprintln!(
+                "DEBUG: Res 0 LL size: {} (Non-zero: {})",
+                current_ll.len(),
+                current_ll.iter().filter(|&&v| v != 0.0).count()
+            );
+
+            if current_ll.is_empty() {
+                let r0 = &component.resolutions[0];
+                current_ll = vec![0.0f32; (r0.width * r0.height) as usize];
+            }
+
+            let cod = self.cod.as_ref().ok_or("No COD marker")?;
+            eprintln!(
+                "DEBUG: reconstruct_pixels cod.transformation = {}",
+                cod.transformation
+            );
+            let is_reversible = cod.transformation == 1;
+            eprintln!("DEBUG: Reversible: {}", is_reversible);
+
+            if !is_reversible {
+                let qcd = self.qcd.as_ref().ok_or("No QCD for Irreversible")?;
+                let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                let decode_step = |val: u16| -> f32 {
+                    let exp = (val >> 11) & 0x1F;
+                    let mant = val & 0x7FF;
+                    let rb = 8 + guard_bits;
+                    let s = (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(exp as i32 - rb as i32);
+                    eprintln!(
+                        "DEBUG: Dequant step: val={} exp={} mant={} rb={} s={}",
+                        val, exp, mant, rb, s
+                    );
+                    s
+                };
+                let step_ll = if !qcd.step_sizes.is_empty() {
+                    decode_step(qcd.step_sizes[0])
+                } else {
+                    1.0
+                };
+                eprintln!("DEBUG: Res 0 LL Dequant Step: {:.4}", step_ll);
+                for v in &mut current_ll {
+                    *v *= step_ll;
+                }
+                eprintln!(
+                    "DEBUG: Res 0 LL Samples: {:?}",
+                    &current_ll.iter().take(5).collect::<Vec<_>>()
                 );
             }
 
+            // Iterate through higher resolutions (1..N) to apply IDWT
+            for r in 1..component.resolutions.len() {
+                let res = &component.resolutions[r];
+                let hl = get_subband_data(res, SubbandOrientation::HL);
+                let lh = get_subband_data(res, SubbandOrientation::LH);
+                let hh = get_subband_data(res, SubbandOrientation::HH);
+
+                eprintln!(
+                    "DEBUG: Res {} IDWT. HL nz: {}, LH nz: {}, HH nz: {}",
+                    r,
+                    hl.iter().filter(|&&v| v != 0.0).count(),
+                    lh.iter().filter(|&&v| v != 0.0).count(),
+                    hh.iter().filter(|&&v| v != 0.0).count()
+                );
+
+                if !hl.is_empty() {
+                    eprintln!(
+                        "DEBUG: HL[0..5]: {:?}",
+                        hl.iter().take(5).collect::<Vec<_>>()
+                    );
+                }
+                if !lh.is_empty() {
+                    eprintln!(
+                        "DEBUG: LH[0..5]: {:?}",
+                        lh.iter().take(5).collect::<Vec<_>>()
+                    );
+                }
+                if !hh.is_empty() {
+                    eprintln!(
+                        "DEBUG: HH[0..5]: {:?}",
+                        hh.iter().take(5).collect::<Vec<_>>()
+                    );
+                }
+
+                let mut output = vec![0.0f32; (res.width * res.height) as usize];
+
+                if is_reversible {
+                    // Reversible 5-3 (Integers)
+                    let ll_i32: Vec<i32> = current_ll.iter().map(|&f| f as i32).collect();
+                    let hl_i32: Vec<i32> = hl.iter().map(|&f| f as i32).collect();
+                    let lh_i32: Vec<i32> = lh.iter().map(|&f| f as i32).collect();
+                    let hh_i32: Vec<i32> = hh.iter().map(|&f| f as i32).collect();
+                    let mut output_i32 = vec![0i32; output.len()];
+
+                    crate::jpeg2000::dwt::Dwt53::inverse_2d(
+                        &ll_i32,
+                        &hl_i32,
+                        &lh_i32,
+                        &hh_i32,
+                        res.width,
+                        res.height,
+                        &mut output_i32,
+                    );
+                    for i in 0..output.len() {
+                        output[i] = output_i32[i] as f32;
+                    }
+                } else {
+                    // Irreversible 9-7 (Floats)
+                    // Dequantization required.
+                    let qcd = self.qcd.as_ref().ok_or("No QCD for Irreversible")?;
+                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                    let quant_style = qcd.quant_style & 0x1F; // 0=No, 1=Derived, 2=Expounded
+
+                    // Helper to decode step size
+                    let decode_step = |val: u16| -> f32 {
+                        let exp = (val >> 11) & 0x1F;
+                        let mant = val & 0x7FF;
+                        // Rb = component depth + guard bits. assume depth 8.
+                        let rb = 8 + guard_bits;
+                        // Delta = 2^(Rb - exp) * (1 + mant / 2048.0)
+                        let delta =
+                            (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(rb as i32 - exp as i32);
+                        delta
+                    };
+
+                    // Determine step sizes for HL, LH, HH
+                    let (step_hl, step_lh, step_hh) = if quant_style == 1 {
+                        // Derived
+                        let base = qcd.step_sizes[0];
+                        // TODO: accurate derivation formula. For now, decode base.
+                        let s = decode_step(base);
+                        // Approximation for derived? Standard says:
+                        // epsilon_b = epsilon_0 + (N_L - n_b)
+                        // mu_b = mu_0
+                        // So we should recalculate using modified exponent.
+                        // But for now, let's just use the indexed values if available, or just use base if ONLY base available.
+                        if qcd.step_sizes.len() > 1 {
+                            // Use Expounded indexing if avail
+                            let idx_hl = 1 + (r - 1) * 3;
+                            let idx_lh = idx_hl + 1;
+                            let idx_hh = idx_hl + 2;
+                            (
+                                decode_step(qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)]),
+                                decode_step(qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)]),
+                                decode_step(qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)]),
+                            )
+                        } else {
+                            (s, s, s) // Fallback
+                        }
+                    } else {
+                        // Expounded or Fallback
+                        let idx_hl = 1 + (r - 1) * 3;
+                        let idx_lh = idx_hl + 1;
+                        let idx_hh = idx_hl + 2;
+                        (
+                            decode_step(qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)]),
+                            decode_step(qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)]),
+                            decode_step(qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)]),
+                        )
+                    };
+
+                    eprintln!(
+                        "DEBUG: Res {} Dequant Steps: HL={:.4} LH={:.4} HH={:.4}",
+                        r, step_hl, step_lh, step_hh
+                    );
+
+                    // Apply step sizes
+                    let hl_fq: Vec<f32> = hl.iter().map(|&v| v * step_hl).collect();
+                    let lh_fq: Vec<f32> = lh.iter().map(|&v| v * step_lh).collect();
+                    let hh_fq: Vec<f32> = hh.iter().map(|&v| v * step_hh).collect();
+
+                    crate::jpeg2000::dwt::Dwt97::inverse_2d(
+                        &current_ll,
+                        &hl_fq,
+                        &lh_fq,
+                        &hh_fq,
+                        res.width,
+                        res.height,
+                        &mut output,
+                    );
+                }
+                current_ll = output;
+            }
+
+            let final_data = current_ll;
             // Convert to u8 pixels and store
             let offset = comp_idx * pixels_per_component;
-            for i in 0..pixels_per_component.min(output.len()) {
-                let val = (output[i] + 128.0).round().clamp(0.0, 255.0) as u8;
+
+            eprintln!(
+                "DEBUG: Final Pixels Comp {} (showing first 10, offset 128 applied):",
+                comp_idx
+            );
+            for i in 0..10.min(final_data.len()) {
+                let val_u8 = (final_data[i] + 128.0).round().clamp(0.0, 255.0) as u8;
+                eprintln!("  [{}] {:.2} -> {}", i, final_data[i], val_u8);
+            }
+            for i in 0..pixels_per_component.min(final_data.len()) {
+                let depth = if self.components.len() > comp_idx {
+                    self.components[comp_idx].depth
+                } else {
+                    8
+                };
+                let shift = depth.saturating_sub(8);
+                let level_offset = (1 << (depth - 1)) as f32;
+                let scale_div = (1 << shift) as f32;
+
+                // For unsigned data, we subtract level shift in decoder, so here we add it back.
+                // If is_signed is true, we might handled it differently, but usually J2K works on signed samples relative to mid-grey.
+
+                let val = ((final_data[i] + level_offset) / scale_div)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
                 if offset + i < pixels.len() {
                     pixels[offset + i] = val;
                 }
             }
         }
-
         Ok(pixels)
     }
 }

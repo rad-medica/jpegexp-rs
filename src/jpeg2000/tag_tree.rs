@@ -78,6 +78,15 @@ impl TagTree {
         }
     }
 
+    /// Get the current value (low) at a leaf coordinate (x, y).
+    pub fn get_current_value(&self, x: usize, y: usize) -> i32 {
+        if x >= self.leaf_width || y >= self.leaf_height {
+            return 0;
+        }
+        let leaf_idx = y * self.leaf_width + x;
+        self.nodes[leaf_idx].low
+    }
+
     /// Set the value at a leaf coordinate (x, y).
     pub fn set_value(&mut self, x: usize, y: usize, value: i32) {
         if x >= self.leaf_width || y >= self.leaf_height {

@@ -31,9 +31,7 @@ pub struct PrecinctState {
 
 impl PrecinctState {
     pub fn new(w: usize, h: usize) -> Self {
-        // Initialize with capacity appropriate for most cases
         let mut subbands = Vec::with_capacity(3);
-        // It will be populated on demand or we can pre-populate if we knew subbands count
         Self { subbands }
     }
 
@@ -72,6 +70,10 @@ impl PacketHeader {
         grid_height: usize,
         num_subbands: usize,
     ) -> Result<Self, ()> {
+        eprintln!(
+            "DEBUG: PacketHeader::read layer={}, res_subbands={}",
+            layer, num_subbands
+        );
         let mut header = PacketHeader {
             packet_seq_num: 0,
             empty: false,
@@ -80,17 +82,15 @@ impl PacketHeader {
         };
 
         // 1. Zero-length packet bit
-        // Read 1 bit. If 0, packet is empty.
         let bit = reader.read_bit()?;
         if bit == 0 {
+            eprintln!("DEBUG: Packet Empty bit=0");
             header.empty = true;
             return Ok(header);
         }
 
         // 2. Code-block inclusion and header info
         for s in 0..num_subbands {
-            eprintln!("DEBUG: Packet S{} L{}", s, layer);
-            // Ensure state has trees for this subband
             if state.subbands.len() <= s {
                 state
                     .subbands
@@ -102,26 +102,53 @@ impl PacketHeader {
                 for x in 0..grid_width {
                     // Determine inclusion
                     let threshold = (layer + 1) as i32;
-                    let not_included_yet = subband_state
-                        .inclusion_tree
-                        .decode(reader, x, y, threshold)?;
-                    let included = !not_included_yet;
+                    let already_included =
+                        subband_state.inclusion_tree.get_current_value(x, y) < threshold;
 
-                    if included {
-                        eprintln!("DEBUG: Included CB {},{} in S{}", x, y, s);
-                        let zero_bp = 0;
-                        let num_passes = 1;
+                    let mut process_block = false;
+                    if already_included {
+                        if reader.read_bit()? == 1 {
+                            process_block = true;
+                        }
+                    } else {
+                        let not_included_yet = subband_state
+                            .inclusion_tree
+                            .decode(reader, x, y, threshold)?;
+                        if !not_included_yet {
+                            process_block = true;
+                        }
+                    }
+
+                    if process_block {
+                        eprintln!("DEBUG: CB {},{} included in subband {}", x, y, s);
+
+                        // Decode Zero Bit Planes
+                        // Only present if this is the first time included
+                        if !already_included {
+                            subband_state.zero_bp_tree.decode(reader, x, y, 128)?;
+                        }
+                        let zero_bp = subband_state.zero_bp_tree.get_current_value(x, y) as u8;
+
+                        // Decode Number of Passes
+                        let num_passes = Self::read_coding_passes(reader)?;
 
                         // Data Length
-                        let _has_lblock =
-                            subband_state.lblock_tree.decode(reader, x, y, threshold)?;
-                        let data_len = reader.read_bits(16)?;
+                        // Decode LBlock parameter with arbitrary threshold (32)
+                        let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
+                        let lbits = subband_state.lblock_tree.get_current_value(x, y) + 3;
+                        eprintln!("DEBUG: LBlock val={}, reading {} bits", lbits - 3, lbits);
+
+                        let data_len = reader.read_bits(lbits as u8)?;
+                        eprintln!(
+                            "DEBUG: Data len read: {} (Passes: {}, ZBP: {})",
+                            data_len, num_passes, zero_bp
+                        );
 
                         header.included_cblks.push(CodeBlockInfo {
                             x,
                             y,
                             subband_index: s as u8,
-                            included,
+                            included: true,
                             num_passes,
                             data_len,
                             zero_bp,
@@ -134,6 +161,32 @@ impl PacketHeader {
         Ok(header)
     }
 
+    /// Reads the number of coding passes using J2K codeword table (Table B.4).
+    fn read_coding_passes(reader: &mut J2kBitReader) -> Result<u8, ()> {
+        if reader.read_bit()? == 0 {
+            eprintln!("DEBUG: passes codework 0 -> 1");
+            return Ok(1);
+        }
+        if reader.read_bit()? == 0 {
+            eprintln!("DEBUG: passes codework 10 -> 2");
+            return Ok(2);
+        }
+        let bits = reader.read_bits(2)?;
+        if bits < 3 {
+            eprintln!("DEBUG: passes codeword 11{} -> {}", bits, 3 + bits);
+            return Ok((3 + bits) as u8);
+        }
+        let bits = reader.read_bits(5)?;
+        if bits < 31 {
+            eprintln!("DEBUG: passes codeword 1111{} -> {}", bits, 6 + bits);
+            return Ok((6 + bits) as u8);
+        }
+        // Extension: 32 + 5 bits... (Very rare for typical images)
+        let bits2 = reader.read_bits(5)?;
+        eprintln!("DEBUG: passes codeword extension -> {}", 37 + bits2);
+        Ok((37 + bits2) as u8)
+    }
+
     /// Write a packet header to the bit stream.
     pub fn write(
         &self,
@@ -143,16 +196,13 @@ impl PacketHeader {
         grid_height: usize,
         num_subbands: usize,
     ) {
-        // 1. Zero-length packet bit
         if self.empty {
             writer.write_bit(0);
             return;
         }
         writer.write_bit(1);
 
-        // 2. Code-block inclusion and header info
         for s in 0..num_subbands {
-            // Ensure state has trees for this subband
             if state.subbands.len() <= s {
                 state
                     .subbands
@@ -162,7 +212,6 @@ impl PacketHeader {
 
             for y in 0..grid_height {
                 for x in 0..grid_width {
-                    // Check if codeblock is included in this packet
                     let cb_info = self
                         .included_cblks
                         .iter()
@@ -171,7 +220,6 @@ impl PacketHeader {
                     let included_now = cb_info.is_some() && cb_info.unwrap().included;
 
                     if included_now {
-                        // Tag tree encode:
                         subband_state.inclusion_tree.encode(
                             writer,
                             x,
@@ -179,10 +227,7 @@ impl PacketHeader {
                             (self.layer_index + 1) as i32,
                         );
 
-                        // Zero BP, passes, length...
                         let cb = cb_info.unwrap();
-
-                        // Zero Bit Planes (Tag Tree)
                         subband_state
                             .zero_bp_tree
                             .set_value(x, y, cb.zero_bp as i32);
@@ -193,14 +238,12 @@ impl PacketHeader {
                             (self.layer_index + 1) as i32,
                         );
 
-                        // Number of Passes
-                        let num_passes = cb.num_passes.max(1); // Ensure at least 1
+                        let num_passes = cb.num_passes.max(1);
                         for _ in 0..(num_passes - 1) {
                             writer.write_bit(1);
                         }
-                        writer.write_bit(0); // Terminate unary encoding
+                        writer.write_bit(0);
 
-                        // Data Length (Lblock encoding)
                         if cb.data_len > 0 {
                             subband_state
                                 .lblock_tree
@@ -211,10 +254,8 @@ impl PacketHeader {
                                 y,
                                 (self.layer_index + 1) as i32,
                             );
-                            // Write the actual data length value (16 bits for simplified encoding)
                             writer.write_bits(cb.data_len, 16);
                         } else {
-                            // No data length - tag tree encodes absence
                             subband_state.lblock_tree.set_value(x, y, 0);
                             subband_state.lblock_tree.encode(
                                 writer,
@@ -224,7 +265,6 @@ impl PacketHeader {
                             );
                         }
                     } else {
-                        // Not included
                         subband_state.inclusion_tree.encode(
                             writer,
                             x,
@@ -243,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_packet_read_empty() {
-        let data = vec![0x00]; // 0 bit -> empty
+        let data = vec![0x00];
         let mut reader = J2kBitReader::new(&data);
         let mut state = PrecinctState::new(2, 2);
 

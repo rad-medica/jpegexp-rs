@@ -4,21 +4,25 @@ pub struct BitPlaneCoder<'a> {
     pub width: u32,
     pub height: u32,
     pub data: &'a [i32], // Quantized coefficients
-
-    // State: Significance, Visited, Refinement
-    // Bitmasks per sample? Or separate arrays?
-    // Standard usually uses a state array.
-    // Bit 0: Sig, Bit 1: Visited, Bit 2: Refined...
     pub state: Vec<u8>,
-
     pub mq: MqCoder,
+    pub coefficients: Vec<i32>,
+    pub num_passes_decoded: u32,
 }
 
 impl<'a> BitPlaneCoder<'a> {
     pub fn new(width: u32, height: u32, data: &'a [i32]) -> Self {
         let size = (width * height) as usize;
         let mut mq = MqCoder::new();
-        mq.init_contexts(19); // 19 contexts for LL subband usually
+        mq.init_contexts(19);
+
+        // Load coefficients if provided usually
+        // But for standard new, init to zero if not reusing
+        let coefficients = if !data.is_empty() && data.len() == size {
+            data.to_vec()
+        } else {
+            vec![0; size]
+        };
 
         Self {
             width,
@@ -26,6 +30,8 @@ impl<'a> BitPlaneCoder<'a> {
             data,
             state: vec![0; size],
             mq,
+            coefficients,
+            num_passes_decoded: 0,
         }
     }
 
@@ -55,28 +61,43 @@ impl<'a> BitPlaneCoder<'a> {
         let idx = |cnx, cny| (cny * w + cnx) as usize;
 
         // H: (x-1, y), (x+1, y)
-        if ix > 0 && (self.state[idx(ix-1, iy)] & Self::SIG) != 0 { h_cnt += 1; }
-        if ix < w-1 && (self.state[idx(ix+1, iy)] & Self::SIG) != 0 { h_cnt += 1; }
+        if ix > 0 && (self.state[idx(ix - 1, iy)] & Self::SIG) != 0 {
+            h_cnt += 1;
+        }
+        if ix < w - 1 && (self.state[idx(ix + 1, iy)] & Self::SIG) != 0 {
+            h_cnt += 1;
+        }
 
         // V: (x, y-1), (x, y+1)
-        if iy > 0 && (self.state[idx(ix, iy-1)] & Self::SIG) != 0 { v_cnt += 1; }
-        if iy < h-1 && (self.state[idx(ix, iy+1)] & Self::SIG) != 0 { v_cnt += 1; }
+        if iy > 0 && (self.state[idx(ix, iy - 1)] & Self::SIG) != 0 {
+            v_cnt += 1;
+        }
+        if iy < h - 1 && (self.state[idx(ix, iy + 1)] & Self::SIG) != 0 {
+            v_cnt += 1;
+        }
 
         // D: Diagonals
-        if ix > 0 && iy > 0 && (self.state[idx(ix-1, iy-1)] & Self::SIG) != 0 { d_cnt += 1; }
-        if ix < w-1 && iy > 0 && (self.state[idx(ix+1, iy-1)] & Self::SIG) != 0 { d_cnt += 1; }
-        if ix > 0 && iy < h-1 && (self.state[idx(ix-1, iy+1)] & Self::SIG) != 0 { d_cnt += 1; }
-        if ix < w-1 && iy < h-1 && (self.state[idx(ix+1, iy+1)] & Self::SIG) != 0 { d_cnt += 1; }
+        if ix > 0 && iy > 0 && (self.state[idx(ix - 1, iy - 1)] & Self::SIG) != 0 {
+            d_cnt += 1;
+        }
+        if ix < w - 1 && iy > 0 && (self.state[idx(ix + 1, iy - 1)] & Self::SIG) != 0 {
+            d_cnt += 1;
+        }
+        if ix > 0 && iy < h - 1 && (self.state[idx(ix - 1, iy + 1)] & Self::SIG) != 0 {
+            d_cnt += 1;
+        }
+        if ix < w - 1 && iy < h - 1 && (self.state[idx(ix + 1, iy + 1)] & Self::SIG) != 0 {
+            d_cnt += 1;
+        }
 
         (h_cnt, v_cnt, d_cnt)
     }
 
     fn get_zc_context(&self, band: u8, h: u8, v: u8, d: u8) -> usize {
-        // Simplified Table C-8 for LL band (band=0)
-        // (This is huge, usually table driven. Using minimal logic for flow)
-        // Returns context label 0..8
+        // Table C-2: Contexts for the significance propagation and cleanup passes
         match band {
-            0 | 1 => { // LL and LH
+            0 | 1 => {
+                // LL and LH (Vertical High-Pass, Horiz Low-Pass -> Horiz dominant)
                 match (h, v, d) {
                     (2, _, _) => 8,
                     (1, v, _) if v >= 1 => 7,
@@ -88,9 +109,11 @@ impl<'a> BitPlaneCoder<'a> {
                     (0, 0, 1) => 1,
                     _ => 0,
                 }
-            },
-            2 => { // HL subband: transpose H/V from LH logic
-                match (v, h, d) { // Note: h and v swapped
+            }
+            2 => {
+                // HL (Horiz High-Pass, Vert Low-Pass -> Vert dominant)
+                match (v, h, d) {
+                    // Transpose H and V
                     (2, _, _) => 8,
                     (1, h, _) if h >= 1 => 7,
                     (1, 0, d) if d >= 1 => 6,
@@ -101,23 +124,22 @@ impl<'a> BitPlaneCoder<'a> {
                     (0, 0, 1) => 1,
                     _ => 0,
                 }
-            },
-            3 => { // HH subband: uses different context mapping
-                // HH subband context calculation is more complex
-                // For now, use a simplified version based on neighbor counts
-                match (h, v, d) {
-                    (2, _, _) | (_, 2, _) => 8,
-                    (1, v, _) if v >= 1 => 7,
-                    (h, 1, _) if h >= 1 => 7,
-                    (1, 0, d) if d >= 1 => 6,
-                    (0, 1, d) if d >= 1 => 6,
-                    (1, 0, 0) | (0, 1, 0) => 5,
-                    (0, 0, d) if d >= 2 => 2,
-                    (0, 0, 1) => 1,
+            }
+            3 => {
+                // HH (Diagonal High-Pass -> Diagonal dominant)
+                match (d, h + v) {
+                    (d, _) if d >= 3 => 8,
+                    (2, hv) if hv >= 1 => 7,
+                    (2, 0) => 6,
+                    (1, hv) if hv >= 2 => 5,
+                    (1, 1) => 4,
+                    (1, 0) => 3,
+                    (0, hv) if hv >= 2 => 2,
+                    (0, 1) => 1,
                     _ => 0,
                 }
-            },
-            _ => 0 // Unknown subband, default context
+            }
+            _ => 0,
         }
     }
 
@@ -126,45 +148,85 @@ impl<'a> BitPlaneCoder<'a> {
         // Assume 30 down to 0? Or determined by max value.
         // For testing, let's start at bit 5.
         for bp in (0..5).rev() {
-             self.significance_propagation(bp);
-             self.magnitude_refinement(bp);
-             self.cleanup(bp);
+            self.significance_propagation(bp);
+            self.magnitude_refinement(bp);
+            self.cleanup(bp);
         }
     }
 
-    /// Decodes a codeblock from compressed data.
-    /// This is the reverse of encode_codeblock - it reconstructs coefficients from the bitstream.
-    pub fn decode_codeblock(&mut self, data: &[u8], width: u32, height: u32, max_bit_plane: u8) -> Result<Vec<i32>, ()> {
-        // Initialize MQ decoder
-        self.mq.init_contexts(19); // Standard uses 19 contexts for LL subband
+    pub fn decode_codeblock(
+        &mut self,
+        data: &[u8],
+        max_bit_plane: u8,
+        num_new_passes: u8,
+    ) -> Result<Vec<i32>, ()> {
+        if num_new_passes == 0 {
+            return Ok(self.coefficients.clone());
+        }
+
         self.mq.init_decoder(data);
 
-        // Initialize state arrays
-        let size = (width * height) as usize;
-        self.state = vec![0; size];
+        eprintln!(
+            "DEBUG: BPC decode_codeblock: max_BP={} current_passes={} new_passes={}",
+            max_bit_plane, self.num_passes_decoded, num_new_passes
+        );
 
-        // Initialize coefficients to zero
-        let mut coefficients = vec![0i32; size];
-
-        // Iterate bitplanes from MSB to LSB
-        for bp in (0..=max_bit_plane).rev() {
-            // Reset VISITED flag for this bitplane
-            for i in 0..size {
-                self.state[i] &= !Self::VISITED;
-            }
-
-            // Three passes per bitplane
-            self.decode_significance_propagation(bp, width, height, &mut coefficients)?;
-            self.decode_magnitude_refinement(bp, width, height, &mut coefficients)?;
-            self.decode_cleanup(bp, width, height, &mut coefficients)?;
+        #[derive(Debug)]
+        enum PassType {
+            SigProp,
+            MagRef,
+            Cleanup,
         }
 
-        Ok(coefficients)
+        for i in 0..num_new_passes {
+            let pass_idx = self.num_passes_decoded;
+
+            let (bp, pass_type) = if pass_idx == 0 {
+                (max_bit_plane, PassType::Cleanup)
+            } else {
+                let plane_offset = (pass_idx - 1) / 3;
+                if plane_offset as u8 >= max_bit_plane {
+                    eprintln!("DEBUG: Stop decoding, bitplane coding limit reached (bp < 0)");
+                    break;
+                }
+                let bp = max_bit_plane - 1 - plane_offset as u8;
+                let rem = (pass_idx - 1) % 3;
+                match rem {
+                    0 => (bp, PassType::SigProp),
+                    1 => (bp, PassType::MagRef),
+                    2 => (bp, PassType::Cleanup),
+                    _ => unreachable!(),
+                }
+            };
+
+            eprintln!(
+                "DEBUG:   Pass Idx {} (New {}) -> BP {} Type {:?}",
+                pass_idx, i, bp, pass_type
+            );
+
+            // Reset VISITED at start of SigProp
+            if let PassType::SigProp = pass_type {
+                for v in &mut self.state {
+                    *v &= !Self::VISITED;
+                }
+            }
+
+            match pass_type {
+                PassType::SigProp => self.decode_significance_propagation(bp)?,
+                PassType::MagRef => self.decode_magnitude_refinement(bp)?,
+                PassType::Cleanup => self.decode_cleanup(bp)?,
+            }
+            self.num_passes_decoded += 1;
+        }
+
+        Ok(self.coefficients.clone())
     }
 
-    fn decode_significance_propagation(&mut self, bit_plane: u8, width: u32, height: u32, coefficients: &mut [i32]) -> Result<(), ()> {
+    fn decode_significance_propagation(&mut self, bit_plane: u8) -> Result<(), ()> {
         // Scan in stripe order (4 rows at a time)
         let stripe_height = 4;
+        let width = self.width;
+        let height = self.height;
 
         for y_stripe in (0..height).step_by(stripe_height as usize) {
             for x in 0..width {
@@ -191,13 +253,17 @@ impl<'a> BitPlaneCoder<'a> {
                                 self.state[idx] |= Self::SIG | Self::VISITED;
 
                                 // Decode sign
-                                let sc_ctx = self.get_sign_context(x, y, width, height);
-                                let sign_bit = self.mq.decode_bit(sc_ctx);
+                                let sc_data = self.get_sign_context(x, y, width, height);
+                                let sc_ctx = sc_data & 0xFF;
+                                let xor = (sc_data >> 8) & 1;
+                                let sym = self.mq.decode_bit(sc_ctx) as u8;
+                                let sign_bit = sym ^ (xor as u8);
+
                                 if sign_bit != 0 {
                                     self.state[idx] |= Self::SIGN;
-                                    coefficients[idx] = -(1 << bit_plane);
+                                    self.coefficients[idx] = -(1 << bit_plane);
                                 } else {
-                                    coefficients[idx] = 1 << bit_plane;
+                                    self.coefficients[idx] = 1 << bit_plane;
                                 }
                             } else {
                                 // Visited but not significant
@@ -211,7 +277,9 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(())
     }
 
-    fn decode_magnitude_refinement(&mut self, bit_plane: u8, width: u32, height: u32, coefficients: &mut [i32]) -> Result<(), ()> {
+    fn decode_magnitude_refinement(&mut self, bit_plane: u8) -> Result<(), ()> {
+        let width = self.width;
+        let height = self.height;
         let size = (width * height) as usize;
 
         // Collect indices and compute contexts before mutable borrow
@@ -234,9 +302,9 @@ impl<'a> BitPlaneCoder<'a> {
             if bit != 0 {
                 // Add bit to coefficient
                 if (state & Self::SIGN) != 0 {
-                    coefficients[i] -= 1 << bit_plane;
+                    self.coefficients[i] -= 1 << bit_plane;
                 } else {
-                    coefficients[i] += 1 << bit_plane;
+                    self.coefficients[i] += 1 << bit_plane;
                 }
             }
 
@@ -245,9 +313,11 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(())
     }
 
-    fn decode_cleanup(&mut self, bit_plane: u8, width: u32, height: u32, coefficients: &mut [i32]) -> Result<(), ()> {
+    fn decode_cleanup(&mut self, bit_plane: u8) -> Result<(), ()> {
         // Scan in stripe order
         let stripe_height = 4;
+        let width = self.width;
+        let height = self.height;
 
         for y_stripe in (0..height).step_by(stripe_height as usize) {
             for x in 0..width {
@@ -274,13 +344,17 @@ impl<'a> BitPlaneCoder<'a> {
                             self.state[idx] |= Self::SIG;
 
                             // Decode sign
-                            let sc_ctx = self.get_sign_context(x, y, width, height);
-                            let sign_bit = self.mq.decode_bit(sc_ctx);
+                            let sc_data = self.get_sign_context(x, y, width, height);
+                            let sc_ctx = sc_data & 0xFF;
+                            let xor = (sc_data >> 8) & 1;
+                            let sym = self.mq.decode_bit(sc_ctx) as u8;
+                            let sign_bit = sym ^ (xor as u8);
+
                             if sign_bit != 0 {
                                 self.state[idx] |= Self::SIGN;
-                                coefficients[idx] = -(1 << bit_plane);
+                                self.coefficients[idx] = -(1 << bit_plane);
                             } else {
-                                coefficients[idx] = 1 << bit_plane;
+                                self.coefficients[idx] = 1 << bit_plane;
                             }
                         }
                     }
@@ -291,63 +365,97 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     fn get_sign_context(&self, x: u32, y: u32, width: u32, height: u32) -> usize {
-        // Simplified sign context calculation
-        // Standard uses horizontal and vertical neighbor signs
-        let mut h_sign = 0;
-        let mut v_sign = 0;
-
+        // Table C-3: Contexts for the sign bit (SC)
+        // Calculate contributions (1 for pos, -1 for neg)
         let w = width as i32;
         let h = height as i32;
         let ix = x as i32;
         let iy = y as i32;
-
         let idx = |cx, cy| (cy * w + cx) as usize;
 
-        // Check horizontal neighbors
-        if ix > 0 {
-            let s = self.state[idx(ix - 1, iy)];
+        let get_sign_val = |pos: usize| -> i8 {
+            let s = self.state[pos];
             if (s & Self::SIG) != 0 {
-                h_sign = if (s & Self::SIGN) != 0 { 1 } else { 0 };
+                if (s & Self::SIGN) != 0 { -1 } else { 1 }
+            } else {
+                0
             }
+        };
+
+        let mut h_contrib = 0;
+        if ix > 0 {
+            h_contrib += get_sign_val(idx(ix - 1, iy));
         }
         if ix < w - 1 {
-            let s = self.state[idx(ix + 1, iy)];
-            if (s & Self::SIG) != 0 {
-                h_sign += if (s & Self::SIGN) != 0 { 1 } else { 0 };
-            }
+            h_contrib += get_sign_val(idx(ix + 1, iy));
         }
 
-        // Check vertical neighbors
+        let mut v_contrib = 0;
         if iy > 0 {
-            let s = self.state[idx(ix, iy - 1)];
-            if (s & Self::SIG) != 0 {
-                v_sign = if (s & Self::SIGN) != 0 { 1 } else { 0 };
-            }
+            v_contrib += get_sign_val(idx(ix, iy - 1));
         }
         if iy < h - 1 {
-            let s = self.state[idx(ix, iy + 1)];
-            if (s & Self::SIG) != 0 {
-                v_sign += if (s & Self::SIGN) != 0 { 1 } else { 0 };
-            }
+            v_contrib += get_sign_val(idx(ix, iy + 1));
         }
 
-        // Sign context is base 9 + h_sign + v_sign
-        9 + (h_sign.min(2) as usize) + (v_sign.min(2) as usize) * 3
+        // Context label 9..13
+        // XOR bit (0 or 1) implies if we should invert the sign bit before coding.
+        // Returns (context, xor_bit) - but mq only needs context?
+        // Wait, sign coding uses xor bit!
+
+        let (ctx_offset, xor) = match (h_contrib, v_contrib) {
+            (2, 2) => (13, 1),
+            (2, 1) => (12, 1),
+            (2, 0) => (11, 1),
+            (2, -1) => (10, 1),
+            (2, -2) => (9, 1),
+            (1, 2) => (12, 1),
+            (1, 1) => (13, 0),
+            (1, 0) => (12, 0),
+            (1, -1) => (11, 0),
+            (1, -2) => (10, 0),
+            (0, 2) => (11, 1),
+            (0, 1) => (12, 1),
+            (0, 0) => (9, 0),
+            (0, -1) => (12, 0),
+            (0, -2) => (11, 0),
+            (-1, 2) => (10, 1),
+            (-1, 1) => (11, 1),
+            (-1, 0) => (12, 1),
+            (-1, -1) => (13, 0),
+            (-1, -2) => (12, 0),
+            (-2, 2) => (9, 0),
+            (-2, 1) => (10, 0),
+            (-2, 0) => (11, 0),
+            (-2, -1) => (12, 0),
+            (-2, -2) => (13, 0),
+            _ => (9, 0),
+        };
+
+        // We need to return the combined context?
+        // Or handle XOR outside?
+        // My MqCoder doesn't handle XOR.
+        // So I should return (ctx, xor).
+        // But the function returns usize.
+        // I'll return ctx | (xor << 8).
+        ctx_offset | (xor << 8)
     }
 
     fn get_magnitude_refinement_context(&self, idx: usize, width: u32, _height: u32) -> usize {
-        // Simplified MR context - uses refinement state and neighbors
+        // Table C-6
         let state = self.state[idx];
         let refined = if (state & Self::REFINE) != 0 { 1 } else { 0 };
 
-        // Check if neighbors are significant (simplified)
         let x = (idx % width as usize) as u32;
         let y = (idx / width as usize) as u32;
-        let (hc, vc, _dc) = self.get_neighbors(x, y);
-        let has_neighbors = if hc > 0 || vc > 0 { 1 } else { 0 };
+        let (hc, vc, dc) = self.get_neighbors(x, y);
+        let sigma_prime = if hc + vc + dc > 0 { 1 } else { 0 };
 
-        // MR context base is 14
-        14 + refined + has_neighbors
+        if refined == 0 {
+            if sigma_prime == 1 { 15 } else { 14 }
+        } else {
+            16
+        }
     }
 
     fn significance_propagation(&mut self, bit_plane: u8) {
@@ -358,59 +466,65 @@ impl<'a> BitPlaneCoder<'a> {
 
         for y in 0..h {
             for x in 0..w {
-                 let idx = (y * w + x) as usize;
-                 let state = self.state[idx];
+                let idx = (y * w + x) as usize;
+                let state = self.state[idx];
 
-                 // If insignificant and not visited
-                 if (state & (Self::SIG | Self::VISITED)) == 0 {
-                     let (hc, vc, dc) = self.get_neighbors(x, y);
-                     if hc > 0 || vc > 0 || dc > 0 {
-                         // Propagate Importance
-                         let val = self.data[idx];
-                         let bit = (val.abs() >> bit_plane) & 1;
+                // If insignificant and not visited
+                if (state & (Self::SIG | Self::VISITED)) == 0 {
+                    let (hc, vc, dc) = self.get_neighbors(x, y);
+                    if hc > 0 || vc > 0 || dc > 0 {
+                        // Propagate Importance
+                        let val = self.data[idx];
+                        let bit = (val.abs() >> bit_plane) & 1;
 
-                         // Encode ZC
-                         let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8); // band 0 assumed
-                         self.mq.encode(bit as u8, cx);
+                        // Encode ZC
+                        let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8); // band 0 assumed
+                        self.mq.encode(bit as u8, cx);
 
-                         if bit == 1 {
-                             // Became Significant: Update State
-                             let sign = if val < 0 { 1 } else { 0 };
-                             self.state[idx] |= Self::SIG | Self::VISITED;
-                             if sign == 1 { self.state[idx] |= Self::SIGN; }
+                        if bit == 1 {
+                            // Became Significant: Update State
+                            let sign = if val < 0 { 1 } else { 0 };
+                            self.state[idx] |= Self::SIG | Self::VISITED;
+                            if sign == 1 {
+                                self.state[idx] |= Self::SIGN;
+                            }
 
-                             // Encode Sign (SC)
-                             // Context depends on neighbor signs
-                             let sc_ctx = self.get_sign_context(x, y, self.width, self.height);
-                             self.mq.encode(sign as u8, sc_ctx);
-                         } else {
-                             // Visited but not significant
-                             self.state[idx] |= Self::VISITED;
-                         }
-                     }
-                 }
+                            // Encode Sign (SC)
+                            // Context depends on neighbor signs
+                            // Context depends on neighbor signs
+                            let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                            let sc_ctx = sc_data & 0xFF;
+                            let xor = (sc_data >> 8) & 1;
+                            let sym = sign ^ (xor as u8);
+                            self.mq.encode(sym, sc_ctx);
+                        } else {
+                            // Visited but not significant
+                            self.state[idx] |= Self::VISITED;
+                        }
+                    }
+                }
             }
         }
     }
 
     fn magnitude_refinement(&mut self, bit_plane: u8) {
-         let w = self.width;
-         let h = self.height;
-         for i in 0..(w*h) as usize {
-             let state = self.state[i];
-             // If already significant and NOT visited in SigProp (i.e., became sig in prev bitplane)
-             if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
-                  self.state[i] |= Self::VISITED; // Mark visited for this bitplane
-                  let val = self.data[i];
-                  let bit = (val.abs() >> bit_plane) & 1;
+        let w = self.width;
+        let h = self.height;
+        for i in 0..(w * h) as usize {
+            let state = self.state[i];
+            // If already significant and NOT visited in SigProp (i.e., became sig in prev bitplane)
+            if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
+                self.state[i] |= Self::VISITED; // Mark visited for this bitplane
+                let val = self.data[i];
+                let bit = (val.abs() >> bit_plane) & 1;
 
-                  // MR Context
-                  let mr_ctx = 14;
-                  // Refinement logic: uses Neighbors+RefineBit state.
-                  self.mq.encode(bit as u8, mr_ctx);
-                  self.state[i] |= Self::REFINE; // First refinement done
-             }
-         }
+                // MR Context
+                let mr_ctx = self.get_magnitude_refinement_context(i, w, h);
+                // Refinement logic: uses Neighbors+RefineBit state.
+                self.mq.encode(bit as u8, mr_ctx);
+                self.state[i] |= Self::REFINE; // First refinement done
+            }
+        }
     }
 
     fn cleanup(&mut self, bit_plane: u8) {
@@ -422,31 +536,36 @@ impl<'a> BitPlaneCoder<'a> {
 
         for y in 0..h {
             for x in 0..w {
-                 let idx = (y * w + x) as usize;
-                 let state = self.state[idx];
-                 if (state & Self::VISITED) == 0 {
-                     // Not visited: Must be insignificant so far
-                     let (hc, vc, dc) = self.get_neighbors(x, y);
+                let idx = (y * w + x) as usize;
+                let state = self.state[idx];
+                if (state & Self::VISITED) == 0 {
+                    // Not visited: Must be insignificant so far
+                    let (hc, vc, dc) = self.get_neighbors(x, y);
 
-                     // ZC Context
-                     let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8);
-                     let val = self.data[idx];
-                     let bit = (val.abs() >> bit_plane) & 1;
+                    // ZC Context
+                    let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8);
+                    let val = self.data[idx];
+                    let bit = (val.abs() >> bit_plane) & 1;
 
-                     self.mq.encode(bit as u8, cx);
+                    self.mq.encode(bit as u8, cx);
 
-                     if bit == 1 {
-                          // Became Significant
-                          let sign = if val < 0 { 1 } else { 0 };
-                          self.state[idx] |= Self::SIG;
-                          if sign == 1 { self.state[idx] |= Self::SIGN; }
+                    if bit == 1 {
+                        // Became Significant
+                        let sign = if val < 0 { 1 } else { 0 };
+                        self.state[idx] |= Self::SIG;
+                        if sign == 1 {
+                            self.state[idx] |= Self::SIGN;
+                        }
 
-                          let sc_ctx = self.get_sign_context(x, y, self.width, self.height);
-                          self.mq.encode(sign as u8, sc_ctx);
-                     }
-                 }
-                 // Reset VISITED for next bitplane
-                 self.state[idx] &= !Self::VISITED;
+                        let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                        let sc_ctx = sc_data & 0xFF;
+                        let xor = (sc_data >> 8) & 1;
+                        let sym = sign ^ (xor as u8); // Invert if xor is set
+                        self.mq.encode(sym, sc_ctx);
+                    }
+                }
+                // Reset VISITED for next bitplane
+                self.state[idx] &= !Self::VISITED;
             }
         }
     }
@@ -459,12 +578,7 @@ mod tests {
     #[test]
     fn test_bit_plane_coding_simple() {
         // 4x4 block
-        let data = [
-             10, 0, 0, 0,
-              0, 5, 0, 0,
-              0, 0, -3, 0,
-              0, 0, 0, 1
-        ];
+        let data = [10, 0, 0, 0, 0, 5, 0, 0, 0, 0, -3, 0, 0, 0, 0, 1];
         let mut bpc = BitPlaneCoder::new(4, 4, &data);
 
         // This should not panic
@@ -481,6 +595,10 @@ mod tests {
         // wait, we ran loop 5..0. 0..5 rev.
         // 3 is 000011.
         // Bit 1: 3>>1 & 1 = 1. Yes.
-        assert_eq!(bpc.state[10] & sig, sig, "Index 10 (-3) should be significant");
+        assert_eq!(
+            bpc.state[10] & sig,
+            sig,
+            "Index 10 (-3) should be significant"
+        );
     }
 }

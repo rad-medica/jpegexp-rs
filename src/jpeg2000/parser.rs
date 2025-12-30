@@ -3,7 +3,7 @@
 //! Handles the parsing of Main Headers (SOC, SIZ, COD, QCD, CAP) and
 //! Tile-Part Headers (SOT, SOD).
 
-use super::image::{J2kCap, J2kCod, J2kImage, J2kQcd};
+use super::image::{J2kCap, J2kCod, J2kComponentInfo, J2kImage, J2kQcd};
 use crate::JpeglsError;
 use crate::jpeg_marker_code::JpegMarkerCode;
 use crate::jpeg_stream_reader::JpegStreamReader;
@@ -105,10 +105,22 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         self.image.component_count = comps as u32;
 
         // Components info follows... (Precision, Subsamp) - Skip for now or store
-        for _ in 0..comps {
-            let _depth = self.reader.read_u8()?;
-            let _sub_x = self.reader.read_u8()?;
-            let _sub_y = self.reader.read_u8()?;
+        for c in 0..comps {
+            let depth_byte = self.reader.read_u8()?;
+            let depth = (depth_byte & 0x7F) + 1;
+            let is_signed = (depth_byte & 0x80) != 0;
+            let sub_x = self.reader.read_u8()?;
+            let sub_y = self.reader.read_u8()?;
+            eprintln!(
+                "DEBUG: Component {} Depth={} Signed={} Sub=({},{})",
+                c, depth, is_signed, sub_x, sub_y
+            );
+            self.image.components.push(J2kComponentInfo {
+                depth,
+                is_signed,
+                dx: sub_x,
+                dy: sub_y,
+            });
         }
         Ok(())
     }
@@ -123,16 +135,32 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             return Err(JpeglsError::InvalidData);
         }
         let scod = self.reader.read_u8()?; // coding style flags
+        eprintln!("DEBUG: parse_cod scod={:02X}", scod);
         let sprog = self.reader.read_u8()?; // progression order
         let nlayers = self.reader.read_u16()?; // number of layers
         let mct = self.reader.read_u8()?; // multi-component transform flag
         let decomposition_levels = self.reader.read_u8()?; // number of decomposition levels
         let codeblock_width_exp = self.reader.read_u8()?; // codeblock width exponent (log2)
         let codeblock_height_exp = self.reader.read_u8()?; // codeblock height exponent (log2)
+        let _codeblock_style = self.reader.read_u8()?;
+        let transformation = self.reader.read_u8()?;
 
-        // Skip remaining bytes (Codeblock style, transformation, precints sizes if any)
-        // We consumed 2 (len) + 8 (fields) = 10 bytes from the 'len' budget.
-        let remaining = (len as usize).saturating_sub(10);
+        let mut precinct_sizes = Vec::new();
+        // If Scod bit 0 (Precincts defined) is set, read precinct sizes.
+        if (scod & 0x01) != 0 {
+            let count = (decomposition_levels + 1) as usize;
+            for _ in 0..count {
+                precinct_sizes.push(self.reader.read_u8()?);
+            }
+        }
+
+        // We consumed 2(len) + 5(Scod..Decomp) + 2(CB dim) + 2(CB style, Trans) + Prec = 11 + Prec
+        // Previous calc was 8 (Scod..CBH) + ...
+        // Total fields read:
+        // Scod(1), Sprog(1), Nlayers(2), MCT(1), Decomp(1), CBW(1), CBH(1), Style(1), Trans(1) = 10 bytes.
+        // + 2 bytes length = 12 bytes.
+        let parsed_bytes = 12 + precinct_sizes.len();
+        let remaining = (len as usize).saturating_sub(parsed_bytes);
         if remaining > 0 {
             self.reader.advance(remaining);
         }
@@ -144,6 +172,8 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             decomposition_levels,
             codeblock_width_exp,
             codeblock_height_exp,
+            transformation,
+            precinct_sizes,
         });
         Ok(())
     }
@@ -165,10 +195,21 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let mut bytes_left = (len as usize).saturating_sub(3);
 
         let mut step_sizes = Vec::new();
-        while bytes_left >= 2 {
-            let step = self.reader.read_u16()?;
+        // Read step sizes based on quantization style
+        let quant_type = sqcd & 0x1F;
+        let is_16bit = quant_type == 0x02; // Scalar Expounded
+
+        let step_size_len = if is_16bit { 2 } else { 1 };
+
+        while bytes_left >= step_size_len {
+            let step = if is_16bit {
+                self.reader.read_u16()?
+            } else {
+                // Align 8-bit steps (Exp << 3) to 16-bit format (Exp << 11) by shifting left 8
+                (self.reader.read_u8()? as u16) << 8
+            };
             step_sizes.push(step);
-            bytes_left -= 2;
+            bytes_left -= step_size_len as usize;
         }
         eprintln!(
             "DEBUG: parse_qcd steps={:?} leftover={}",

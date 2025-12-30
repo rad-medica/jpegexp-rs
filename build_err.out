@@ -1,0 +1,320 @@
+    Checking jpegexp-rs v0.1.0 (C:\Users\aroja\CODE\jpegexp-rs)
+error[E0308]: mismatched types
+   --> src\jpeg2000\decoder.rs:492:48
+    |
+492 |                         .position(|cb| cb.x == cb_info.x && cb.y == cb_info.y);
+    |                                        ----    ^^^^^^^^^ expected `u32`, found `usize`
+    |                                        |
+    |                                        expected because this is `u32`
+    |
+help: you can convert a `usize` to a `u32` and panic if the converted value doesn't fit
+    |
+492 |                         .position(|cb| cb.x == cb_info.x.try_into().unwrap() && cb.y == cb_info.y);
+    |                                                         ++++++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src\jpeg2000\decoder.rs:492:69
+    |
+492 |                         .position(|cb| cb.x == cb_info.x && cb.y == cb_info.y);
+    |                                                             ----    ^^^^^^^^^ expected `u32`, found `usize`
+    |                                                             |
+    |                                                             expected because this is `u32`
+    |
+help: you can convert a `usize` to a `u32` and panic if the converted value doesn't fit
+    |
+492 |                         .position(|cb| cb.x == cb_info.x && cb.y == cb_info.y.try_into().unwrap());
+    |                                                                              ++++++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src\jpeg2000\decoder.rs:503:29
+    |
+500 |                         let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
+    |                                       ---------------------------------------------------- arguments to this function are incorrect
+...
+503 |                             &block.state,
+    |                             ^^^^^^^^^^^^ expected `&[i32]`, found `&Vec<u8>`
+    |
+    = note: expected reference `&[i32]`
+               found reference `&Vec<u8>`
+note: associated function defined here
+   --> src\jpeg2000\bit_plane_coder.rs:14:12
+    |
+ 14 |     pub fn new(width: u32, height: u32, data: &'a [i32]) -> Self {
+    |            ^^^                          ---------------
+
+error[E0308]: mismatched types
+   --> src\jpeg2000\decoder.rs:544:35
+    |
+544 |                         block.x = cb_info.x;
+    |                         -------   ^^^^^^^^^ expected `u32`, found `usize`
+    |                         |
+    |                         expected due to the type of this binding
+
+error[E0308]: mismatched types
+   --> src\jpeg2000\decoder.rs:545:35
+    |
+545 |                         block.y = cb_info.y;
+    |                         -------   ^^^^^^^^^ expected `u32`, found `usize`
+    |                         |
+    |                         expected due to the type of this binding
+
+warning: unreachable statement
+   --> src\jpegls\scan_decoder.rs:298:25
+    |
+296 |                           continue;
+    |                           -------- any code following this expression is unreachable
+297 |                           // Real marker (not restart, not stuffing): back up, remove 0xFF from cache
+298 | /                         eprintln!(
+299 | |                             "DEBUG: Real marker {:02X} at {} Bits={} Cache={:X}",
+300 | |                             next_byte, self.position, self.valid_bits, self.read_cache
+301 | |                         );
+    | |_________________________^ unreachable statement
+    |
+    = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+    = note: this warning originates in the macro `eprintln` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0499]: cannot borrow `*self` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:194:17
+    |
+194 |                 self.decode_cleanup(bp, self.width, self.height, &mut self.coefficients)?;
+    |                 ^^^^^--------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^----------------------^
+    |                 |    |                                           |
+    |                 |    |                                           first mutable borrow occurs here
+    |                 |    first borrow later used by call
+    |                 second mutable borrow occurs here
+
+error[E0499]: cannot borrow `self.coefficients` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:194:66
+    |
+194 |                 self.decode_cleanup(bp, self.width, self.height, &mut self.coefficients)?;
+    |                 ---- --------------                              ^^^^^^^^^^^^^^^^^^^^^^ second mutable borrow occurs here
+    |                 |    |
+    |                 |    first borrow later used by call
+    |                 first mutable borrow occurs here
+
+error[E0499]: cannot borrow `*self` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:197:26
+    |
+197 |                       0 => self.decode_significance_propagation(
+    |                            ^    ------------------------------- first borrow later used by call
+    |  __________________________|
+    | |
+198 | |                         bp,
+199 | |                         self.width,
+200 | |                         self.height,
+201 | |                         &mut self.coefficients,
+    | |                         ---------------------- first mutable borrow occurs here
+202 | |                     )?,
+    | |_____________________^ second mutable borrow occurs here
+
+error[E0499]: cannot borrow `self.coefficients` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:201:25
+    |
+197 |                     0 => self.decode_significance_propagation(
+    |                          ---- ------------------------------- first borrow later used by call
+    |                          |
+    |                          first mutable borrow occurs here
+...
+201 |                         &mut self.coefficients,
+    |                         ^^^^^^^^^^^^^^^^^^^^^^ second mutable borrow occurs here
+
+error[E0499]: cannot borrow `*self` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:203:26
+    |
+203 |                       1 => self.decode_magnitude_refinement(
+    |                            ^    --------------------------- first borrow later used by call
+    |  __________________________|
+    | |
+204 | |                         bp,
+205 | |                         self.width,
+206 | |                         self.height,
+207 | |                         &mut self.coefficients,
+    | |                         ---------------------- first mutable borrow occurs here
+208 | |                     )?,
+    | |_____________________^ second mutable borrow occurs here
+
+error[E0499]: cannot borrow `self.coefficients` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:207:25
+    |
+203 |                     1 => self.decode_magnitude_refinement(
+    |                          ---- --------------------------- first borrow later used by call
+    |                          |
+    |                          first mutable borrow occurs here
+...
+207 |                         &mut self.coefficients,
+    |                         ^^^^^^^^^^^^^^^^^^^^^^ second mutable borrow occurs here
+
+error[E0499]: cannot borrow `*self` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:210:25
+    |
+210 |                         self.decode_cleanup(bp, self.width, self.height, &mut self.coefficients)?
+    |                         ^^^^^--------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^----------------------^
+    |                         |    |                                           |
+    |                         |    |                                           first mutable borrow occurs here
+    |                         |    first borrow later used by call
+    |                         second mutable borrow occurs here
+
+error[E0499]: cannot borrow `self.coefficients` as mutable more than once at a time
+   --> src\jpeg2000\bit_plane_coder.rs:210:74
+    |
+210 |                         self.decode_cleanup(bp, self.width, self.height, &mut self.coefficients)?
+    |                         ---- --------------                              ^^^^^^^^^^^^^^^^^^^^^^ second mutable borrow occurs here
+    |                         |    |
+    |                         |    first borrow later used by call
+    |                         first mutable borrow occurs here
+
+warning: unused variable: `cb_w`
+   --> src\jpeg2000\decoder.rs:159:13
+    |
+159 |         let cb_w = 1 << (cod.codeblock_width_exp + 2);
+    |             ^^^^
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+help: if this is intentional, prefix it with an underscore
+    |
+159 |         let _cb_w = 1 << (cod.codeblock_width_exp + 2);
+    |             +
+help: you might have meant to pattern match on the similarly named constant `MIN_C`
+    |
+159 -         let cb_w = 1 << (cod.codeblock_width_exp + 2);
+159 +         let jpegls::regular_mode_context::RegularModeContext::update_variables_and_bias::MIN_C = 1 << (cod.codeblock_width_exp + 2);
+    |
+
+warning: unused variable: `cb_h`
+   --> src\jpeg2000\decoder.rs:160:13
+    |
+160 |         let cb_h = 1 << (cod.codeblock_height_exp + 2);
+    |             ^^^^
+    |
+help: if this is intentional, prefix it with an underscore
+    |
+160 |         let _cb_h = 1 << (cod.codeblock_height_exp + 2);
+    |             +
+help: you might have meant to pattern match on the similarly named constant `MIN_C`
+    |
+160 -         let cb_h = 1 << (cod.codeblock_height_exp + 2);
+160 +         let jpegls::regular_mode_context::RegularModeContext::update_variables_and_bias::MIN_C = 1 << (cod.codeblock_height_exp + 2);
+    |
+
+warning: unused variable: `remaining_len`
+   --> src\jpeg2000\decoder.rs:291:45
+    |
+291 | ...                   let remaining_len = parser.reader.remaining_data().len();
+    |                           ^^^^^^^^^^^^^
+    |
+help: if this is intentional, prefix it with an underscore
+    |
+291 |                                         let _remaining_len = parser.reader.remaining_data().len();
+    |                                             +
+help: you might have meant to pattern match on the similarly named constant `BLOCK_DIM`
+    |
+291 -                                         let remaining_len = parser.reader.remaining_data().len();
+291 +                                         let jpeg1::dct::BLOCK_DIM = parser.reader.remaining_data().len();
+    |
+
+warning: unused variable: `remaining_len`
+   --> src\jpeg2000\decoder.rs:322:45
+    |
+322 | ...                   let remaining_len = parser.reader.remaining_data().len();
+    |                           ^^^^^^^^^^^^^
+    |
+help: if this is intentional, prefix it with an underscore
+    |
+322 |                                         let _remaining_len = parser.reader.remaining_data().len();
+    |                                             +
+help: you might have meant to pattern match on the similarly named constant `BLOCK_DIM`
+    |
+322 -                                         let remaining_len = parser.reader.remaining_data().len();
+322 +                                         let jpeg1::dct::BLOCK_DIM = parser.reader.remaining_data().len();
+    |
+
+warning: unused variable: `remaining_len`
+   --> src\jpeg2000\decoder.rs:344:45
+    |
+344 | ...                   let remaining_len = parser.reader.remaining_data().len();
+    |                           ^^^^^^^^^^^^^
+    |
+help: if this is intentional, prefix it with an underscore
+    |
+344 |                                         let _remaining_len = parser.reader.remaining_data().len();
+    |                                             +
+help: you might have meant to pattern match on the similarly named constant `BLOCK_DIM`
+    |
+344 -                                         let remaining_len = parser.reader.remaining_data().len();
+344 +                                         let jpeg1::dct::BLOCK_DIM = parser.reader.remaining_data().len();
+    |
+
+warning: unused variable: `remaining_len`
+   --> src\jpeg2000\decoder.rs:358:13
+    |
+358 |         let remaining_len = parser.reader.remaining_data().len();
+    |             ^^^^^^^^^^^^^
+    |
+help: if this is intentional, prefix it with an underscore
+    |
+358 |         let _remaining_len = parser.reader.remaining_data().len();
+    |             +
+help: you might have meant to pattern match on the similarly named constant `BLOCK_DIM`
+    |
+358 -         let remaining_len = parser.reader.remaining_data().len();
+358 +         let jpeg1::dct::BLOCK_DIM = parser.reader.remaining_data().len();
+    |
+
+warning: unused variable: `hh`
+   --> src\jpeg2000\dwt.rs:121:9
+    |
+121 |         hh: &[i32],
+    |         ^^ help: if this is intentional, prefix it with an underscore: `_hh`
+
+warning: unused variable: `pixels`
+  --> src\jpeg2000\encoder.rs:52:9
+   |
+52 |         pixels: &[u8],
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_pixels`
+
+warning: unused variable: `w`
+  --> src\jpeg2000\packet.rs:33:16
+   |
+33 |     pub fn new(w: usize, h: usize) -> Self {
+   |                ^
+   |
+help: if this is intentional, prefix it with an underscore
+   |
+33 |     pub fn new(_w: usize, h: usize) -> Self {
+   |                +
+help: you might have meant to pattern match on the similarly named constant `BLOCK_DIM`
+   |
+33 -     pub fn new(w: usize, h: usize) -> Self {
+33 +     pub fn new(jpeg1::dct::BLOCK_DIM: usize, h: usize) -> Self {
+   |
+
+warning: unused variable: `h`
+  --> src\jpeg2000\packet.rs:33:26
+   |
+33 |     pub fn new(w: usize, h: usize) -> Self {
+   |                          ^
+   |
+help: if this is intentional, prefix it with an underscore
+   |
+33 |     pub fn new(w: usize, _h: usize) -> Self {
+   |                          +
+help: you might have meant to pattern match on the similarly named constant `BLOCK_DIM`
+   |
+33 -     pub fn new(w: usize, h: usize) -> Self {
+33 +     pub fn new(w: usize, jpeg1::dct::BLOCK_DIM: usize) -> Self {
+   |
+
+warning: variable does not need to be mutable
+  --> src\jpeg2000\packet.rs:34:13
+   |
+34 |         let mut subbands = Vec::with_capacity(3);
+   |             ----^^^^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0308, E0499.
+For more information about an error, try `rustc --explain E0308`.
+warning: `jpegexp-rs` (lib) generated 12 warnings
+error: could not compile `jpegexp-rs` (lib) due to 13 previous errors; 12 warnings emitted

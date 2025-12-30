@@ -3,11 +3,11 @@
 //! This module provides basic JPEG 2000 encoding functionality.
 //! Currently implements a simplified encoder that produces valid J2K codestreams.
 
-use super::image::{J2kCod, J2kQcd};
-use super::writer::J2kWriter;
-use super::dwt::{Dwt53, Dwt97};
-use super::quantization;
 use super::bit_io::J2kBitWriter;
+use super::dwt::{Dwt53, Dwt97};
+use super::image::{J2kCod, J2kQcd};
+use super::quantization;
+use super::writer::J2kWriter;
 use crate::FrameInfo;
 use crate::JpeglsError;
 
@@ -83,8 +83,10 @@ impl J2kEncoder {
             number_of_layers: 1,
             mct: 0,
             decomposition_levels: self.decomposition_levels,
-            codeblock_width_exp: 4, // 2^4 = 16
+            codeblock_width_exp: 4,  // 2^4 = 16
             codeblock_height_exp: 4, // 2^4 = 16
+            transformation: 1,
+            precinct_sizes: Vec::new(),
         };
         writer.write_cod(&cod)?;
 

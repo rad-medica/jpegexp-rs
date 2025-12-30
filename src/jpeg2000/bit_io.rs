@@ -21,6 +21,10 @@ impl<'a> J2kBitReader<'a> {
                 return Err(()); // EOF
             }
             let b = self.data[self.pos];
+            eprintln!(
+                "DEBUG: J2kBitReader load byte {:02X} at pos {}",
+                b, self.pos
+            );
             self.pos += 1;
 
             // Byte stuffing handling for J2K Packet Headers
@@ -35,7 +39,12 @@ impl<'a> J2kBitReader<'a> {
             self.bits_left = 8;
         }
 
-        let bit = (self.bit_buffer >> (self.bits_left - 1)) & 1;
+        let shift = self.bits_left - 1;
+        let bit = (self.bit_buffer >> shift) & 1;
+        eprintln!(
+            "DEBUG: read_bit buffer={:02X} shift={} bit={}",
+            self.bit_buffer, shift, bit
+        );
         self.bits_left -= 1;
         Ok(bit)
     }
