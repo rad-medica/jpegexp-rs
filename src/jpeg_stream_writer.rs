@@ -186,6 +186,27 @@ impl<'a> JpegStreamWriter<'a> {
         Ok(())
     }
 
+    pub fn write_start_of_scan_segment_planar(
+        &mut self,
+        component_id: u8,
+        near_lossless: i32,
+        interleave_mode: InterleaveMode,
+    ) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::StartOfScan)?;
+        let length = 2 + 1 + (1 * 2) + 3; // 1 component
+        self.write_u16(length as u16)?;
+
+        self.write_byte(1)?; // 1 component
+        self.write_byte(component_id)?; // Component Selector
+        self.write_byte(0)?; // Mapping table selector
+
+        self.write_byte(near_lossless as u8)?;
+        self.write_byte(interleave_mode as u8)?;
+        self.write_byte(0)?; // Ah, Al
+
+        Ok(())
+    }
+
     pub fn write_jpegls_preset_parameters_segment(
         &mut self,
         pc: &JpeglsPcParameters,

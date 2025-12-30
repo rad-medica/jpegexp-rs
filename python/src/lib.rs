@@ -275,8 +275,28 @@ fn decode_j2k_with_info(data: &[u8]) -> PyResult<(Vec<u8>, u32, u32, u32)> {
     let width = image.width;
     let height = image.height;
     let components = image.component_count;
-    // J2K returns metadata; full pixel decode pending
-    let pixels = vec![128u8; (width * height * components) as usize];
+
+    let planar_pixels = image
+        .reconstruct_pixels()
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+
+    // Convert planar (RRR...GGG...BBB...) to interleaved (RGBRGB...)
+    let pixel_count = (width * height) as usize;
+    let mut pixels = vec![0u8; planar_pixels.len()];
+
+    if components == 1 {
+        pixels.copy_from_slice(&planar_pixels);
+    } else {
+        for i in 0..pixel_count {
+            for c in 0..components {
+                let src_idx = (c as usize * pixel_count) + i;
+                let dst_idx = (i * components as usize) + c as usize;
+                if src_idx < planar_pixels.len() && dst_idx < pixels.len() {
+                    pixels[dst_idx] = planar_pixels[src_idx];
+                }
+            }
+        }
+    }
 
     Ok((pixels, width, height, components))
 }

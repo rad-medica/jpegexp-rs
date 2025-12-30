@@ -166,17 +166,14 @@ impl J2kImage {
     /// Returns a vector of pixel values (u8) for the image
     pub fn reconstruct_pixels(&self) -> Result<Vec<u8>, String> {
         if self.tiles.is_empty() {
-            eprintln!("DEBUG: reconstruct_pixels - No tiles!");
             return Err("No tiles in image".to_string());
         }
-        eprintln!("DEBUG: reconstruct_pixels - Tiles: {}", self.tiles.len());
 
         let mut pixels = vec![0u8; (self.width * self.height * self.component_count) as usize];
         let pixels_per_component = (self.width * self.height) as usize;
 
         // For now, handle single tile case
         let tile = &self.tiles[0];
-        eprintln!("DEBUG: Tile 0 Components: {}", tile.components.len());
 
         let cod = self.cod.as_ref().ok_or("No COD marker")?;
         let nom_w = 1 << (cod.codeblock_width_exp + 2);
@@ -196,25 +193,9 @@ impl J2kImage {
                 let cap = (sb_w * sb_h) as usize;
                 let mut sb_data = vec![0.0f32; cap]; // Zero initialized
 
-                eprintln!(
-                    "DEBUG: Retrieving subband Res=? Ori={:?} Blocks={}",
-                    orientation,
-                    sb.codeblocks.len()
-                );
                 for cb in &sb.codeblocks {
                     let start_x = cb.x * nom_w as u32;
                     let start_y = cb.y * nom_h as u32;
-
-                    let nz = cb.coefficients.iter().filter(|&&c| c != 0).count();
-                    eprintln!(
-                        "DEBUG: CB ({}, {}) w={} h={} coeffs={} (Non-zero: {})",
-                        cb.x,
-                        cb.y,
-                        cb.width,
-                        cb.height,
-                        cb.coefficients.len(),
-                        nz
-                    );
 
                     for cy in 0..cb.height {
                         for cx in 0..cb.width {
@@ -252,20 +233,18 @@ impl J2kImage {
             }
         };
 
+        let mut component_buffers = Vec::new();
+
         for (comp_idx, component) in tile.components.iter().enumerate() {
-            eprintln!("DEBUG: Reconstructing Component {}", comp_idx);
             if component.resolutions.is_empty() {
+                // Ensure we push something to keep indices aligned, even if empty/invalid
+                component_buffers.push(vec![0.0f32; pixels_per_component]);
                 continue;
             }
 
             // Start with LL from Resolution 0
             let mut current_ll =
                 get_subband_data(&component.resolutions[0], SubbandOrientation::LL);
-            eprintln!(
-                "DEBUG: Res 0 LL size: {} (Non-zero: {})",
-                current_ll.len(),
-                current_ll.iter().filter(|&&v| v != 0.0).count()
-            );
 
             if current_ll.is_empty() {
                 let r0 = &component.resolutions[0];
@@ -273,12 +252,7 @@ impl J2kImage {
             }
 
             let cod = self.cod.as_ref().ok_or("No COD marker")?;
-            eprintln!(
-                "DEBUG: reconstruct_pixels cod.transformation = {}",
-                cod.transformation
-            );
             let is_reversible = cod.transformation == 1;
-            eprintln!("DEBUG: Reversible: {}", is_reversible);
 
             if !is_reversible {
                 let qcd = self.qcd.as_ref().ok_or("No QCD for Irreversible")?;
@@ -288,10 +262,6 @@ impl J2kImage {
                     let mant = val & 0x7FF;
                     let rb = 8 + guard_bits;
                     let s = (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(exp as i32 - rb as i32);
-                    eprintln!(
-                        "DEBUG: Dequant step: val={} exp={} mant={} rb={} s={}",
-                        val, exp, mant, rb, s
-                    );
                     s
                 };
                 let step_ll = if !qcd.step_sizes.is_empty() {
@@ -299,14 +269,9 @@ impl J2kImage {
                 } else {
                     1.0
                 };
-                eprintln!("DEBUG: Res 0 LL Dequant Step: {:.4}", step_ll);
                 for v in &mut current_ll {
                     *v *= step_ll;
                 }
-                eprintln!(
-                    "DEBUG: Res 0 LL Samples: {:?}",
-                    &current_ll.iter().take(5).collect::<Vec<_>>()
-                );
             }
 
             // Iterate through higher resolutions (1..N) to apply IDWT
@@ -315,33 +280,6 @@ impl J2kImage {
                 let hl = get_subband_data(res, SubbandOrientation::HL);
                 let lh = get_subband_data(res, SubbandOrientation::LH);
                 let hh = get_subband_data(res, SubbandOrientation::HH);
-
-                eprintln!(
-                    "DEBUG: Res {} IDWT. HL nz: {}, LH nz: {}, HH nz: {}",
-                    r,
-                    hl.iter().filter(|&&v| v != 0.0).count(),
-                    lh.iter().filter(|&&v| v != 0.0).count(),
-                    hh.iter().filter(|&&v| v != 0.0).count()
-                );
-
-                if !hl.is_empty() {
-                    eprintln!(
-                        "DEBUG: HL[0..5]: {:?}",
-                        hl.iter().take(5).collect::<Vec<_>>()
-                    );
-                }
-                if !lh.is_empty() {
-                    eprintln!(
-                        "DEBUG: LH[0..5]: {:?}",
-                        lh.iter().take(5).collect::<Vec<_>>()
-                    );
-                }
-                if !hh.is_empty() {
-                    eprintln!(
-                        "DEBUG: HH[0..5]: {:?}",
-                        hh.iter().take(5).collect::<Vec<_>>()
-                    );
-                }
 
                 let mut output = vec![0.0f32; (res.width * res.height) as usize];
 
@@ -420,11 +358,6 @@ impl J2kImage {
                         )
                     };
 
-                    eprintln!(
-                        "DEBUG: Res {} Dequant Steps: HL={:.4} LH={:.4} HH={:.4}",
-                        r, step_hl, step_lh, step_hh
-                    );
-
                     // Apply step sizes
                     let hl_fq: Vec<f32> = hl.iter().map(|&v| v * step_hl).collect();
                     let lh_fq: Vec<f32> = lh.iter().map(|&v| v * step_lh).collect();
@@ -443,19 +376,59 @@ impl J2kImage {
                 current_ll = output;
             }
 
-            let final_data = current_ll;
-            // Convert to u8 pixels and store
+            component_buffers.push(current_ll);
+        }
+
+        // Apply Multiple Component Transform (MCT) if enabled
+        let cod = self.cod.as_ref().ok_or("No COD marker")?;
+        if cod.mct == 1 && component_buffers.len() >= 3 {
+             let count = component_buffers[0].len();
+             if component_buffers[1].len() == count && component_buffers[2].len() == count {
+                 if cod.transformation == 1 {
+                     // Reversible (RCT)
+                     // G = Y - floor((Cb + Cr) / 4)
+                     // R = Cr + G
+                     // B = Cb + G
+                     for i in 0..count {
+                         let y = component_buffers[0][i] as i32;
+                         let cb = component_buffers[1][i] as i32;
+                         let cr = component_buffers[2][i] as i32;
+
+                         let g = y - ((cb + cr) >> 2);
+                         let r = cr + g;
+                         let b = cb + g;
+
+                         component_buffers[0][i] = r as f32;
+                         component_buffers[1][i] = g as f32;
+                         component_buffers[2][i] = b as f32;
+                     }
+                 } else {
+                     // Irreversible (ICT)
+                     // R = Y + 1.402 * Cr
+                     // G = Y - 0.34413 * Cb - 0.71414 * Cr
+                     // B = Y + 1.772 * Cb
+                     for i in 0..count {
+                         let y = component_buffers[0][i];
+                         let cb = component_buffers[1][i];
+                         let cr = component_buffers[2][i];
+
+                         let r = y + 1.402 * cr;
+                         let g = y - 0.34413 * cb - 0.71414 * cr;
+                         let b = y + 1.772 * cb;
+
+                         component_buffers[0][i] = r;
+                         component_buffers[1][i] = g;
+                         component_buffers[2][i] = b;
+                     }
+                 }
+             }
+        }
+
+        // Finalize: Level Shift and Clamp
+        for (comp_idx, buffer) in component_buffers.iter().enumerate() {
             let offset = comp_idx * pixels_per_component;
 
-            eprintln!(
-                "DEBUG: Final Pixels Comp {} (showing first 10, offset 128 applied):",
-                comp_idx
-            );
-            for i in 0..10.min(final_data.len()) {
-                let val_u8 = (final_data[i] + 128.0).round().clamp(0.0, 255.0) as u8;
-                eprintln!("  [{}] {:.2} -> {}", i, final_data[i], val_u8);
-            }
-            for i in 0..pixels_per_component.min(final_data.len()) {
+            for i in 0..pixels_per_component.min(buffer.len()) {
                 let depth = if self.components.len() > comp_idx {
                     self.components[comp_idx].depth
                 } else {
@@ -465,10 +438,7 @@ impl J2kImage {
                 let level_offset = (1 << (depth - 1)) as f32;
                 let scale_div = (1 << shift) as f32;
 
-                // For unsigned data, we subtract level shift in decoder, so here we add it back.
-                // If is_signed is true, we might handled it differently, but usually J2K works on signed samples relative to mid-grey.
-
-                let val = ((final_data[i] + level_offset) / scale_div)
+                let val = ((buffer[i] + level_offset) / scale_div)
                     .round()
                     .clamp(0.0, 255.0) as u8;
                 if offset + i < pixels.len() {

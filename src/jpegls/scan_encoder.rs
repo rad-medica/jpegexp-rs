@@ -6,6 +6,7 @@ use crate::jpegls::coding_parameters::CodingParameters;
 use crate::jpegls::regular_mode_context::RegularModeContext;
 use crate::jpegls::run_mode_context::RunModeContext;
 use crate::jpegls::traits::JpeglsSample;
+use crate::jpegls::InterleaveMode;
 
 pub struct ScanEncoder<'a> {
     frame_info: FrameInfo,
@@ -17,10 +18,13 @@ pub struct ScanEncoder<'a> {
     free_bit_count: i32,
     is_ff_written: bool,
 
-    // Contexts
-    regular_mode_contexts: Vec<RegularModeContext>,
-    run_mode_contexts: Vec<RunModeContext>,
-    run_index: usize,
+    // Contexts (per component)
+    // regular_mode_contexts[component_index][context_id]
+    regular_mode_contexts: Vec<Vec<RegularModeContext>>,
+    // run_mode_contexts[component_index][0..1]
+    run_mode_contexts: Vec<Vec<RunModeContext>>,
+    // run_index[component_index]
+    run_index: Vec<usize>,
 
     // Parameters
     t1: i32,
@@ -37,8 +41,24 @@ impl<'a> ScanEncoder<'a> {
         destination: &'a mut [u8],
     ) -> Self {
         let range = pc_parameters.maximum_sample_value + 1;
-        let regular_mode_contexts = vec![RegularModeContext::new(range); 365];
-        let run_mode_contexts = vec![RunModeContext::new(0, range), RunModeContext::new(1, range)];
+        let num_components = if coding_parameters.interleave_mode == InterleaveMode::None {
+            1
+        } else {
+            frame_info.component_count as usize
+        };
+
+        let mut regular_mode_contexts = Vec::with_capacity(num_components);
+        let mut run_mode_contexts = Vec::with_capacity(num_components);
+        let mut run_index = Vec::with_capacity(num_components);
+
+        for _ in 0..num_components {
+            regular_mode_contexts.push(vec![RegularModeContext::new(range); 365]);
+            run_mode_contexts.push(vec![
+                RunModeContext::new(0, range),
+                RunModeContext::new(1, range),
+            ]);
+            run_index.push(0);
+        }
 
         Self {
             frame_info,
@@ -51,7 +71,7 @@ impl<'a> ScanEncoder<'a> {
             is_ff_written: false,
             regular_mode_contexts,
             run_mode_contexts,
-            run_index: 0,
+            run_index,
             t1: pc_parameters.threshold1,
             t2: pc_parameters.threshold2,
             t3: pc_parameters.threshold3,
@@ -88,12 +108,8 @@ impl<'a> ScanEncoder<'a> {
         if bit_count == 0 {
             return;
         }
-        // Clamp bit_count to prevent overflow (max 31 bits for u32 shift)
         let bit_count = bit_count.clamp(0, 31);
-
-        // Handle case where bits don't fit in current buffer
         if self.free_bit_count < bit_count {
-            // Write the high bits that fit
             let bits_that_fit = self.free_bit_count.max(0);
             if bits_that_fit > 0 {
                 let shift = bit_count - bits_that_fit;
@@ -102,7 +118,6 @@ impl<'a> ScanEncoder<'a> {
                 self.bit_buffer |= high_bits << (self.free_bit_count - bits_that_fit);
                 self.free_bit_count -= bits_that_fit;
             }
-            // Flush and write remaining bits
             self.flush();
             let remaining = bit_count - bits_that_fit;
             if remaining > 0 && self.free_bit_count >= remaining {
@@ -112,7 +127,6 @@ impl<'a> ScanEncoder<'a> {
                 self.free_bit_count -= remaining;
             }
         } else {
-            // Normal case: all bits fit
             self.bit_buffer |= bits << (self.free_bit_count - bit_count);
             self.free_bit_count -= bit_count;
         }
@@ -123,12 +137,10 @@ impl<'a> ScanEncoder<'a> {
             let byte_val = (self.bit_buffer >> 24) as u8;
             self.bit_buffer <<= 8;
             self.free_bit_count += 8;
-
             if self.position < self.destination.len() {
                 self.destination[self.position] = byte_val;
                 self.position += 1;
             }
-
             if byte_val == JPEG_MARKER_START_BYTE && self.position < self.destination.len() {
                 self.destination[self.position] = 0x00;
                 self.position += 1;
@@ -137,7 +149,6 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn end_scan(&mut self) {
-        // Pad with 0-bits to byte alignment
         let used_bits = 32 - self.free_bit_count;
         let remainder = used_bits % 8;
         if remainder != 0 {
@@ -157,30 +168,39 @@ impl<'a> ScanEncoder<'a> {
     ) -> Result<(), JpeglsError> {
         let width = self.frame_info.width as usize;
         let height = self.frame_info.height as usize;
-        let components = 1;
+        let interleave_mode = self.coding_parameters.interleave_mode;
 
-        let pixel_stride = width + 2;
-        let mut line_buffer: Vec<T> = vec![T::default(); components * pixel_stride * 2];
+        let components = if interleave_mode == InterleaveMode::None {
+            1
+        } else {
+            self.frame_info.component_count as usize
+        };
+
+        let pixel_stride = width * components;
+        let buffer_width = (width + 1) * components;
+
+        let mut line_buffer: Vec<T> = vec![T::default(); buffer_width * 2];
         let mut source_idx = 0;
 
         for line in 0..height {
             let (prev_line_slice, curr_line_slice) =
-                line_buffer.split_at_mut(components * pixel_stride);
+                line_buffer.split_at_mut(buffer_width);
             let (prev, curr) = if (line & 1) == 1 {
                 (curr_line_slice, prev_line_slice)
             } else {
                 (prev_line_slice, curr_line_slice)
             };
 
-            let prev_line = &mut prev[0..pixel_stride];
-            let curr_line = &mut curr[0..pixel_stride];
+            let current_source_row = &source[source_idx..source_idx + pixel_stride];
+            curr[components..buffer_width].copy_from_slice(current_source_row);
 
-            let current_source_row = &source[source_idx..source_idx + width];
-            curr_line[1..width + 1].copy_from_slice(current_source_row);
-            curr_line[0] = prev_line[1];
+            // Replicate boundary pixels for padding
+            for c in 0..components {
+                 curr[c] = prev[components + c];
+            }
 
-            self.encode_sample_line(prev_line, curr_line, width)?;
-            source_idx += width;
+            self.encode_sample_line(prev, curr, width, components)?;
+            source_idx += pixel_stride;
         }
         Ok(())
     }
@@ -190,36 +210,92 @@ impl<'a> ScanEncoder<'a> {
         prev_line: &[T],
         curr_line: &mut [T],
         width: usize,
+        components: usize,
     ) -> Result<(), JpeglsError> {
-        let mut index = 1;
-        let mut rb = prev_line[0].to_i32();
-        let mut rd = prev_line[1].to_i32();
+        let mut pixel_idx = 0;
+        let mut current_buf_idx = components;
 
-        while index <= width {
-            let ra = curr_line[index - 1].to_i32();
-            let rc = rb;
-            rb = rd;
-            rd = prev_line[index + 1].to_i32();
+        let mut rb = vec![0i32; components];
+        let mut rd = vec![0i32; components];
 
-            let d1 = rd - rb;
-            let d2 = rb - rc;
-            let d3 = rc - ra;
+        for c in 0..components {
+            rb[c] = prev_line[c].to_i32();
+            rd[c] = prev_line[components + c].to_i32();
+        }
 
-            let q1 = self.quantize_gradient(d1);
-            let q2 = self.quantize_gradient(d2);
-            let q3 = self.quantize_gradient(d3);
+        while pixel_idx < width {
+            let mut all_qs_zero = true;
+            let mut component_qs = vec![0; components];
+            let mut component_pred = vec![0; components];
 
-            let qs = self.compute_context_id(q1, q2, q3);
+            let is_last_pixel = pixel_idx == width - 1;
 
-            if qs != 0 {
-                let predicted = self.compute_predicted_value(ra, rb, rc);
-                self.encode_regular::<T>(qs, curr_line[index].to_i32(), predicted)?;
-                index += 1;
+            for c in 0..components {
+                let idx = current_buf_idx + c;
+                let ra = curr_line[idx - components].to_i32();
+                let rc = rb[c];
+                rb[c] = rd[c];
+
+                if is_last_pixel {
+                    rd[c] = rb[c];
+                } else {
+                    rd[c] = prev_line[idx + components].to_i32();
+                }
+
+                let d1 = rd[c] - rb[c];
+                let d2 = rb[c] - rc;
+                let d3 = rc - ra;
+
+                let q1 = self.quantize_gradient(d1);
+                let q2 = self.quantize_gradient(d2);
+                let q3 = self.quantize_gradient(d3);
+
+                let qs = self.compute_context_id(q1, q2, q3);
+                component_qs[c] = qs;
+                if qs != 0 {
+                    all_qs_zero = false;
+                }
+
+                component_pred[c] = self.compute_predicted_value(ra, rb[c], rc);
+            }
+
+            if !all_qs_zero {
+                for c in 0..components {
+                    let idx = current_buf_idx + c;
+                    let val = curr_line[idx].to_i32();
+                    self.encode_regular::<T>(component_qs[c], val, component_pred[c], c)?;
+                }
+                pixel_idx += 1;
+                current_buf_idx += components;
             } else {
-                index += self.encode_run_mode(index, prev_line, curr_line, width)?;
-                if index <= width {
-                    rb = prev_line[index - 1].to_i32();
-                    rd = prev_line[index].to_i32();
+                let start_pixel_idx = pixel_idx;
+
+                let encoded_len = self.encode_run_mode_interleaved(
+                     start_pixel_idx,
+                     prev_line,
+                     curr_line,
+                     width,
+                     components,
+                     &mut rb,
+                     &mut rd
+                )?;
+
+                pixel_idx += encoded_len;
+                current_buf_idx += encoded_len * components;
+
+                // Re-sync Rb/Rd
+                if pixel_idx < width {
+                     let is_last = pixel_idx == width - 1;
+                     for c in 0..components {
+                         let comp_offset = components + c;
+
+                         rb[c] = prev_line[(pixel_idx - 1) * components + comp_offset].to_i32();
+                         if is_last {
+                             rd[c] = rb[c];
+                         } else {
+                             rd[c] = prev_line[pixel_idx * components + comp_offset].to_i32();
+                         }
+                     }
                 }
             }
         }
@@ -231,6 +307,7 @@ impl<'a> ScanEncoder<'a> {
         qs: i32,
         x: i32,
         predicted: i32,
+        component_index: usize,
     ) -> Result<(), JpeglsError> {
         let sign = Self::bit_wise_sign(qs);
         let ctx_index = crate::jpegls::traits::apply_sign_for_index(qs, sign);
@@ -243,7 +320,7 @@ impl<'a> ScanEncoder<'a> {
         let correction: i32;
 
         {
-            let context = &mut self.regular_mode_contexts[ctx_index];
+            let context = &mut self.regular_mode_contexts[component_index][ctx_index];
             k = context.compute_golomb_coding_parameter(31)?;
             c_val = context.c();
             correction = context.get_error_correction(near_lossless | k);
@@ -256,7 +333,7 @@ impl<'a> ScanEncoder<'a> {
         self.encode_mapped_value(k, mapped_error, limit);
 
         let reset_threshold = self.reset_threshold;
-        let context = &mut self.regular_mode_contexts[ctx_index];
+        let context = &mut self.regular_mode_contexts[component_index][ctx_index];
         context.update_variables_and_bias(error_val, near_lossless, reset_threshold)?;
         Ok(())
     }
@@ -300,20 +377,17 @@ impl<'a> ScanEncoder<'a> {
                 self.append_to_bit_stream(0, 1);
             }
             self.append_to_bit_stream(1, 1);
-            // Clamp k to prevent overflow
             let k_clamped = k.min(31);
             self.append_to_bit_stream((mapped_error & ((1i32 << k_clamped) - 1)) as u32, k_clamped);
         } else {
             let remaining = limit - qbpp;
             if remaining > 31 {
                 self.append_to_bit_stream(0, 31);
-                // Clamp the remaining bits to prevent overflow
                 let remaining_clamped = (remaining - 31).min(31);
                 self.append_to_bit_stream(1, remaining_clamped);
             } else {
                 self.append_to_bit_stream(1, remaining.min(31));
             }
-            // Clamp qbpp to prevent overflow
             let qbpp_clamped = qbpp.min(31);
             self.append_to_bit_stream(((mapped_error - 1) & ((1i32 << qbpp_clamped) - 1)) as u32, qbpp_clamped);
         }
@@ -371,52 +445,137 @@ impl<'a> ScanEncoder<'a> {
         }
     }
 
-    fn encode_run_mode<T: JpeglsSample>(
+    // Updated for Interleaved
+    fn encode_run_mode_interleaved<T: JpeglsSample>(
         &mut self,
-        start_index: usize,
+        start_pixel_idx: usize,
         prev_line: &[T],
         curr_line: &mut [T],
         width: usize,
+        components: usize,
+        _rb: &mut [i32],
+        _rd: &mut [i32],
     ) -> Result<usize, JpeglsError> {
-        let count_type_remain = width - (start_index - 1);
+        // Run length is number of PIXELS where all components match Ra
         let mut run_length = 0;
-        let ra = curr_line[start_index - 1];
+        let count_type_remain = width - start_pixel_idx;
+
+        let base_offset = components;
+
+        // Capture Ra for all components
+        let mut ra = vec![T::default(); components];
+        for c in 0..components {
+             ra[c] = curr_line[base_offset + (start_pixel_idx - 1) * components + c];
+        }
 
         while run_length < count_type_remain {
-            let val = curr_line[start_index + run_length];
-            if !T::is_near(
-                val.to_i32(),
-                ra.to_i32(),
-                self.coding_parameters.near_lossless,
-            ) {
+            let mut all_match = true;
+            for c in 0..components {
+                let val = curr_line[base_offset + (start_pixel_idx + run_length) * components + c];
+                if !T::is_near(
+                    val.to_i32(),
+                    ra[c].to_i32(),
+                    self.coding_parameters.near_lossless,
+                ) {
+                    all_match = false;
+                    break;
+                }
+            }
+            if !all_match {
                 break;
             }
-            curr_line[start_index + run_length] = ra;
+
+            for c in 0..components {
+                curr_line[base_offset + (start_pixel_idx + run_length) * components + c] = ra[c];
+            }
             run_length += 1;
         }
 
-        self.encode_run_pixels(run_length, run_length == count_type_remain);
+        // Use Component 0 run index for shared run
+        self.encode_run_pixels(run_length, run_length == count_type_remain, 0);
 
         if run_length == count_type_remain {
             return Ok(run_length);
         }
 
-        let rb = prev_line[start_index + run_length];
-        let x = curr_line[start_index + run_length];
+        // Interruption
+        let interruption_pixel_idx = start_pixel_idx + run_length;
 
-        let interruption_val =
-            self.encode_run_interruption_pixel::<T>(x.to_i32(), ra.to_i32(), rb.to_i32());
-        curr_line[start_index + run_length] = T::from_i32(interruption_val);
+        let mut interruption_comp = 0;
+        let mut found_break = false;
 
-        self.decrement_run_index();
+        for c in 0..components {
+            let val = curr_line[base_offset + interruption_pixel_idx * components + c];
+            if !T::is_near(
+                 val.to_i32(),
+                 ra[c].to_i32(),
+                 self.coding_parameters.near_lossless
+            ) {
+                 interruption_comp = c;
+                 found_break = true;
+                 break;
+            }
+        }
+
+        if !found_break {
+             return Ok(run_length);
+        }
+
+        // Handle interruption component
+        let c = interruption_comp;
+        let up_val = prev_line[base_offset + interruption_pixel_idx * components + c];
+        let val = curr_line[base_offset + interruption_pixel_idx * components + c];
+
+        let interruption_val = self.encode_run_interruption_pixel::<T>(
+             val.to_i32(),
+             ra[c].to_i32(),
+             up_val.to_i32(),
+             c // Use component c context
+        );
+        curr_line[base_offset + interruption_pixel_idx * components + c] = T::from_i32(interruption_val);
+
+        self.decrement_run_index(0);
+
+        for next_c in (c + 1)..components {
+             let idx = base_offset + interruption_pixel_idx * components + next_c;
+
+             let r_a = curr_line[idx - components].to_i32();
+             let r_up = prev_line[idx].to_i32(); // Rb
+             let r_up_left = prev_line[idx - components].to_i32(); // Rc
+
+             let r_up_right = if interruption_pixel_idx == width - 1 {
+                 r_up // Rd = Rb at end of line
+             } else {
+                 prev_line[idx + components].to_i32() // Rd
+             };
+
+             let d1 = r_up_right - r_up;
+             let d2 = r_up - r_up_left;
+             let d3 = r_up_left - r_a;
+
+             let q1 = self.quantize_gradient(d1);
+             let q2 = self.quantize_gradient(d2);
+             let q3 = self.quantize_gradient(d3);
+
+             let qs = self.compute_context_id(q1, q2, q3);
+             let predicted = self.compute_predicted_value(r_a, r_up, r_up_left);
+
+             self.encode_regular::<T>(
+                 qs,
+                 curr_line[idx].to_i32(),
+                 predicted,
+                 next_c
+             )?;
+        }
+
         Ok(run_length + 1)
     }
 
-    fn encode_run_pixels(&mut self, mut run_length: usize, end_of_line: bool) {
-        while run_length >= (1 << crate::constants::J[self.run_index]) {
+    fn encode_run_pixels(&mut self, mut run_length: usize, end_of_line: bool, comp: usize) {
+        while run_length >= (1 << crate::constants::J[self.run_index[comp]]) {
             self.append_ones_to_bit_stream(1);
-            run_length -= 1 << crate::constants::J[self.run_index];
-            self.increment_run_index();
+            run_length -= 1 << crate::constants::J[self.run_index[comp]];
+            self.increment_run_index(comp);
         }
 
         if end_of_line {
@@ -424,27 +583,29 @@ impl<'a> ScanEncoder<'a> {
                 self.append_ones_to_bit_stream(1);
             }
         } else {
-            self.append_to_bit_stream(run_length as u32, crate::constants::J[self.run_index] + 1);
+            self.append_to_bit_stream(run_length as u32, crate::constants::J[self.run_index[comp]] + 1);
         }
     }
 
-    fn encode_run_interruption_pixel<T: JpeglsSample>(&mut self, x: i32, ra: i32, rb: i32) -> i32 {
+    fn encode_run_interruption_pixel<T: JpeglsSample>(
+        &mut self, x: i32, ra: i32, rb: i32, comp: usize
+    ) -> i32 {
         let near_lossless = self.coding_parameters.near_lossless;
         if (ra - rb).abs() <= near_lossless {
             let error_value = self.compute_error_value(x - ra);
-            self.encode_run_interruption_error(1, error_value);
+            self.encode_run_interruption_error(1, error_value, comp);
             T::compute_reconstructed_sample(ra, error_value)
         } else {
             let sign = Self::bit_wise_sign(rb - ra);
             let error_value = self.compute_error_value((x - rb) * sign);
-            self.encode_run_interruption_error(0, error_value);
+            self.encode_run_interruption_error(0, error_value, comp);
             T::compute_reconstructed_sample(rb, error_value * sign)
         }
     }
 
-    fn encode_run_interruption_error(&mut self, context_index: usize, error_value: i32) {
+    fn encode_run_interruption_error(&mut self, context_index: usize, error_value: i32, comp: usize) {
         let (k, e_mapped_error_value) = {
-            let context = &self.run_mode_contexts[context_index];
+            let context = &self.run_mode_contexts[comp][context_index];
             let k = context.compute_golomb_coding_parameter();
             let map = context.compute_map(error_value, k);
             let val =
@@ -452,23 +613,23 @@ impl<'a> ScanEncoder<'a> {
             (k, val)
         };
 
-        let limit = self.coding_parameters.limit - crate::constants::J[self.run_index] - 1;
+        let limit = self.coding_parameters.limit - crate::constants::J[self.run_index[comp]] - 1;
         self.encode_mapped_value(k, e_mapped_error_value, limit);
 
         let reset_threshold = self.reset_threshold;
-        let context = &mut self.run_mode_contexts[context_index];
+        let context = &mut self.run_mode_contexts[comp][context_index];
         context.update_variables(error_value, e_mapped_error_value, reset_threshold);
     }
 
-    fn increment_run_index(&mut self) {
-        if self.run_index < 31 {
-            self.run_index += 1;
+    fn increment_run_index(&mut self, comp: usize) {
+        if self.run_index[comp] < 31 {
+            self.run_index[comp] += 1;
         }
     }
 
-    fn decrement_run_index(&mut self) {
-        if self.run_index > 0 {
-            self.run_index -= 1;
+    fn decrement_run_index(&mut self, comp: usize) {
+        if self.run_index[comp] > 0 {
+            self.run_index[comp] -= 1;
         }
     }
 
@@ -476,7 +637,6 @@ impl<'a> ScanEncoder<'a> {
         if bit_count == 0 {
             return;
         }
-        // Clamp bit_count to prevent overflow (max 31 bits for u32 shift)
         let bit_count = bit_count.min(31);
         self.append_to_bit_stream((1u32 << bit_count).wrapping_sub(1), bit_count);
     }

@@ -7,7 +7,10 @@ from PIL import Image
 import imagecodecs
 
 # Configuration
-JPEGEXP_BIN = os.path.abspath("target/release/jpegexp.exe")
+if os.name == "nt":
+    JPEGEXP_BIN = os.path.abspath("target/release/jpegexp.exe")
+else:
+    JPEGEXP_BIN = os.path.abspath("target/release/jpegexp")
 OUTPUT_DIR = "tests/artifacts_comprehensive"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

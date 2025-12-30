@@ -63,14 +63,10 @@ impl<'a> JpeglsEncoder<'a> {
             compute_default(max_sample_value, self.near_lossless)
         };
 
-        let interleave_mode =
-            if self.interleave_mode == InterleaveMode::None && frame_info.component_count > 1 {
-                InterleaveMode::Sample
-            } else {
-                self.interleave_mode
-            };
+        // Fallback to Planar (None) if InterleaveMode is None but we have components > 1.
+        let interleave_mode = self.interleave_mode;
 
-        let coding_parameters = CodingParameters {
+        let mut coding_parameters = CodingParameters {
             near_lossless: self.near_lossless,
             interleave_mode,
             restart_interval: 0,
@@ -88,22 +84,61 @@ impl<'a> JpeglsEncoder<'a> {
         self.writer.write_start_of_frame_jpegls(&frame_info)?;
         self.writer.write_jpegls_preset_parameters_segment(&pc)?;
 
-        let component_count = frame_info.component_count;
-        self.writer.write_start_of_scan_segment(
-            component_count,
-            self.near_lossless,
-            interleave_mode,
-        )?;
+        if interleave_mode == InterleaveMode::None && frame_info.component_count > 1 {
+            // Encode separate scans for each component
+            for c in 0..frame_info.component_count {
+                // Write SOS for SINGLE component `c+1`
+                self.writer.write_start_of_scan_segment_planar(
+                    c as u8 + 1, // Component ID (1-based)
+                    self.near_lossless,
+                    InterleaveMode::None
+                )?;
 
-        let _bytes_written = if frame_info.bits_per_sample <= 8 {
-            self.encode_scan_typed::<u8>(source, &frame_info, pc, coding_parameters)?
-        } else {
-            let (head, body, tail) = unsafe { source.align_to::<u16>() };
-            if !head.is_empty() || !tail.is_empty() {
-                return Err(JpeglsError::InvalidData);
+                // Extract component data
+                // Assume source is Interleaved (standard). We need to de-interleave.
+                let component_index = c as usize;
+                let width = frame_info.width as usize;
+                let height = frame_info.height as usize;
+                let total_components = frame_info.component_count as usize;
+
+                if frame_info.bits_per_sample <= 8 {
+                    let pixel_count = width * height;
+                    let mut plane_data = vec![0u8; pixel_count];
+                    for i in 0..pixel_count {
+                        plane_data[i] = source[i * total_components + component_index];
+                    }
+                    self.encode_scan_typed::<u8>(&plane_data, &frame_info, pc, coding_parameters, true)?;
+                } else {
+                    let (head, body, tail) = unsafe { source.align_to::<u16>() };
+                    if !head.is_empty() || !tail.is_empty() {
+                        return Err(JpeglsError::InvalidData);
+                    }
+                    let pixel_count = width * height;
+                    let mut plane_data = vec![0u16; pixel_count];
+                    for i in 0..pixel_count {
+                        plane_data[i] = body[i * total_components + component_index];
+                    }
+                    self.encode_scan_typed::<u16>(&plane_data, &frame_info, pc, coding_parameters, true)?;
+                }
             }
-            self.encode_scan_typed::<u16>(body, &frame_info, pc, coding_parameters)?
-        };
+        } else {
+            // Single Scan (Monochrome or Interleaved)
+            self.writer.write_start_of_scan_segment(
+                frame_info.component_count,
+                self.near_lossless,
+                interleave_mode,
+            )?;
+
+            let _bytes_written = if frame_info.bits_per_sample <= 8 {
+                self.encode_scan_typed::<u8>(source, &frame_info, pc, coding_parameters, false)?
+            } else {
+                let (head, body, tail) = unsafe { source.align_to::<u16>() };
+                if !head.is_empty() || !tail.is_empty() {
+                    return Err(JpeglsError::InvalidData);
+                }
+                self.encode_scan_typed::<u16>(body, &frame_info, pc, coding_parameters, false)?
+            };
+        }
 
         self.writer.write_end_of_image()?;
 
@@ -115,13 +150,20 @@ impl<'a> JpeglsEncoder<'a> {
         source: &[T],
         frame_info: &FrameInfo,
         pc: JpeglsPcParameters,
-        coding_params: CodingParameters,
+        mut coding_params: CodingParameters,
+        is_planar_component: bool,
     ) -> Result<usize, JpeglsError> {
         let stride = frame_info.width as usize;
 
         let dest_slice = self.writer.remaining_slice();
 
-        let mut scan_encoder = ScanEncoder::new(*frame_info, pc, coding_params, dest_slice);
+        let mut scan_frame_info = *frame_info;
+        if is_planar_component {
+            scan_frame_info.component_count = 1;
+            coding_params.interleave_mode = InterleaveMode::None;
+        }
+
+        let mut scan_encoder = ScanEncoder::new(scan_frame_info, pc, coding_params, dest_slice);
 
         let bytes_written = scan_encoder.encode_scan(source, stride)?;
         drop(scan_encoder);
