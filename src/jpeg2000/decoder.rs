@@ -205,8 +205,31 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let progression_order = cod.progression_order;
         let cb_w = 1 << (cod.codeblock_width_exp + 2);
         let cb_h = 1 << (cod.codeblock_height_exp + 2);
-        let tile_w = parser.image.tile_width;
-        let tile_h = parser.image.tile_height;
+
+        // Coordinate calculation logic based on ISO/IEC 15444-1 Annex B
+        // 1. Determine Tile Grid indices (p, q)
+        let x_siz = parser.image.width;
+        let y_siz = parser.image.height;
+        let x_osiz = parser.image.x_origin;
+        let y_osiz = parser.image.y_origin;
+        let x_tsiz = parser.image.tile_width;
+        let y_tsiz = parser.image.tile_height;
+        let x_tosiz = parser.image.tile_x_origin;
+        let y_tosiz = parser.image.tile_y_origin;
+
+        // Number of tiles in X and Y
+        let num_tiles_x = (x_siz.saturating_sub(x_tosiz) + x_tsiz - 1) / x_tsiz;
+        // avoid div by zero if tile size is huge or something (parser checks usually catch this)
+        let num_tiles_x = if num_tiles_x == 0 { 1 } else { num_tiles_x };
+
+        let p = isot as u32 % num_tiles_x;
+        let q = isot as u32 / num_tiles_x;
+
+        // 2. Determine Tile coordinates on Reference Grid (tx0, ty0, tx1, ty1)
+        let tx0 = (x_tosiz + p * x_tsiz).max(x_osiz);
+        let ty0 = (y_tosiz + q * y_tsiz).max(y_osiz);
+        let tx1 = (x_tosiz + (p + 1) * x_tsiz).min(x_siz);
+        let ty1 = (y_tosiz + (q + 1) * y_tsiz).min(y_siz);
 
         // Initialize tile components and resolutions with correct dimensions
         {
@@ -216,6 +239,21 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     .resize_with(num_components, Default::default);
             }
             for c in 0..num_components {
+                // Get component subsampling factors
+                let (dx, dy) = if c < parser.image.components.len() {
+                    let info = &parser.image.components[c];
+                    (info.dx as u32, info.dy as u32)
+                } else {
+                    (1, 1) // Default to 1 if missing info
+                };
+
+                // 3. Determine Tile-Component coordinates (tcx0, tcy0, tcx1, tcy1)
+                // ceil(a / b) = (a + b - 1) / b
+                let tcx0 = (tx0 + dx - 1) / dx;
+                let tcx1 = (tx1 + dx - 1) / dx;
+                let tcy0 = (ty0 + dy - 1) / dy;
+                let tcy1 = (ty1 + dy - 1) / dy;
+
                 let comp = &mut tile.components[c];
                 if comp.resolutions.len() < num_resolutions {
                     comp.resolutions
@@ -228,9 +266,18 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     } else {
                         num_resolutions - 1 - r
                     };
-                    // TODO: Handle subsampling (currently parse_siz skips it)
-                    let res_w = (tile_w + (1 << shift) - 1) >> shift;
-                    let res_h = (tile_h + (1 << shift) - 1) >> shift;
+
+                    // 4. Determine Resolution Level coordinates (trx0, try0, trx1, try1)
+                    // Division by 2^shift is equivalent to >> shift, but ceil requires handling.
+                    // ceil(x / 2^s) = (x + (1<<s) - 1) >> s
+                    let denom = 1 << shift;
+                    let trx0 = (tcx0 + denom - 1) >> shift;
+                    let trx1 = (tcx1 + denom - 1) >> shift;
+                    let try0 = (tcy0 + denom - 1) >> shift;
+                    let try1 = (tcy1 + denom - 1) >> shift;
+
+                    let res_w = trx1.saturating_sub(trx0);
+                    let res_h = try1.saturating_sub(try0);
 
                     comp.resolutions[r].width = res_w;
                     comp.resolutions[r].height = res_h;

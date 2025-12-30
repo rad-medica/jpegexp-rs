@@ -9,6 +9,14 @@ pub struct J2kImage {
     pub tile_width: u32,
     /// Height of an individual tile.
     pub tile_height: u32,
+    /// Horizontal offset of the image area on the reference grid.
+    pub x_origin: u32,
+    /// Vertical offset of the image area on the reference grid.
+    pub y_origin: u32,
+    /// Horizontal offset of the first tile on the reference grid.
+    pub tile_x_origin: u32,
+    /// Vertical offset of the first tile on the reference grid.
+    pub tile_y_origin: u32,
     /// Number of color or data components.
     pub component_count: u32,
     /// Optional Coding Style Default (COD) parameters.

@@ -93,13 +93,13 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let _caps = self.reader.read_u16()?; // RSiz
         self.image.width = self.reader.read_u32()?;
         self.image.height = self.reader.read_u32()?;
-        let _off_x = self.reader.read_u32()?;
-        let _off_y = self.reader.read_u32()?;
+        self.image.x_origin = self.reader.read_u32()?;
+        self.image.y_origin = self.reader.read_u32()?;
 
         self.image.tile_width = self.reader.read_u32()?;
         self.image.tile_height = self.reader.read_u32()?;
-        let _tile_off_x = self.reader.read_u32()?;
-        let _tile_off_y = self.reader.read_u32()?;
+        self.image.tile_x_origin = self.reader.read_u32()?;
+        self.image.tile_y_origin = self.reader.read_u32()?;
 
         let comps = self.reader.read_u16()?;
         self.image.component_count = comps as u32;
