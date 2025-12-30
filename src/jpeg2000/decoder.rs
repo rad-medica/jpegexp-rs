@@ -22,12 +22,16 @@ struct ComponentState {
 }
 
 struct ResolutionState {
+    pub width: u32,
+    pub height: u32,
     precincts: HashMap<(u32, u32), crate::jpeg2000::packet::PrecinctState>,
 }
 
 impl ResolutionState {
-    fn new(_w: usize, _h: usize) -> Self {
+    fn new(w: usize, h: usize) -> Self {
         Self {
+            width: w as u32,
+            height: h as u32,
             precincts: HashMap::new(),
         }
     }
@@ -36,6 +40,8 @@ impl ResolutionState {
 impl Default for ResolutionState {
     fn default() -> Self {
         Self {
+            width: 0,
+            height: 0,
             precincts: HashMap::new(),
         }
     }
@@ -368,7 +374,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         // LRCP Loop
         for l in 0..safe_num_layers {
             for r in 0..num_resolutions {
-                let (grid_w, grid_h) = Self::calculate_grid_dimensions(parser, 0, r, &cod)?; // Use comp 0 for grid size for now
                 let num_subbands = if r == 0 { 1 } else { 3 };
 
                 for c in 0..num_components {
@@ -382,22 +387,47 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                     // Ensure resolution state exists
                     if comp_state.resolutions.len() <= r {
+                        // NOTE: decode_tile_data MUST have been called first to populate dimensions in parser.image.tiles
+                        // However, we need to get dimensions from parser.image to init state if needed,
+                        // or better, rely on decode_tile_data having set it up?
+                        // decode_tile_data updates parser.image.tiles.
+                        // tile_states is parallel.
+                        // We need width/height here.
+                        // Since we are iterating c, r, we can pull from parser.image
+                        let tile = &parser.image.tiles[tile_state_idx]; // assuming isot matches idx
+                        // Wait, tile_idx passed to decode_tile_data was isot.
+                        // Here tile_states uses tile_state_idx.
+                        // We should lookup tile by index if possible, but for now assume sequential.
+                        let comp_info = &tile.components[c];
+                        let res_info = &comp_info.resolutions[r];
                         comp_state.resolutions.resize_with(r + 1, || {
-                            ResolutionState::new(grid_w as usize, grid_h as usize)
+                            ResolutionState::new(res_info.width as usize, res_info.height as usize)
                         });
                     }
                     let res_state = &mut comp_state.resolutions[r];
+                    let res_w = res_state.width;
+                    let res_h = res_state.height;
+
+                    // Calculate grid dimensions for this component/resolution
+                    let (ppx, ppy) = if !cod.precinct_sizes.is_empty() {
+                        if r < cod.precinct_sizes.len() {
+                            let s = cod.precinct_sizes[r];
+                            let shift_x = s & 0x0F;
+                            let shift_y = (s >> 4) & 0x0F;
+                            (1 << shift_x, 1 << shift_y)
+                        } else {
+                            (32768, 32768)
+                        }
+                    } else {
+                        (32768, 32768)
+                    };
+
+                    let grid_w = (res_w + ppx - 1) / ppx;
+                    let grid_h = (res_h + ppy - 1) / ppy;
 
                     // Iterate Precincts
-                    // Grid dimensions logic determines num precincts
-                    // For now assuming 1 precinct covers valid area or iterating grid
-                    let p_w = 1 << 15; // Grid width (Scod size or default)
-                    let p_h = 1 << 15;
-                    // Calculate num precincts based on grid size / precinct size
-                    // For now, simplify to 1 precinct at (0,0) if not dividing
-                    // Iterating grid points:
-                    let num_px = (grid_w + p_w - 1) / p_w;
-                    let num_py = (grid_h + p_h - 1) / p_h;
+                    let num_px = grid_w;
+                    let num_py = grid_h;
 
                     for py in 0..num_py {
                         for px in 0..num_px {
@@ -684,55 +714,97 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         }
         Ok(())
     }
+}
 
-    fn calculate_grid_dimensions(
-        parser: &J2kParser,
-        comp: usize,
-        res: usize,
-        cod: &crate::jpeg2000::image::J2kCod,
-    ) -> Result<(u32, u32), JpeglsError> {
-        let (tile_w, tile_h) = (parser.image.tile_width, parser.image.tile_height);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jpeg2000::image::{J2kImage, J2kCod, J2kComponentInfo};
+    use crate::jpeg2000::parser::J2kParser;
+    use crate::jpeg_stream_reader::JpegStreamReader;
 
-        // This simplified logic assumes component 0 for grid size usage in loop
-        // Proper J2K handles per-component grids.
-        // We match `get_grid_size` closure logic from earlier attempts.
+    #[test]
+    fn test_subsampling_resolution_calculation() {
+        // Mock image with 2 components:
+        // Comp 0: 1x1 subsampling (Full res)
+        // Comp 1: 2x2 subsampling (Half res)
+        let mut image = J2kImage::default();
+        image.width = 512;
+        image.height = 512;
+        image.x_origin = 0;
+        image.y_origin = 0;
+        image.tile_width = 512;
+        image.tile_height = 512;
+        image.tile_x_origin = 0;
+        image.tile_y_origin = 0;
+        image.component_count = 2;
 
-        let num_resolutions = (cod.decomposition_levels + 1) as usize;
-        let shift = if res >= (num_resolutions - 1) {
-            0
-        } else {
-            num_resolutions - 1 - res
-        };
-        let res_w = (tile_w + (1 << shift) - 1) >> shift;
-        let res_h = (tile_h + (1 << shift) - 1) >> shift;
+        // Component 0
+        image.components.push(J2kComponentInfo {
+            depth: 8,
+            is_signed: false,
+            dx: 1,
+            dy: 1,
+        });
+        // Component 1
+        image.components.push(J2kComponentInfo {
+            depth: 8,
+            is_signed: false,
+            dx: 2,
+            dy: 2,
+        });
 
-        let (ppx, ppy) = if !cod.precinct_sizes.is_empty() {
-            if res < cod.precinct_sizes.len() {
-                let s = cod.precinct_sizes[res];
-                let shift_x = s & 0x0F;
-                let shift_y = (s >> 4) & 0x0F;
-                (1 << shift_x, 1 << shift_y)
-            } else {
-                (32768, 32768)
-            }
-        } else {
-            (32768, 32768)
-        };
+        // Tiles setup
+        image.tiles.resize_with(1, Default::default);
+        image.tiles[0].index = 0;
 
-        let grid_w = (res_w + ppx - 1) / ppx;
-        let grid_h = (res_h + ppy - 1) / ppy;
+        // COD: 1 decomposition level => 2 resolutions (0 and 1)
+        image.cod = Some(J2kCod {
+            coding_style: 0,
+            progression_order: 0,
+            number_of_layers: 1,
+            mct: 0,
+            decomposition_levels: 1,
+            codeblock_width_exp: 4,
+            codeblock_height_exp: 4,
+            transformation: 0,
+            precinct_sizes: vec![],
+        });
 
-        Ok((grid_w, grid_h))
-    }
+        // Dummy reader
+        let data = vec![0; 100];
+        let mut reader = JpegStreamReader::new(&data);
+        let mut parser = J2kParser::new(&mut reader);
+        // Inject our constructed image into parser
+        parser.image = Box::new(image);
 
-    fn calculate_precinct_cb_dimensions(
-        parser: &J2kParser,
-        comp: usize,
-        res: usize,
-        px: u32,
-        py: u32,
-        cod: &crate::jpeg2000::image::J2kCod,
-    ) -> Result<(usize, usize), JpeglsError> {
-        Ok((1, 1))
+        let mut tile_states = Vec::new();
+
+        // Call decode_tile_data
+        let _ = J2kDecoder::decode_tile_data(&mut parser, 0, 0, false, &mut tile_states);
+
+        // Verify tile_states
+        let tile = &parser.image.tiles[0];
+        assert_eq!(tile.components.len(), 2);
+
+        // Check Component 0 (Full Res 512x512)
+        // Res 0 (LL): 256x256
+        // Res 1 (Full): 512x512
+        let comp0 = &tile.components[0];
+        assert_eq!(comp0.resolutions.len(), 2);
+        assert_eq!(comp0.resolutions[0].width, 256, "Comp 0 Res 0 width mismatch");
+        assert_eq!(comp0.resolutions[0].height, 256, "Comp 0 Res 0 height mismatch");
+        assert_eq!(comp0.resolutions[1].width, 512, "Comp 0 Res 1 width mismatch");
+        assert_eq!(comp0.resolutions[1].height, 512, "Comp 0 Res 1 height mismatch");
+
+        // Check Component 1 (Subsampled 2x2 => 256x256)
+        // Res 0 (LL): 128x128
+        // Res 1 (Full): 256x256
+        let comp1 = &tile.components[1];
+        assert_eq!(comp1.resolutions.len(), 2);
+        assert_eq!(comp1.resolutions[0].width, 128, "Comp 1 Res 0 width mismatch");
+        assert_eq!(comp1.resolutions[0].height, 128, "Comp 1 Res 0 height mismatch");
+        assert_eq!(comp1.resolutions[1].width, 256, "Comp 1 Res 1 width mismatch");
+        assert_eq!(comp1.resolutions[1].height, 256, "Comp 1 Res 1 height mismatch");
     }
 }
