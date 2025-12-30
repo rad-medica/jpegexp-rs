@@ -18,17 +18,18 @@ cargo run --bin jpegexp -- <command>
 
 ### decode
 
-Decode a JPEG image to raw pixels or PPM format.
+Decode a JPEG image to raw pixels or standard image formats.
 
 ```bash
-jpegexp decode -i <input> -o <output> [-f <format>]
+jpegexp decode [OPTIONS]
 ```
 
 **Options:**
 
-- `-i, --input <file>` - Input JPEG file (JPEG, JPEG-LS, J2K, JP2, HTJ2K)
-- `-o, --output <file>` - Output file path
-- `-f, --format <format>` - Output format: `raw` (default) or `ppm`
+- `-i, --input <INPUT>` - Path to input file
+- `-o, --output <OUTPUT>` - Path for the decoded output file
+- `-f, --format <FORMAT>` - Output format (raw, ppm, png, jpg) [default: raw]
+- `-h, --help` - Print help
 
 **Examples:**
 
@@ -48,18 +49,20 @@ jpegexp decode -i scan.jls -o output.raw
 Encode raw pixels to a JPEG format.
 
 ```bash
-jpegexp encode -i <input> -o <output> -w <width> -H <height> [-n <components>] [-c <codec>]
+jpegexp encode [OPTIONS] --input <INPUT> --output <OUTPUT> --width <WIDTH> --height <HEIGHT>
 ```
 
 **Options:**
 
-- `-i, --input <file>` - Input raw pixel file
-- `-o, --output <file>` - Output JPEG file
-- `-w, --width <pixels>` - Image width
-- `-H, --height <pixels>` - Image height
-- `-n, --components <count>` - Number of components (1=grayscale, 3=RGB), default: 1
-- `-c, --codec <codec>` - Target codec: `jpeg`, `jpegls`, default: jpeg
-- `-q, --quality <1-100>` - Quality level (lossy codecs only), default: 85
+- `-i, --input <INPUT>` - Path to raw pixel data file
+- `-o, --output <OUTPUT>` - Path for the encoded output file
+- `-w, --width <WIDTH>` - Image width in pixels
+- `-H, --height <HEIGHT>` - Image height in pixels
+- `-n, --components <COMPONENTS>` - Number of color components (1=grayscale, 3=RGB) [default: 1]
+- `-c, --codec <CODEC>` - Target codec for encoding (jpeg, jpegls, j2k, htj2k) [default: jpeg]
+- `-q, --quality <QUALITY>` - Quality level (1-100, only for lossy codecs) [default: 85]
+- `--near-lossless <NEAR_LOSSLESS>` - Enable near-lossless mode for JPEG-LS (0=lossless, 1-255=near-lossless) [default: 0]
+- `-h, --help` - Print help
 
 **Examples:**
 
@@ -76,17 +79,19 @@ jpegexp encode -i rgb_pixels.raw -o photo.jpg -w 800 -H 600 -n 3
 
 ### transcode
 
-Convert between JPEG formats.
+Transcode between JPEG formats.
 
 ```bash
-jpegexp transcode -i <input> -o <output> -c <codec>
+jpegexp transcode [OPTIONS] --input <INPUT> --output <OUTPUT> --codec <CODEC>
 ```
 
 **Options:**
 
-- `-i, --input <file>` - Input JPEG file
-- `-o, --output <file>` - Output JPEG file
-- `-c, --codec <codec>` - Target codec: `jpeg`, `jpegls`
+- `-i, --input <INPUT>` - Path to input file
+- `-o, --output <OUTPUT>` - Path for the transcoded output file
+- `-c, --codec <CODEC>` - Target codec for transcoding (jpeg, jpegls, j2k, htj2k)
+- `-q, --quality <QUALITY>` - Quality level (1-100, only for lossy codecs) [default: 85]
+- `-h, --help` - Print help
 
 **Examples:**
 
@@ -100,75 +105,30 @@ jpegexp transcode -i lossless.jls -o compressed.jpg -c jpeg
 
 ### info
 
-Display image metadata.
+Display image metadata and codec information.
 
 ```bash
-jpegexp info -i <input> [-e]
+jpegexp info [OPTIONS] --input <INPUT>
 ```
 
 **Options:**
 
-- `-i, --input <file>` - Input file to inspect
-- `-e, --extended` - Show extended metadata
+- `-i, --input <INPUT>` - Path to input file
+- `-h, --help` - Print help
 
 **Examples:**
 
 ```bash
 # Basic info
 jpegexp info -i image.jpg
-
-# Extended info for JPEG 2000
-jpegexp info -i medical.j2k -e
-```
-
-**Sample Output:**
-
-```
-File: "image.j2k"
-Size: 45678 bytes
-
-Format: JPEG 2000 Codestream
-  Dimensions: 512x512
-  Components: 1
-  Tile size:  512x512
-  DWT levels: 5
-  Layers:     1
-  Progression: LRCP
-  HTJ2K:      No
 ```
 
 ### list
 
-List supported codecs and capabilities.
+List supported codecs and their capabilities.
 
 ```bash
 jpegexp list
-```
-
-**Output:**
-
-```
-Supported Codecs:
-
-  JPEG (jpeg)
-    Standard: ISO/IEC 10918-1 / ITU-T T.81
-    Modes:    Baseline DCT, Progressive, Lossless (Process 14)
-    Encode:   ✓  Decode: ✓
-
-  JPEG-LS (jpegls)
-    Standard: ISO/IEC 14495-1 / ITU-T T.87
-    Modes:    Lossless, Near-Lossless
-    Encode:   ✓  Decode: ✓
-
-  JPEG 2000 (j2k)
-    Standard: ISO/IEC 15444-1
-    Features: DWT, EBCOT, Quality Layers, ROI, ICC Profiles
-    Encode:   ✗  Decode: ✓
-
-  HTJ2K (htj2k)
-    Standard: ISO/IEC 15444-15
-    Features: High-Throughput block coding (10x+ faster)
-    Encode:   ✗  Decode: ✓
 ```
 
 ## Exit Codes
