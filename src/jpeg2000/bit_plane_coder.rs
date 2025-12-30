@@ -166,11 +166,6 @@ impl<'a> BitPlaneCoder<'a> {
 
         self.mq.init_decoder(data);
 
-        eprintln!(
-            "DEBUG: BPC decode_codeblock: max_BP={} current_passes={} new_passes={}",
-            max_bit_plane, self.num_passes_decoded, num_new_passes
-        );
-
         #[derive(Debug)]
         enum PassType {
             SigProp,
@@ -178,7 +173,7 @@ impl<'a> BitPlaneCoder<'a> {
             Cleanup,
         }
 
-        for i in 0..num_new_passes {
+        for _i in 0..num_new_passes {
             let pass_idx = self.num_passes_decoded;
 
             let (bp, pass_type) = if pass_idx == 0 {
@@ -186,7 +181,6 @@ impl<'a> BitPlaneCoder<'a> {
             } else {
                 let plane_offset = (pass_idx - 1) / 3;
                 if plane_offset as u8 >= max_bit_plane {
-                    eprintln!("DEBUG: Stop decoding, bitplane coding limit reached (bp < 0)");
                     break;
                 }
                 let bp = max_bit_plane - 1 - plane_offset as u8;
@@ -198,11 +192,6 @@ impl<'a> BitPlaneCoder<'a> {
                     _ => unreachable!(),
                 }
             };
-
-            eprintln!(
-                "DEBUG:   Pass Idx {} (New {}) -> BP {} Type {:?}",
-                pass_idx, i, bp, pass_type
-            );
 
             // Reset VISITED at start of SigProp
             if let PassType::SigProp = pass_type {

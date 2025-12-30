@@ -252,10 +252,6 @@ impl<'a> JpegStreamReader<'a> {
     }
 
     pub fn read_start_of_scan_segment_jpegls(&mut self) -> Result<(), JpeglsError> {
-        eprintln!(
-            "DEBUG: Entering read_start_of_scan_segment_jpegls pos={}",
-            self.position
-        );
         if self.read_marker()? != JpegMarkerCode::StartOfScan {
             // eprintln!("DEBUG: SOS Marker NOT FOUND");
             return Err(JpeglsError::InvalidData);
@@ -282,16 +278,8 @@ impl<'a> JpegStreamReader<'a> {
             // eprintln!("DEBUG: SOS skipping {} bytes", skip);
             self.advance(skip as usize);
         } else if (length as i32) < consumed {
-            eprintln!(
-                "DEBUG: SOS length mismatch! Len={} Consumed={}",
-                length, consumed
-            );
         }
 
-        eprintln!(
-            "DEBUG: SOS complete. near={}, ilv={:?}",
-            self.parameters.near_lossless, self.parameters.interleave_mode
-        );
         self.state = JpegStreamReaderState::ScanSection;
         Ok(())
     }

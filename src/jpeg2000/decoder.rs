@@ -439,7 +439,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             // SOP Marker Handling
                             if (cod.coding_style & 0x02) != 0 {
                                 // SOP: FF 91 + Lsop(2) + Nsop(2) = 6 bytes
-                                let pos = parser.reader.position();
+
                                 // Read strict
                                 let marker = parser.reader.read_u16().unwrap_or(0);
                                 if marker == 0xFF91 {
@@ -690,9 +690,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jpeg2000::image::{J2kImage, J2kCod, J2kComponentInfo};
-    use crate::jpeg2000::parser::J2kParser;
     use crate::jpeg_stream_reader::JpegStreamReader;
+    use crate::jpeg2000::image::{J2kCod, J2kComponentInfo, J2kImage};
+    use crate::jpeg2000::parser::J2kParser;
 
     #[test]
     fn test_subsampling_resolution_calculation() {
@@ -763,69 +763,43 @@ mod tests {
         // Res 1 (Full): 512x512
         let comp0 = &tile.components[0];
         assert_eq!(comp0.resolutions.len(), 2);
-        assert_eq!(comp0.resolutions[0].width, 256, "Comp 0 Res 0 width mismatch");
-        assert_eq!(comp0.resolutions[0].height, 256, "Comp 0 Res 0 height mismatch");
-        assert_eq!(comp0.resolutions[1].width, 512, "Comp 0 Res 1 width mismatch");
-        assert_eq!(comp0.resolutions[1].height, 512, "Comp 0 Res 1 height mismatch");
+        assert_eq!(
+            comp0.resolutions[0].width, 256,
+            "Comp 0 Res 0 width mismatch"
+        );
+        assert_eq!(
+            comp0.resolutions[0].height, 256,
+            "Comp 0 Res 0 height mismatch"
+        );
+        assert_eq!(
+            comp0.resolutions[1].width, 512,
+            "Comp 0 Res 1 width mismatch"
+        );
+        assert_eq!(
+            comp0.resolutions[1].height, 512,
+            "Comp 0 Res 1 height mismatch"
+        );
 
         // Check Component 1 (Subsampled 2x2 => 256x256)
         // Res 0 (LL): 128x128
         // Res 1 (Full): 256x256
         let comp1 = &tile.components[1];
         assert_eq!(comp1.resolutions.len(), 2);
-        assert_eq!(comp1.resolutions[0].width, 128, "Comp 1 Res 0 width mismatch");
-        assert_eq!(comp1.resolutions[0].height, 128, "Comp 1 Res 0 height mismatch");
-        assert_eq!(comp1.resolutions[1].width, 256, "Comp 1 Res 1 width mismatch");
-        assert_eq!(comp1.resolutions[1].height, 256, "Comp 1 Res 1 height mismatch");
-
-    fn calculate_grid_dimensions(
-        parser: &J2kParser,
-        _comp: usize,
-        res: usize,
-        cod: &crate::jpeg2000::image::J2kCod,
-    ) -> Result<(u32, u32), JpeglsError> {
-        let (tile_w, tile_h) = (parser.image.tile_width, parser.image.tile_height);
-
-        // This simplified logic assumes component 0 for grid size usage in loop
-        // Proper J2K handles per-component grids.
-        // We match `get_grid_size` closure logic from earlier attempts.
-
-        let num_resolutions = (cod.decomposition_levels + 1) as usize;
-        let shift = if res >= (num_resolutions - 1) {
-            0
-        } else {
-            num_resolutions - 1 - res
-        };
-        let res_w = (tile_w + (1 << shift) - 1) >> shift;
-        let res_h = (tile_h + (1 << shift) - 1) >> shift;
-
-        let (ppx, ppy) = if !cod.precinct_sizes.is_empty() {
-            if res < cod.precinct_sizes.len() {
-                let s = cod.precinct_sizes[res];
-                let shift_x = s & 0x0F;
-                let shift_y = (s >> 4) & 0x0F;
-                (1 << shift_x, 1 << shift_y)
-            } else {
-                (32768, 32768)
-            }
-        } else {
-            (32768, 32768)
-        };
-
-        let grid_w = (res_w + ppx - 1) / ppx;
-        let grid_h = (res_h + ppy - 1) / ppy;
-
-        Ok((grid_w, grid_h))
-    }
-
-    fn _calculate_precinct_cb_dimensions(
-        _parser: &J2kParser,
-        _comp: usize,
-        _res: usize,
-        _px: u32,
-        _py: u32,
-        _cod: &crate::jpeg2000::image::J2kCod,
-    ) -> Result<(usize, usize), JpeglsError> {
-        Ok((1, 1))
+        assert_eq!(
+            comp1.resolutions[0].width, 128,
+            "Comp 1 Res 0 width mismatch"
+        );
+        assert_eq!(
+            comp1.resolutions[0].height, 128,
+            "Comp 1 Res 0 height mismatch"
+        );
+        assert_eq!(
+            comp1.resolutions[1].width, 256,
+            "Comp 1 Res 1 width mismatch"
+        );
+        assert_eq!(
+            comp1.resolutions[1].height, 256,
+            "Comp 1 Res 1 height mismatch"
+        );
     }
 }
