@@ -305,6 +305,7 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         if self.valid_bits < count {
+            // eprintln!("peek_bits failed: wanted {}, have {}", count, self.valid_bits);
             return Err(JpeglsError::InvalidData);
         }
         Ok(((self.read_cache >> (self.valid_bits - count)) & ((1 << count) - 1)) as i32)
