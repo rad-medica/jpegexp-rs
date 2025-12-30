@@ -373,40 +373,38 @@ impl J2kImage {
                     let quant_style = qcd.quant_style & 0x1F; // 0=No, 1=Derived, 2=Expounded
 
                     // Helper to decode step size
-                    let decode_step = |val: u16| -> f32 {
-                        let exp = (val >> 11) & 0x1F;
-                        let mant = val & 0x7FF;
-                        // Rb = component depth + guard bits. assume depth 8.
-                        let rb = 8 + guard_bits;
-                        // Delta = 2^(Rb - exp) * (1 + mant / 2048.0)
-                        let delta =
-                            (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(rb as i32 - exp as i32);
-                        delta
+                    let depth = if self.components.len() > comp_idx {
+                        self.components[comp_idx].depth
+                    } else {
+                        8
+                    };
+
+                    let calc_step = |exp: u16, mant: u16, is_hh: bool| -> f32 {
+                        // Table E.1: HL/LH gain=1 (log2=1), HH gain=2 (log2=2).
+                        let log2_gain = if is_hh { 2 } else { 1 };
+                        let rb = depth + guard_bits + log2_gain;
+                        (1.0 + (mant as f32 / 2048.0)) * 2.0f32.powi(rb as i32 - exp as i32)
+                    };
+
+                    let decode_step_val = |val: u16, is_hh: bool| -> f32 {
+                        calc_step((val >> 11) & 0x1F, val & 0x7FF, is_hh)
                     };
 
                     // Determine step sizes for HL, LH, HH
                     let (step_hl, step_lh, step_hh) = if quant_style == 1 {
                         // Derived
-                        let base = qcd.step_sizes[0];
-                        // TODO: accurate derivation formula. For now, decode base.
-                        let s = decode_step(base);
-                        // Approximation for derived? Standard says:
-                        // epsilon_b = epsilon_0 + (N_L - n_b)
-                        // mu_b = mu_0
-                        // So we should recalculate using modified exponent.
-                        // But for now, let's just use the indexed values if available, or just use base if ONLY base available.
-                        if qcd.step_sizes.len() > 1 {
-                            // Use Expounded indexing if avail
-                            let idx_hl = 1 + (r - 1) * 3;
-                            let idx_lh = idx_hl + 1;
-                            let idx_hh = idx_hl + 2;
-                            (
-                                decode_step(qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)]),
-                                decode_step(qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)]),
-                                decode_step(qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)]),
-                            )
+                        if qcd.step_sizes.is_empty() {
+                            (1.0, 1.0, 1.0)
                         } else {
-                            (s, s, s) // Fallback
+                            let base = qcd.step_sizes[0];
+                            let base_exp = (base >> 11) & 0x1F;
+                            let base_mant = base & 0x7FF;
+                            let derived_exp = base_exp + (r as u16) - 1;
+                            (
+                                calc_step(derived_exp, base_mant, false),
+                                calc_step(derived_exp, base_mant, false),
+                                calc_step(derived_exp, base_mant, true),
+                            )
                         }
                     } else {
                         // Expounded or Fallback
@@ -414,9 +412,9 @@ impl J2kImage {
                         let idx_lh = idx_hl + 1;
                         let idx_hh = idx_hl + 2;
                         (
-                            decode_step(qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)]),
-                            decode_step(qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)]),
-                            decode_step(qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)]),
+                            decode_step_val(qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)], false),
+                            decode_step_val(qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)], false),
+                            decode_step_val(qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)], true),
                         )
                     };
 
