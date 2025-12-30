@@ -131,7 +131,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let len = self.reader.read_u16()?;
         // We read 8 bytes of content (Scod=1, SGcod=4, SPcod partial=3)
         // plus 2 bytes for length = 10 bytes minimum.
-        if len < 10 {
+        if len < 12 {
             return Err(JpeglsError::InvalidData);
         }
         let scod = self.reader.read_u8()?; // coding style flags
@@ -512,14 +512,16 @@ mod tests {
             0x07, 0x01, 0x01, // depth/subsampling
             // COD marker
             0xFF, 0x52, // COD
-            0x00, 0x0A, // length 10 (2 len + 8 payload)
-            0x01, // scod
+            0x00, 0x0C, // length 12 (2 len + 10 payload)
+            0x00, // scod (User defined precincts = 0)
             0x02, // sprog
             0x00, 0x01, // nlayers = 1
             0x00, // mct (unused)
             0x03, // decomposition levels
             0x04, // codeblock width exponent
             0x05, // codeblock height exponent
+            0x00, // codeblock style
+            0x00, // transformation
             // QCD marker
             0xFF, 0x5C, // QCD
             0x00, 0x05, // length 5
@@ -533,11 +535,11 @@ mod tests {
         let mut parser = J2kParser::new(&mut reader);
         parser.parse_main_header().unwrap();
         let cod = parser.image.cod.as_ref().expect("COD should be parsed");
-        assert_eq!(cod.coding_style, 0x01);
+        assert_eq!(cod.coding_style, 0x00);
         assert_eq!(cod.progression_order, 0x02);
         assert_eq!(cod.number_of_layers, 1);
         let qcd = parser.image.qcd.as_ref().expect("QCD should be parsed");
         assert_eq!(qcd.quant_style, 0x06);
-        assert_eq!(qcd.step_sizes, vec![0x0010]);
+        assert_eq!(qcd.step_sizes, vec![0x1000]);
     }
 }
