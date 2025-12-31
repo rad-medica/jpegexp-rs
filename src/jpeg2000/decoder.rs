@@ -10,11 +10,10 @@ use crate::jpeg_stream_reader::JpegStreamReader;
 
 use crate::jpeg2000::packet::PrecinctState;
 use std::collections::HashMap;
-        }
-    }
-}
-
 #[derive(Default)]
+pub struct ResolutionState {
+    pub width: u32,
+    pub height: u32,
     pub precincts: HashMap<(u32, u32), crate::jpeg2000::packet::PrecinctState>,
 }
 
@@ -26,6 +25,7 @@ impl ResolutionState {
             precincts: HashMap::new(),
         }
     }
+}
 
 #[derive(Default)]
 pub struct ComponentState {
@@ -314,7 +314,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 sb.height = h_sb;
                             }
                         }
-                    };
+                    }
                 }
             }
         }
@@ -478,7 +478,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 Self::decode_packet_body(parser, h, isot, c, r, l, is_htj2k)?;
                             }
                         }
-                    };
+                    }
                 }
             }
         }
@@ -534,7 +534,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         _ => {}
                     };
                 }
-                // <-- Punto y coma agregado aquí
+                if is_htj2k {
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
                         &data, &data, 64, 64,
                     );
@@ -586,7 +586,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         parser.image.components[comp].depth
                     } else {
                         8
-                    }
+                    };
 
                     let m_b = if cod.transformation == 1 {
                         // Reversible: Use Depth instead of Epsilon?
@@ -622,11 +622,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         bpc.state = block.state.clone();
                         bpc.num_passes_decoded = block.coding_passes as u32;
 
-                        let _ = bpc.decode_codeblock(
-                            &data,
-                            max_bit_plane,
-                            cb_info.num_passes,
-                        );
+                        let _ = bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes);
 
                         block.coefficients = bpc.coefficients;
                         block.state = bpc.state;
@@ -646,11 +642,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             cb_height as u32,
                             &[],
                         );
-                        if let Ok(coefficients) = bpc.decode_codeblock(
-                            &data,
-                            max_bit_plane,
-                            cb_info.num_passes,
-                        ) {
+                        if let Ok(coefficients) =
+                            bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes)
+                        {
                             block.coefficients = coefficients;
                             block.state = bpc.state;
                             block.coding_passes = bpc.num_passes_decoded as u8;

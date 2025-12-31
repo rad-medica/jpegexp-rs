@@ -267,24 +267,24 @@ impl<'a> ScanDecoder<'a> {
             if byte == JPEG_MARKER_START_BYTE as usize {
                 if self.position < self.source.len() {
                     let next_byte = self.source[self.position];
-                    if next_byte == 0 {
-                        // Stuffed 0xFF: the 0xFF is already in cache, skip the stuffing byte (0x00)
+
+                    if (next_byte & 0x80) == 0 {
+                        // Stuffed 0 bit. The byte contains 7 bits of data.
                         self.position += 1;
-                        // Continue reading - the 0xFF is valid data
-                    } else if (0xD0..=0xD7).contains(&next_byte) {
-                        // Restart marker: back up, remove 0xFF from cache
-                        self.position -= 1;
-                        self.valid_bits -= 8;
-                        self.read_cache >>= 8;
-                        break;
-                    } else if next_byte != 0xFF && next_byte != 0x00 {
-                        // Real marker: back up, remove 0xFF from cache
+
+                        // Consume 7 bits
+                        let val_7bits = (next_byte & 0x7F) as usize;
+                        self.read_cache = (self.read_cache << 7) | val_7bits;
+                        self.valid_bits += 7;
+                    } else if next_byte != 0xFF {
+                        // Real marker (MSB is 1, so & 0x80 != 0)
+                        // Back up, remove 0xFF from cache
                         self.position -= 1;
                         self.valid_bits -= 8;
                         self.read_cache >>= 8;
                         break;
                     }
-                    // If next_byte is also 0xFF, treat as data and continue
+                // If next_byte is 0xFF, it will be handled in next iteration (treated as data FF)
                 } else {
                     // End of data after 0xFF - keep it in cache
                     break;
@@ -305,7 +305,6 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         if self.valid_bits < count {
-            // eprintln!("peek_bits failed: wanted {}, have {}", count, self.valid_bits);
             return Err(JpeglsError::InvalidData);
         }
         Ok(((self.read_cache >> (self.valid_bits - count)) & ((1 << count) - 1)) as i32)
