@@ -41,14 +41,30 @@ impl<'a> JpeglsDecoder<'a> {
         self.reader.read_start_of_scan_segment_jpegls()?;
         let frame_info = self.frame_info();
 
+        let preset = self.reader.preset_coding_parameters();
+        let preset = if crate::jpegls::coding_parameters::is_default(&preset, &Default::default()) {
+            let max_val = (1 << frame_info.bits_per_sample) - 1;
+            crate::jpegls::coding_parameters::compute_default(
+                max_val,
+                self.reader.parameters().near_lossless,
+            )
+        } else {
+            preset
+        };
+
         let mut scan_decoder = crate::jpegls::scan_decoder::ScanDecoder::new(
             frame_info,
-            self.reader.preset_coding_parameters(),
+            preset,
             self.reader.parameters(),
             self.reader.remaining_data(),
         )?;
 
-        scan_decoder.decode_scan(destination, 0)?;
+        let components = frame_info.component_count as usize;
+        let width = frame_info.width as usize;
+        let bytes_per_sample = if frame_info.bits_per_sample <= 8 { 1 } else { 2 };
+        let stride = width * components * bytes_per_sample;
+
+        scan_decoder.decode_scan(destination, stride)?;
         Ok(())
     }
 }
