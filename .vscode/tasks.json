@@ -1,56 +1,206 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "cargo build",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["build"],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "problemMatcher": "$rustc"
-    },
-    {
-      "label": "cargo build (release)",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["build", "--release"],
-      "group": "build",
-      "problemMatcher": "$rustc"
-    },
-    {
-      "label": "cargo test",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["test"],
-      "group": "test",
-      "problemMatcher": "$rustc"
-    },
-    {
-      "label": "cargo clippy",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["clippy", "--", "-D", "warnings"],
-      "group": "test",
-      "problemMatcher": "$rustc"
-    },
-    {
-      "label": "cargo fmt",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["fmt"],
-      "group": "build",
-      "problemMatcher": []
-    },
-    {
-      "label": "cargo clean",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["clean"],
-      "group": "build",
-      "problemMatcher": []
-    }
-  ]
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cargo: build (debug)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared",
+                "focus": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "cargo: build (release)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "--release"],
+            "group": "build",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: build CLI (debug)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "--bin", "jpegexp"],
+            "group": "build",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: build CLI (release)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "--release", "--bin", "jpegexp"],
+            "group": "build",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: test",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["test"],
+            "group": "test",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
+        },
+        {
+            "label": "cargo: test (verbose)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["test", "--", "--nocapture"],
+            "group": "test",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "env": {
+                "RUST_BACKTRACE": "full",
+                "RUST_TEST_NOCAPTURE": "1"
+            }
+        },
+        {
+            "label": "cargo: clippy",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["clippy", "--", "-D", "warnings"],
+            "group": "build",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: fmt",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["fmt"],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: fmt (check)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["fmt", "--", "--check"],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: clean",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["clean"],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: bench",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["bench"],
+            "group": "test",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "python: build bindings (maturin develop)",
+            "type": "shell",
+            "command": "maturin",
+            "args": ["develop"],
+            "options": {
+                "cwd": "${workspaceFolder}/python"
+            },
+            "group": "build",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "python: build bindings (maturin build)",
+            "type": "shell",
+            "command": "maturin",
+            "args": ["build", "--release"],
+            "options": {
+                "cwd": "${workspaceFolder}/python"
+            },
+            "group": "build",
+            "problemMatcher": "$rustc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "cargo: build C header (cbindgen)",
+            "type": "shell",
+            "command": "cbindgen",
+            "args": ["--output", "jpegexp.h", "--config", "cbindgen.toml"],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "build: all (debug + release + python)",
+            "dependsOn": [
+                "cargo: build (debug)",
+                "cargo: build (release)",
+                "python: build bindings (maturin develop)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        }
+    ]
 }

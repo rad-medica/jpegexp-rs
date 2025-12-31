@@ -29,3 +29,18 @@ wasm-bindgen = "0.2"
 default = []
 wasm = []
 ffi = []
+
+[profile.dev]
+# Optimized debug profile - faster builds with debug info
+opt-level = 0
+debug = true
+# split-debuginfo = "packed"  # Windows: use "unpacked" or omit (packed is macOS-specific)
+
+[profile.dev.package."*"]
+# Optimize dependencies in dev mode for faster iteration
+opt-level = 3
+
+[profile.test]
+# Test profile - slightly optimized for faster test execution
+opt-level = 1
+debug = true

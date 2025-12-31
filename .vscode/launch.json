@@ -1,79 +1,156 @@
 {
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'jpegexp'",
-      "cargo": {
-        "args": [
-          "build",
-          "--bin=jpegexp",
-          "--package=jpegexp-rs"
-        ],
-        "filter": {
-          "name": "jpegexp",
-          "kind": "bin"
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug CLI (jpegexp)",
+            "preLaunchTask": "cargo: build CLI (debug)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin",
+                    "jpegexp"
+                ],
+                "filter": {
+                    "name": "jpegexp",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "sourceLanguages": ["rust"],
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug CLI with args",
+            "preLaunchTask": "cargo: build CLI (debug)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin",
+                    "jpegexp"
+                ],
+                "filter": {
+                    "name": "jpegexp",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "decode",
+                "-i",
+                "${input:inputFile}",
+                "-o",
+                "${input:outputFile}"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "sourceLanguages": ["rust"],
+            "env": {
+                "RUST_BACKTRACE": "full"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Tests",
+            "preLaunchTask": "cargo: build (debug)",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--message-format=json"
+                ],
+                "filter": {
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "sourceLanguages": ["rust"],
+            "env": {
+                "RUST_BACKTRACE": "full",
+                "RUST_TEST_NOCAPTURE": "1"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Current Test",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--message-format=json",
+                    "--test",
+                    "${input:testName}"
+                ],
+                "filter": {
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "sourceLanguages": ["rust"]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Bench (bench_idct)",
+            "preLaunchTask": "cargo: build (debug)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin",
+                    "bench_idct"
+                ],
+                "filter": {
+                    "name": "bench_idct",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "sourceLanguages": ["rust"],
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "attach",
+            "name": "Debug Library (attach)",
+            "processId": "${command:pickProcess}",
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"]
         }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'jpegexp_rs'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=jpegexp-rs"
-        ],
-        "filter": {
-          "name": "jpegexp_rs",
-          "kind": "lib"
+    ],
+    "inputs": [
+        {
+            "id": "inputFile",
+            "type": "promptString",
+            "description": "Input file path",
+            "default": "tests/test_images/grad_pillow.jpg"
+        },
+        {
+            "id": "outputFile",
+            "type": "promptString",
+            "description": "Output file path",
+            "default": "tests/out/output.raw"
+        },
+        {
+            "id": "testName",
+            "type": "promptString",
+            "description": "Test name (module::test_name)",
+            "default": ""
         }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in current file",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=jpegexp-rs"
-        ],
-        "filter": {
-          "name": "jpegexp_rs",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "python",
-      "request": "launch",
-      "name": "Python: Current File",
-      "program": "${file}",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "python": "${workspaceFolder}/venv/Scripts/python.exe"
-    },
-    {
-      "type": "python",
-      "request": "launch",
-      "name": "Python: Tests",
-      "program": "${workspaceFolder}/tests",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "python": "${workspaceFolder}/venv/Scripts/python.exe"
-    }
-  ]
+    ]
 }
