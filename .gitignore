@@ -43,6 +43,7 @@ dmypy.json
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb_checkpoints/
+tests/out/
 
 # OS
 Thumbs.db
