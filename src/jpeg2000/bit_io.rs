@@ -1,3 +1,25 @@
+// ...existing code...
+// --- BitIoError definition and impls ---
+
+#[derive(Debug, Clone)]
+pub struct BitIoError;
+
+impl std::fmt::Display for BitIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Bit IO error")
+    }
+}
+
+impl<'a> J2kBitReader<'a> {
+    // ...existing code...
+    pub fn position(&self) -> usize {
+        self.pos
+    }
+    // ...existing code...
+}
+
+impl std::error::Error for BitIoError {}
+
 pub struct J2kBitReader<'a> {
     data: &'a [u8],
     pos: usize,
@@ -15,10 +37,10 @@ impl<'a> J2kBitReader<'a> {
         }
     }
 
-    pub fn read_bit(&mut self) -> Result<u8, ()> {
+    pub fn read_bit(&mut self) -> Result<u8, BitIoError> {
         if self.bits_left == 0 {
             if self.pos >= self.data.len() {
-                return Err(()); // EOF
+                return Err(BitIoError);
             }
             let b = self.data[self.pos];
 
@@ -43,7 +65,7 @@ impl<'a> J2kBitReader<'a> {
         Ok(bit)
     }
 
-    pub fn read_bits(&mut self, mut count: u8) -> Result<u32, ()> {
+    pub fn read_bits(&mut self, mut count: u8) -> Result<u32, BitIoError> {
         let mut bits = 0u32;
         while count > 0 {
             let bit = self.read_bit()?;
@@ -51,14 +73,6 @@ impl<'a> J2kBitReader<'a> {
             count -= 1;
         }
         Ok(bits)
-    }
-
-    pub fn has_data(&self) -> bool {
-        self.pos < self.data.len() || self.bits_left > 0
-    }
-
-    pub fn position(&self) -> usize {
-        self.pos
     }
 }
 

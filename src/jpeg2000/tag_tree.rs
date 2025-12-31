@@ -1,4 +1,4 @@
-use crate::jpeg2000::bit_io::{J2kBitReader, J2kBitWriter};
+use crate::jpeg2000::bit_io::{BitIoError, J2kBitReader, J2kBitWriter};
 
 /// Tag Tree for JPEG 2000 Packet Header coding.
 /// Represents a quad-tree structure used to encode 2D arrays of values (e.g. inclusion, zero bit-planes).
@@ -144,7 +144,7 @@ impl TagTree {
         x: usize,
         y: usize,
         threshold: i32,
-    ) -> Result<bool, ()> {
+    ) -> Result<bool, BitIoError> {
         if x >= self.leaf_width || y >= self.leaf_height {
             return Ok(false);
         }

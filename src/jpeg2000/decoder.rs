@@ -10,41 +10,31 @@ use crate::jpeg_stream_reader::JpegStreamReader;
 
 use crate::jpeg2000::packet::PrecinctState;
 use std::collections::HashMap;
-
-#[derive(Default)]
-struct TileState {
-    components: Vec<ComponentState>,
+        }
+    }
 }
 
 #[derive(Default)]
-struct ComponentState {
-    resolutions: Vec<ResolutionState>,
-}
-
-struct ResolutionState {
-    pub width: u32,
-    pub height: u32,
-    precincts: HashMap<(u32, u32), crate::jpeg2000::packet::PrecinctState>,
+    pub precincts: HashMap<(u32, u32), crate::jpeg2000::packet::PrecinctState>,
 }
 
 impl ResolutionState {
-    fn new(w: usize, h: usize) -> Self {
+    pub fn new(w: usize, h: usize) -> Self {
         Self {
             width: w as u32,
             height: h as u32,
             precincts: HashMap::new(),
         }
     }
+
+#[derive(Default)]
+pub struct ComponentState {
+    pub resolutions: Vec<ResolutionState>,
 }
 
-impl Default for ResolutionState {
-    fn default() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            precincts: HashMap::new(),
-        }
-    }
+#[derive(Default)]
+pub struct TileState {
+    pub components: Vec<ComponentState>,
 }
 
 /// High-level generic JPEG 2000 Decoder.
@@ -69,23 +59,17 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let codestream = {
             let mut jp2_reader =
                 crate::jpeg2000::jp2::Jp2Reader::new(self.parser.reader.remaining_data());
-            match jp2_reader.find_codestream() {
-                Ok(cs) => cs,
-                Err(_) => None, // Fallback to raw if logic fails or not JP2
-            }
+            jp2_reader.find_codestream().unwrap_or_default()
         };
 
         let icc_profile = {
             let mut jp2_reader =
                 crate::jpeg2000::jp2::Jp2Reader::new(self.parser.reader.remaining_data());
-            match jp2_reader.find_icc_profile() {
-                Ok(icc) => icc,
-                Err(_) => None,
-            }
+            jp2_reader.find_icc_profile().unwrap_or_default()
         };
 
         if let Some(cs) = codestream {
-            let mut sub_reader = JpegStreamReader::new(&cs);
+            let mut sub_reader = JpegStreamReader::new(cs);
             let mut sub_parser = J2kParser::new(&mut sub_reader);
 
             // 1. Parse Main Header with sub_parser
@@ -173,7 +157,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         return Ok(crate::jpeg_marker_code::JpegMarkerCode::StartOfTile);
                     } else if b2 == 0xD9 {
                         return Ok(crate::jpeg_marker_code::JpegMarkerCode::EndOfImage);
-                    }
+                    };
                 }
                 Ok(_) => continue,
                 Err(_) => return Err(JpeglsError::InvalidData),
@@ -224,7 +208,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let y_tosiz = parser.image.tile_y_origin;
 
         // Number of tiles in X and Y
-        let num_tiles_x = (x_siz.saturating_sub(x_tosiz) + x_tsiz - 1) / x_tsiz;
+        let num_tiles_x = (x_siz.saturating_sub(x_tosiz)).div_ceil(x_tsiz);
         // avoid div by zero if tile size is huge or something (parser checks usually catch this)
         let num_tiles_x = if num_tiles_x == 0 { 1 } else { num_tiles_x };
 
@@ -255,10 +239,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                 // 3. Determine Tile-Component coordinates (tcx0, tcy0, tcx1, tcy1)
                 // ceil(a / b) = (a + b - 1) / b
-                let tcx0 = (tx0 + dx - 1) / dx;
-                let tcx1 = (tx1 + dx - 1) / dx;
-                let tcy0 = (ty0 + dy - 1) / dy;
-                let tcy1 = (ty1 + dy - 1) / dy;
+                let tcx0 = tx0.div_ceil(dx);
+                let tcx1 = tx1.div_ceil(dx);
+                let tcy0 = ty0.div_ceil(dy);
+                let tcy1 = ty1.div_ceil(dy);
 
                 let comp = &mut tile.components[c];
                 if comp.resolutions.len() < num_resolutions {
@@ -267,11 +251,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 }
                 for r in 0..num_resolutions {
                     // Logic from get_grid_size (duplicated here to avoid closure borrow issues)
-                    let shift = if r >= (num_resolutions - 1) {
-                        0
-                    } else {
-                        num_resolutions - 1 - r
-                    };
+                    let shift = num_resolutions.saturating_sub(1 + r);
 
                     // 4. Determine Resolution Level coordinates (trx0, try0, trx1, try1)
                     // Division by 2^shift is equivalent to >> shift, but ceil requires handling.
@@ -292,7 +272,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         comp.resolutions[r]
                             .subbands
                             .resize_with(4, Default::default);
-                    }
+                    };
 
                     // Init subbands
                     let orientations = [
@@ -321,12 +301,12 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 // LL(0), HL(1): width approx (W+1)/2
                                 // LH(2), HH(3): width approx W/2
                                 let w_sb = if i == 0 || i == 1 {
-                                    (res_w + 1) / 2
+                                    res_w.div_ceil(2)
                                 } else {
                                     res_w / 2
                                 };
                                 let h_sb = if i == 0 || i == 2 {
-                                    (res_h + 1) / 2
+                                    res_h.div_ceil(2)
                                 } else {
                                     res_h / 2
                                 };
@@ -334,7 +314,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 sb.height = h_sb;
                             }
                         }
-                    }
+                    };
                 }
             }
         }
@@ -382,7 +362,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         tile_states[tile_state_idx]
                             .components
                             .resize_with(c + 1, Default::default);
-                    }
+                    };
                     let comp_state = &mut tile_states[tile_state_idx].components[c];
 
                     // Ensure resolution state exists
@@ -403,7 +383,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         comp_state.resolutions.resize_with(r + 1, || {
                             ResolutionState::new(res_info.width as usize, res_info.height as usize)
                         });
-                    }
+                    };
                     let res_state = &mut comp_state.resolutions[r];
                     let res_w = res_state.width;
                     let res_h = res_state.height;
@@ -422,8 +402,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         (32768, 32768)
                     };
 
-                    let grid_w = (res_w + ppx - 1) / ppx;
-                    let grid_h = (res_h + ppy - 1) / ppy;
+                    let grid_w = res_w.div_ceil(ppx);
+                    let grid_h = res_h.div_ceil(ppy);
 
                     // Iterate Precincts
                     let num_px = grid_w;
@@ -433,7 +413,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         for px in 0..num_px {
                             let precinct_state = res_state
                                 .precincts
-                                .entry((px as u32, py as u32))
+                                .entry((px, py))
                                 .or_insert_with(|| PrecinctState::new(num_subbands, 0));
 
                             // SOP Marker Handling
@@ -498,7 +478,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 Self::decode_packet_body(parser, h, isot, c, r, l, is_htj2k)?;
                             }
                         }
-                    }
+                    };
                 }
             }
         }
@@ -552,10 +532,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         1 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::LH,
                         2 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HH,
                         _ => {}
-                    }
+                    };
                 }
-
-                if is_htj2k {
+                // <-- Punto y coma agregado aquí
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
                         &data, &data, 64, 64,
                     );
@@ -573,8 +552,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     let (sb_w, sb_h) = if res == 0 {
                         (res_w, res_h)
                     } else {
-                        let ll_w = (res_w + 1) / 2;
-                        let ll_h = (res_h + 1) / 2;
+                        let ll_w = res_w.div_ceil(2);
+                        let ll_h = res_h.div_ceil(2);
                         match subband_idx {
                             0 => (res_w - ll_w, ll_h),         // HL
                             1 => (ll_w, res_h - ll_h),         // LH
@@ -603,13 +582,11 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                     let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
                         (qcd.step_sizes[qcd_idx] >> 11) as u8
+                    } else if comp < parser.image.components.len() {
+                        parser.image.components[comp].depth
                     } else {
-                        if comp < parser.image.components.len() {
-                            parser.image.components[comp].depth
-                        } else {
-                            8
-                        }
-                    };
+                        8
+                    }
 
                     let m_b = if cod.transformation == 1 {
                         // Reversible: Use Depth instead of Epsilon?
@@ -647,8 +624,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                         let _ = bpc.decode_codeblock(
                             &data,
-                            max_bit_plane as u8,
-                            cb_info.num_passes as u8,
+                            max_bit_plane,
+                            cb_info.num_passes,
                         );
 
                         block.coefficients = bpc.coefficients;
@@ -671,8 +648,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         );
                         if let Ok(coefficients) = bpc.decode_codeblock(
                             &data,
-                            max_bit_plane as u8,
-                            cb_info.num_passes as u8,
+                            max_bit_plane,
+                            cb_info.num_passes,
                         ) {
                             block.coefficients = coefficients;
                             block.state = bpc.state;

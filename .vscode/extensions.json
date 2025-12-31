@@ -6,7 +6,7 @@
     "ms-python.black-formatter",
     "ms-python.isort",
     "tamasfe.even-better-toml",
-    "serayuzgur.crates",
+    "fill-labs.dependi",
     "usernamehw.errorlens",
     "editorconfig.editorconfig"
   ]

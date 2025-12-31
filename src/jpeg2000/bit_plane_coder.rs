@@ -159,7 +159,7 @@ impl<'a> BitPlaneCoder<'a> {
         data: &[u8],
         max_bit_plane: u8,
         num_new_passes: u8,
-    ) -> Result<Vec<i32>, ()> {
+    ) -> Result<Vec<i32>, crate::jpeg2000::bit_io::BitIoError> {
         if num_new_passes == 0 {
             return Ok(self.coefficients.clone());
         }
@@ -211,7 +211,10 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(self.coefficients.clone())
     }
 
-    fn decode_significance_propagation(&mut self, bit_plane: u8) -> Result<(), ()> {
+    fn decode_significance_propagation(
+        &mut self,
+        bit_plane: u8,
+    ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
         // Scan in stripe order (4 rows at a time)
         let stripe_height = 4;
         let width = self.width;
@@ -245,7 +248,7 @@ impl<'a> BitPlaneCoder<'a> {
                                 let sc_data = self.get_sign_context(x, y, width, height);
                                 let sc_ctx = sc_data & 0xFF;
                                 let xor = (sc_data >> 8) & 1;
-                                let sym = self.mq.decode_bit(sc_ctx) as u8;
+                                let sym = self.mq.decode_bit(sc_ctx);
                                 let sign_bit = sym ^ (xor as u8);
 
                                 if sign_bit != 0 {
@@ -266,7 +269,10 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(())
     }
 
-    fn decode_magnitude_refinement(&mut self, bit_plane: u8) -> Result<(), ()> {
+    fn decode_magnitude_refinement(
+        &mut self,
+        bit_plane: u8,
+    ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
         let width = self.width;
         let height = self.height;
         let size = (width * height) as usize;
@@ -302,7 +308,7 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(())
     }
 
-    fn decode_cleanup(&mut self, bit_plane: u8) -> Result<(), ()> {
+    fn decode_cleanup(&mut self, bit_plane: u8) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
         // Scan in stripe order
         let stripe_height = 4;
         let width = self.width;
@@ -325,7 +331,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let (hc, vc, dc) = self.get_neighbors(x, y);
 
                         // Decode significance bit
-                        let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8);
+                        let cx = self.get_zc_context(0, hc, vc, dc);
                         let bit = self.mq.decode_bit(cx);
 
                         if bit != 0 {
@@ -336,7 +342,7 @@ impl<'a> BitPlaneCoder<'a> {
                             let sc_data = self.get_sign_context(x, y, width, height);
                             let sc_ctx = sc_data & 0xFF;
                             let xor = (sc_data >> 8) & 1;
-                            let sym = self.mq.decode_bit(sc_ctx) as u8;
+                            let sym = self.mq.decode_bit(sc_ctx);
                             let sign_bit = sym ^ (xor as u8);
 
                             if sign_bit != 0 {
@@ -467,7 +473,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let bit = (val.abs() >> bit_plane) & 1;
 
                         // Encode ZC
-                        let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8); // band 0 assumed
+                        let cx = self.get_zc_context(0, hc, vc, dc); // band 0 assumed
                         self.mq.encode(bit as u8, cx);
 
                         if bit == 1 {
@@ -532,7 +538,7 @@ impl<'a> BitPlaneCoder<'a> {
                     let (hc, vc, dc) = self.get_neighbors(x, y);
 
                     // ZC Context
-                    let cx = self.get_zc_context(0, hc as u8, vc as u8, dc as u8);
+                    let cx = self.get_zc_context(0, hc, vc, dc);
                     let val = self.data[idx];
                     let bit = (val.abs() >> bit_plane) & 1;
 

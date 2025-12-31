@@ -12,12 +12,12 @@
     "rust-analyzer.completion.autoimport.enable": true,
     "rust-analyzer.imports.granularity.group": "module",
     "rust-analyzer.imports.prefix": "by_crate",
-    
+
     // File associations
     "files.associations": {
         "*.rs": "rust"
     },
-    
+
     // Editor settings for Rust
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
@@ -26,22 +26,22 @@
         "editor.insertSpaces": true,
         "editor.rulers": [100]
     },
-    
+
     // Exclude patterns
     "files.exclude": {
         "**/target": true,
         "**/.git": true
     },
-    
+
     // Search exclude patterns
     "search.exclude": {
         "**/target": true,
         "**/Cargo.lock": true
     },
-    
+
     // Terminal settings
     "terminal.integrated.defaultProfile.windows": "PowerShell",
-    
+
     // Python settings (if working with Python bindings)
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter",

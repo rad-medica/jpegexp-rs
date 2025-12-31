@@ -1,4 +1,4 @@
-use super::bit_io::J2kBitReader;
+use super::bit_io::{BitIoError, J2kBitReader};
 use super::tag_tree::TagTree;
 
 pub struct SubbandState {
@@ -69,7 +69,7 @@ impl PacketHeader {
         grid_width: usize,
         grid_height: usize,
         num_subbands: usize,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, BitIoError> {
         let mut header = PacketHeader {
             packet_seq_num: 0,
             empty: false,
@@ -168,7 +168,7 @@ impl PacketHeader {
     }
 
     /// Reads the number of coding passes using J2K codeword table (Table B.4).
-    fn read_coding_passes(reader: &mut J2kBitReader) -> Result<u8, ()> {
+    fn read_coding_passes(reader: &mut J2kBitReader) -> Result<u8, BitIoError> {
         if reader.read_bit()? == 0 {
             // eprintln!("DEBUG: passes codework 0 -> 1");
             return Ok(1);

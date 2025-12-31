@@ -32,20 +32,31 @@ impl Dwt53 {
         let _h_count = len / 2;
 
         // Prediction (Odd samples updated based on Even samples)
-        for i in 0..len {
-            if i % 2 != 0 {
-                let left = x[i - 1];
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] }; // Symmetric extension
-                x[i] -= (left + right) >> 1;
+        {
+            let x_copy = x.clone();
+            for i in 0..len {
+                if i % 2 != 0 {
+                    let left = x_copy[i - 1];
+                    let right = if i + 1 < len {
+                        x_copy[i + 1]
+                    } else {
+                        x_copy[i - 1]
+                    };
+                    x[i] -= (left + right) >> 1;
+                }
             }
         }
-
         // Update (Even samples updated based on Odd samples)
         // y[2n] = x[2n] + floor((y[2n-1] + y[2n+1] + 2)/4)
+        let x_copy = x.clone();
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] }; // Symmetric extension
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                let left = if i > 0 { x_copy[i - 1] } else { x_copy[i + 1] };
+                let right = if i + 1 < len {
+                    x_copy[i + 1]
+                } else {
+                    x_copy[i - 1]
+                };
                 x[i] += (left + right + 2) >> 2;
             }
         }
@@ -59,11 +70,9 @@ impl Dwt53 {
                     out_l[l_idx] = x[i];
                     l_idx += 1;
                 }
-            } else {
-                if h_idx < out_h.len() {
-                    out_h[h_idx] = x[i];
-                    h_idx += 1;
-                }
+            } else if h_idx < out_h.len() {
+                out_h[h_idx] = x[i];
+                h_idx += 1;
             }
         }
     }
@@ -75,36 +84,46 @@ impl Dwt53 {
         let mut x = vec![0i32; len];
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for i in 0..len {
+        for (i, val) in x.iter_mut().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < in_l.len() {
-                    x[i] = in_l[l_idx];
+                    *val = in_l[l_idx];
                     l_idx += 1;
                 }
-            } else {
-                if h_idx < in_h.len() {
-                    x[i] = in_h[h_idx];
-                    h_idx += 1;
-                }
+            } else if h_idx < in_h.len() {
+                *val = in_h[h_idx];
+                h_idx += 1;
             }
         }
 
         // Reverse Update
         // x[2n] = y[2n] - floor((y[2n-1] + y[2n+1] + 2)/4)
-        for i in 0..len {
-            if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-                x[i] -= (left + right + 2) >> 2;
+        {
+            let x_copy = x.clone();
+            for i in 0..len {
+                if i % 2 == 0 {
+                    let left = if i > 0 { x_copy[i - 1] } else { x_copy[i + 1] };
+                    let right = if i + 1 < len {
+                        x_copy[i + 1]
+                    } else {
+                        x_copy[i - 1]
+                    };
+                    x[i] -= (left + right + 2) >> 2;
+                }
             }
         }
 
         // Reverse Prediction
         // x[2n+1] = y[2n+1] + floor((x[2n] + x[2n+2])/2)
+        let x_copy = x.clone();
         for i in 0..len {
             if i % 2 != 0 {
-                let left = x[i - 1];
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                let left = x_copy[i - 1];
+                let right = if i + 1 < len {
+                    x_copy[i + 1]
+                } else {
+                    x_copy[i - 1]
+                };
                 x[i] += (left + right) >> 1;
             }
         }
@@ -203,12 +222,12 @@ pub struct Dwt97;
 
 impl Dwt97 {
     // 9/7 Filter Constants
-    const ALPHA: f32 = -1.586134342;
-    const BETA: f32 = -0.052980118;
-    const GAMMA: f32 = 0.882911075;
-    const DELTA: f32 = 0.443506852;
-    const K: f32 = 1.230174105;
-    const INV_K: f32 = 1.0 / 1.230174105;
+    const ALPHA: f32 = -1.5861343;
+    const BETA: f32 = -0.05298012;
+    const GAMMA: f32 = 0.8829111;
+    const DELTA: f32 = 0.44350687;
+    const K: f32 = 1.2301741;
+    const INV_K: f32 = 1.0 / 1.2301741;
 
     pub fn forward(signal: &[f32], out_l: &mut [f32], out_h: &mut [f32]) {
         let len = signal.len();
@@ -221,34 +240,56 @@ impl Dwt97 {
 
         // 2. Lifting Steps
         // Prediction 1
-        for i in 0..len {
-            if i % 2 != 0 {
-                let left = x[i - 1];
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-                x[i] += Self::ALPHA * (left + right);
+        {
+            let x_copy = x.clone();
+            for i in 0..len {
+                if i % 2 != 0 {
+                    let left = x_copy[i - 1];
+                    let right = if i + 1 < len {
+                        x_copy[i + 1]
+                    } else {
+                        x_copy[i - 1]
+                    };
+                    x[i] += Self::ALPHA * (left + right);
+                }
             }
         }
         // Update 1
+        let x_copy = x.clone();
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                let left = if i > 0 { x_copy[i - 1] } else { x_copy[i + 1] };
+                let right = if i + 1 < len {
+                    x_copy[i + 1]
+                } else {
+                    x_copy[i - 1]
+                };
                 x[i] += Self::BETA * (left + right);
             }
         }
         // Prediction 2
+        let x_copy = x.clone();
         for i in 0..len {
             if i % 2 != 0 {
-                let left = x[i - 1];
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                let left = x_copy[i - 1];
+                let right = if i + 1 < len {
+                    x_copy[i + 1]
+                } else {
+                    x_copy[i - 1]
+                };
                 x[i] += Self::GAMMA * (left + right);
             }
         }
         // Update 2
+        let x_copy = x.clone();
         for i in 0..len {
             if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                let left = if i > 0 { x_copy[i - 1] } else { x_copy[i + 1] };
+                let right = if i + 1 < len {
+                    x_copy[i + 1]
+                } else {
+                    x_copy[i - 1]
+                };
                 x[i] += Self::DELTA * (left + right);
             }
         }
@@ -271,11 +312,9 @@ impl Dwt97 {
                     out_l[l_idx] = x[i];
                     l_idx += 1;
                 }
-            } else {
-                if h_idx < out_h.len() {
-                    out_h[h_idx] = x[i];
-                    h_idx += 1;
-                }
+            } else if h_idx < out_h.len() {
+                out_h[h_idx] = x[i];
+                h_idx += 1;
             }
         }
     }
