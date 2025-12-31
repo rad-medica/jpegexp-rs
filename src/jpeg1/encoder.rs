@@ -59,6 +59,16 @@ impl Jpeg1Encoder {
         frame_info: &FrameInfo,
         destination: &mut [u8],
     ) -> Result<usize, JpeglsError> {
+        let destination_len = destination.len();
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
+                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"encoder.rs:56","message":"encoder.encode entry","data":{{"source_len":{},"destination_len":{},"width":{},"height":{},"components":{}}},"timestamp":{}}}"#, source.len(), destination_len, frame_info.width, frame_info.height, frame_info.component_count, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            }
+        }
+        // #endregion
         let mut writer = JpegStreamWriter::new(destination);
 
         let components_count = frame_info.component_count as usize;
@@ -232,10 +242,38 @@ impl Jpeg1Encoder {
         let mut bw = bit_writer_opt.unwrap();
         bw.flush()?;
         let encoded_len = bw.len();
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
+                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"encoder.rs:232","message":"before final flush and EOI","data":{{"encoded_len":{},"writer_position":{},"destination_len":{}}},"timestamp":{}}}"#, encoded_len, writer.len(), destination_len, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            }
+        }
+        // #endregion
         writer.advance(encoded_len);
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
+                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"encoder.rs:236","message":"before write_end_of_image","data":{{"writer_position":{},"destination_len":{}}},"timestamp":{}}}"#, writer.len(), destination_len, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            }
+        }
+        // #endregion
         writer.write_end_of_image()?;
+        let final_len = writer.len();
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
+                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"C,D","location":"encoder.rs:243","message":"encoder.encode exit","data":{{"final_len":{},"destination_len":{}}},"timestamp":{}}}"#, final_len, destination_len, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            }
+        }
+        // #endregion
 
-        Ok(writer.len())
+        Ok(final_len)
     }
 
     pub fn encode_planar(

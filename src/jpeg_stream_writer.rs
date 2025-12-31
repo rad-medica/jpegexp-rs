@@ -32,6 +32,15 @@ impl<'a> JpegStreamWriter<'a> {
 
     pub fn write_byte(&mut self, value: u8) -> Result<(), JpeglsError> {
         if self.position >= self.destination.len() {
+            // #region agent log
+            {
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
+                    let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"jpeg_stream_writer.rs:34","message":"buffer overflow in write_byte","data":{{"position":{},"destination_len":{},"value":{}}},"timestamp":{}}}"#, self.position, self.destination.len(), value, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+                }
+            }
+            // #endregion
             return Err(JpeglsError::ParameterValueNotSupported); // Use appropriate error (BufferTooSmall)
         }
         self.destination[self.position] = value;

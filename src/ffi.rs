@@ -43,7 +43,10 @@ struct DecoderState {
 /// `data` must be a valid pointer to `len` bytes.
 #[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub unsafe extern "C" fn jpegexp_decoder_new(data: *const c_uchar, len: usize) -> *mut JpegExpDecoder {
+pub unsafe extern "C" fn jpegexp_decoder_new(
+    data: *const c_uchar,
+    len: usize,
+) -> *mut JpegExpDecoder {
     if data.is_null() || len == 0 {
         return ptr::null_mut();
     }
@@ -78,29 +81,170 @@ pub unsafe extern "C" fn jpegexp_decoder_read_header(
     decoder: *mut JpegExpDecoder,
     info: *mut JpegExpImageInfo,
 ) -> c_int {
+    // #region agent log
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+        {
+            let _ = writeln!(
+                f,
+                r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A,D","location":"ffi.rs:77","message":"jpegexp_decoder_read_header entry","data":{{"decoder_null":{},"info_null":{}}},"timestamp":{}}}"#,
+                decoder.is_null(),
+                info.is_null(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+        }
+    }
+    // #endregion
     if decoder.is_null() {
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:85","message":"decoder is null","data":{{}},"timestamp":{}}}"#,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+            }
+        }
+        // #endregion
         return JpegExpError::InvalidData as c_int;
     }
 
     let state = unsafe { &mut *(decoder as *mut DecoderState) };
+    let data_len = state.data.len();
+    let first_bytes: Vec<u8> = state.data.iter().take(4).copied().collect();
+
+    // #region agent log
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+        {
+            let _ = writeln!(
+                f,
+                r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"ffi.rs:96","message":"format detection start","data":{{"data_len":{},"first_bytes":{:?},"is_jpeg1":{},"is_jpeg2000":{},"is_jpegls":{}}},"timestamp":{}}}"#,
+                data_len,
+                first_bytes,
+                state.data.starts_with(&[0xFF, 0xD8]),
+                state.data.starts_with(&[0xFF, 0x4F])
+                    || state.data.starts_with(b"\x00\x00\x00\x0CjP"),
+                !state.data.starts_with(&[0xFF, 0xD8])
+                    && !(state.data.starts_with(&[0xFF, 0x4F])
+                        || state.data.starts_with(b"\x00\x00\x00\x0CjP")),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+        }
+    }
+    // #endregion
 
     // Detect format and read header
     if state.data.starts_with(&[0xFF, 0xD8]) {
         // JPEG 1
         let mut reader = crate::jpeg_stream_reader::JpegStreamReader::new(&state.data);
         let mut spiff = None;
-        if reader.read_header(&mut spiff).is_err() {
-            return JpegExpError::InvalidData as c_int;
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:111","message":"before JPEG1 read_header","data":{{}},"timestamp":{}}}"#,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+            }
         }
-        let frame_info = reader.frame_info();
-        state.info = Some(frame_info);
-
-        if !info.is_null() {
-            unsafe {
-                (*info).width = frame_info.width;
-                (*info).height = frame_info.height;
-                (*info).components = frame_info.component_count as u32;
-                (*info).bits_per_sample = frame_info.bits_per_sample as u32;
+        // #endregion
+        match reader.read_header(&mut spiff) {
+            Ok(_) => {
+                let frame_info = reader.frame_info();
+                state.info = Some(frame_info);
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:119","message":"JPEG1 read_header success","data":{{"width":{},"height":{},"components":{},"bits_per_sample":{}}},"timestamp":{}}}"#,
+                            frame_info.width,
+                            frame_info.height,
+                            frame_info.component_count,
+                            frame_info.bits_per_sample,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+                if !info.is_null() {
+                    unsafe {
+                        (*info).width = frame_info.width;
+                        (*info).height = frame_info.height;
+                        (*info).components = frame_info.component_count as u32;
+                        (*info).bits_per_sample = frame_info.bits_per_sample as u32;
+                    }
+                }
+            }
+            Err(e) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:134","message":"JPEG1 read_header failed","data":{{"error":"{:?}"}},"timestamp":{}}}"#,
+                            e,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+                return JpegExpError::InvalidData as c_int;
             }
         }
     } else if state.data.starts_with(&[0xFF, 0x4F]) || state.data.starts_with(b"\x00\x00\x00\x0CjP")
@@ -181,12 +325,101 @@ pub unsafe extern "C" fn jpegexp_decoder_decode(
 
     // Decode based on format
     if state.data.starts_with(&[0xFF, 0xD8]) {
-        let mut dec = crate::jpeg1::decoder::Jpeg1Decoder::new(&state.data);
-        if dec.read_header().is_err() {
-            return JpegExpError::InvalidData as c_int;
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A,B","location":"ffi.rs:246","message":"decoding JPEG1","data":{{}},"timestamp":{}}}"#,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+            }
         }
-        if dec.decode(output_slice).is_err() {
-            return JpegExpError::InternalError as c_int;
+        // #endregion
+        let mut dec = crate::jpeg1::decoder::Jpeg1Decoder::new(&state.data);
+        match dec.read_header() {
+            Ok(_) => {}
+            Err(e) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:257","message":"JPEG1 decoder read_header failed in decode","data":{{"error":"{:?}"}},"timestamp":{}}}"#,
+                            e,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+                return JpegExpError::InvalidData as c_int;
+            }
+        }
+        match dec.decode(output_slice) {
+            Ok(_) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"ffi.rs:232","message":"JPEG1 decode success","data":{{}},"timestamp":{}}}"#,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+            }
+            Err(e) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"ffi.rs:242","message":"JPEG1 decode failed","data":{{"error":"{:?}"}},"timestamp":{}}}"#,
+                            e,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+                return JpegExpError::InternalError as c_int;
+            }
         }
     } else if state.data.starts_with(&[0xFF, 0x4F]) || state.data.starts_with(b"\x00\x00\x00\x0CjP")
     {
@@ -194,15 +427,124 @@ pub unsafe extern "C" fn jpegexp_decoder_decode(
         // Return default image values for compatibility
         output_slice.fill(128);
     } else {
-        let mut dec = crate::jpegls::JpeglsDecoder::new(&state.data);
-        if dec.read_header().is_err() {
-            return JpegExpError::InvalidData as c_int;
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A,B","location":"ffi.rs:252","message":"decoding JPEG-LS","data":{{}},"timestamp":{}}}"#,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+            }
         }
-        if dec.decode(output_slice).is_err() {
-            return JpegExpError::InternalError as c_int;
+        // #endregion
+        let mut dec = crate::jpegls::JpeglsDecoder::new(&state.data);
+        match dec.read_header() {
+            Ok(_) => {}
+            Err(e) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:262","message":"JPEG-LS decoder read_header failed in decode","data":{{"error":"{:?}"}},"timestamp":{}}}"#,
+                            e,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+                return JpegExpError::InvalidData as c_int;
+            }
+        }
+        match dec.decode(output_slice) {
+            Ok(_) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"ffi.rs:275","message":"JPEG-LS decode success","data":{{}},"timestamp":{}}}"#,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+            }
+            Err(e) => {
+                // #region agent log
+                {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    if let Ok(mut f) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"ffi.rs:285","message":"JPEG-LS decode failed","data":{{"error":"{:?}"}},"timestamp":{}}}"#,
+                            e,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                    }
+                }
+                // #endregion
+                return JpegExpError::InternalError as c_int;
+            }
         }
     }
 
+    // #region agent log
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+        {
+            let _ = writeln!(
+                f,
+                r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"ffi.rs:295","message":"jpegexp_decoder_decode success","data":{{}},"timestamp":{}}}"#,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+        }
+    }
+    // #endregion
     JpegExpError::Ok as c_int
 }
 
@@ -221,7 +563,51 @@ pub unsafe extern "C" fn jpegexp_encode_jpeg(
     output_len: usize,
     bytes_written: *mut usize,
 ) -> c_int {
+    // #region agent log
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+        {
+            let _ = writeln!(
+                f,
+                r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:215","message":"jpegexp_encode_jpeg entry","data":{{"width":{},"height":{},"components":{},"output_len":{}}},"timestamp":{}}}"#,
+                width,
+                height,
+                components,
+                output_len,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+        }
+    }
+    // #endregion
     if pixels.is_null() || output.is_null() || bytes_written.is_null() {
+        // #region agent log
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:225","message":"null pointer check failed","data":{{}},"timestamp":{}}}"#,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+            }
+        }
+        // #endregion
         return JpegExpError::InvalidData as c_int;
     }
 
@@ -236,13 +622,92 @@ pub unsafe extern "C" fn jpegexp_encode_jpeg(
         component_count: components as i32,
     };
 
+    // #region agent log
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+        {
+            let _ = writeln!(
+                f,
+                r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"ffi.rs:237","message":"before encoder.encode call","data":{{"pixel_count":{},"frame_info_width":{},"frame_info_height":{},"frame_info_components":{}}},"timestamp":{}}}"#,
+                pixel_count,
+                frame_info.width,
+                frame_info.height,
+                frame_info.component_count,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+        }
+    }
+    // #endregion
     let mut encoder = crate::jpeg1::encoder::Jpeg1Encoder::new();
     match encoder.encode(pixels_slice, &frame_info, output_slice) {
         Ok(len) => {
+            // #region agent log
+            {
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                if let Ok(mut f) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                {
+                    let first_bytes: Vec<u8> = output_slice.iter().take(10).copied().collect();
+                    let last_bytes: Vec<u8> = output_slice
+                        .iter()
+                        .skip(len.saturating_sub(2))
+                        .take(2)
+                        .copied()
+                        .collect();
+                    let _ = writeln!(
+                        f,
+                        r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"C,D,E","location":"ffi.rs:243","message":"encoder.encode success","data":{{"len":{},"first_bytes":{:?},"last_bytes":{:?},"has_soi":{},"has_eoi":{}}},"timestamp":{}}}"#,
+                        len,
+                        first_bytes,
+                        last_bytes,
+                        first_bytes.len() >= 2 && first_bytes[0] == 0xFF && first_bytes[1] == 0xD8,
+                        last_bytes.len() >= 2 && last_bytes[0] == 0xFF && last_bytes[1] == 0xD9,
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                    );
+                }
+            }
+            // #endregion
             unsafe { *bytes_written = len };
             JpegExpError::Ok as c_int
         }
-        Err(_) => JpegExpError::InternalError as c_int,
+        Err(e) => {
+            // #region agent log
+            {
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                if let Ok(mut f) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"ffi.rs:252","message":"encoder.encode error","data":{{"error":"{:?}"}},"timestamp":{}}}"#,
+                        e,
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                    );
+                }
+            }
+            // #endregion
+            JpegExpError::InternalError as c_int
+        }
     }
 }
 

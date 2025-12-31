@@ -11,7 +11,7 @@ if os.name == "nt":
     JPEGEXP_BIN = os.path.abspath("target/release/jpegexp.exe")
 else:
     JPEGEXP_BIN = os.path.abspath("target/release/jpegexp")
-OUTPUT_DIR = "tests/artifacts_comprehensive"
+OUTPUT_DIR = os.path.join("tests", "out", "comprehensive")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
