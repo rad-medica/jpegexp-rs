@@ -5,7 +5,7 @@ It provides a unified, memory-safe interface for JPEG-LS, JPEG 1, JPEG 2000, and
 
 ## 🚀 Quick Start with Codespaces
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=rad-medica/jpegexp-rs)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/rad-medica/jpegexp-rs)
 
 This repository includes a complete DevContainer configuration for GitHub Codespaces and VS Code. Click the badge above or see [.devcontainer/README.md](.devcontainer/README.md) for details.
 

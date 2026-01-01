@@ -268,14 +268,14 @@ perf report
 ## Resources
 
 ### JPEG Standards
-- JPEG 1: ISO/IEC 10918-1
-- JPEG-LS: ISO/IEC 14495-1
-- JPEG 2000: ISO/IEC 15444-1
+- JPEG 1: ISO/IEC 10918-1 ([ITU-T T.81](https://www.itu.int/rec/T-REC-T.81))
+- JPEG-LS: ISO/IEC 14495-1 ([ITU-T T.87](https://www.itu.int/rec/T-REC-T.87))
+- JPEG 2000: ISO/IEC 15444-1 ([ITU-T T.800](https://www.itu.int/rec/T-REC-T.800))
 
 ### Reference Implementations
-- JPEG 1: libjpeg-turbo
-- JPEG-LS: CharLS
-- JPEG 2000: OpenJPEG
+- JPEG 1: [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) (v3.0+)
+- JPEG-LS: [CharLS](https://github.com/team-charls/charls) (v2.4+)
+- JPEG 2000: [OpenJPEG](https://github.com/uclouvain/openjpeg) (v2.5+)
 
 ### Learning Resources
 - [The Rust Book](https://doc.rust-lang.org/book/)

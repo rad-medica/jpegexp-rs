@@ -16,12 +16,12 @@ echo "🐍 Installing Python dependencies..."
 pip install --user numpy pillow imagecodecs
 
 # Pre-build the project to cache dependencies
-echo "🏗️  Pre-building project (this may take a few minutes)..."
-cargo build --release || echo "⚠️  Initial build failed, but you can retry later"
+echo "🏗️ Pre-building project (this may take a few minutes)..."
+cargo build --release || echo "⚠️ Initial build failed, but you can retry later"
 
 # Run tests to verify setup
 echo "🧪 Running initial tests..."
-cargo test --lib || echo "⚠️  Some tests failed, but environment is ready"
+cargo test --lib || echo "⚠️ Some tests failed, but environment is ready"
 
 echo "✅ Development environment setup complete!"
 echo ""
