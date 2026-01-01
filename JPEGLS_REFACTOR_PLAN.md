@@ -19,7 +19,7 @@ This document outlines a comprehensive plan to refactor/redesign the JPEG-LS cod
 - **Interleaved mode support**: Not properly implemented
 
 ### Key Issues Identified
-1. **Byte Stuffing Logic**: Partially fixed, but may need review
+1. **Byte Stuffing Logic**: Fixed (proper JPEG marker validation), but bitstream handling may need review
 2. **Bit Consumption Rate**: Decoder exhausts bitstream prematurely
 3. **Golomb Coding**: Possible bugs in encode/decode logic
 4. **Context Management**: May not be following JPEG-LS spec correctly
@@ -409,8 +409,9 @@ If refactoring proves too complex or time-consuming, consider integrating CharLS
 - **charls-native**: https://github.com/team-charls/charls-native (C API wrapper)
 
 ### Testing Resources
-- **JPEG-LS Test Images**: http://www.hlevkin.com/06testimages.htm
 - **CharLS Test Suite**: https://github.com/team-charls/charls/tree/master/test
+- **JPEG-LS Conformance Test Images**: Available in CharLS repository and academic datasets
+- **Medical Imaging Test Data**: DICOM samples with JPEG-LS encoding
 
 ### Academic Papers
 - Weinberger, M. J., Seroussi, G., & Sapiro, G. (2000). "The LOCO-I lossless image compression algorithm: Principles and standardization into JPEG-LS"
