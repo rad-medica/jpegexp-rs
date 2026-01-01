@@ -219,7 +219,6 @@ impl<'a> ScanDecoder<'a> {
             bit_count += 1;
             self.skip_bits(1)?;
             if bit_count > 32 {
-                // eprintln!("Invalid Golomb code: bit_count > 32 (k={})", k);
                 return Err(JpeglsError::InvalidData);
             }
         }
@@ -268,26 +267,29 @@ impl<'a> ScanDecoder<'a> {
                 if self.position < self.source.len() {
                     let next_byte = self.source[self.position];
 
-                    if (next_byte & 0x80) == 0 {
-                        // Stuffed 0 bit. The byte contains 7 bits of data.
+                    if next_byte == 0x00 {
+                        // Stuffed 0 byte. The 0xFF is valid data.
+                        // Consume the stuffed zero.
                         self.position += 1;
-
-                        // Consume 7 bits
-                        let val_7bits = (next_byte & 0x7F) as usize;
-                        self.read_cache = (self.read_cache << 7) | val_7bits;
-                        self.valid_bits += 7;
-                    } else if next_byte != 0xFF {
-                        // Real marker (MSB is 1, so & 0x80 != 0)
-                        // Back up, remove 0xFF from cache
+                        // Do not add bits from the stuffed byte to the cache.
+                        // The 0xFF is already in the cache.
+                    } else if next_byte & 0x80 != 0 {
+                        // Real marker (MSB is 1, e.g. 0x80..0xFE).
+                        // Back up, remove 0xFF from cache so it can be handled as a marker later.
                         self.position -= 1;
                         self.valid_bits -= 8;
                         self.read_cache >>= 8;
                         break;
+                    } else {
+                        // 0xFF followed by non-zero, non-marker byte (e.g. 0x01..0x7F).
+                        // This technically violates the spec if 'byte stuffing' is assumed strictly 0x00.
+                        // However, seeing 0x7F here suggests the encoder might have emitted a raw 0xFF
+                        // without stuffing, or we are in a mode where 0xFF is valid if next is not marker.
+                        // We treat the 0xFF as valid data (already in cache) and DO NOT consume next_byte.
+                        // The next_byte will be read in the next iteration.
                     }
-                // If next_byte is 0xFF, it will be handled in next iteration (treated as data FF)
                 } else {
-                    // End of data after 0xFF - keep it in cache
-                    break;
+                    // End of data after 0xFF. Keep 0xFF in cache.
                 }
             }
         }
@@ -305,6 +307,7 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         if self.valid_bits < count {
+            // eprintln!("[DEBUG JLS] Peek bits failed: need {}, have {}, pos {}", count, self.valid_bits, self.position);
             return Err(JpeglsError::InvalidData);
         }
         Ok(((self.read_cache >> (self.valid_bits - count)) & ((1 << count) - 1)) as i32)

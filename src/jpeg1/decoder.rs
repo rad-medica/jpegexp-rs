@@ -87,8 +87,7 @@ impl<'a> Jpeg1Decoder<'a> {
                             && (mcus_decoded % restart_interval == 0)
                             && mcus_decoded < total_mcus
                         {
-                            bit_reader.align_to_byte();
-                            let _ = bit_reader.read_bits(16)?;
+                            let _ = bit_reader.read_marker_code()?;
                             for i in 0..components_count {
                                 dc_preds[i] = 0;
                                 eob_runs[i] = 0;
@@ -145,8 +144,7 @@ impl<'a> Jpeg1Decoder<'a> {
                             && (mcus_decoded % restart_interval == 0)
                             && mcus_decoded < total_blocks
                         {
-                            bit_reader.align_to_byte();
-                            let _ = bit_reader.read_bits(16)?;
+                            let _ = bit_reader.read_marker_code()?;
                             dc_preds[comp_idx] = 0;
                             eob_runs[comp_idx] = 0;
                         }

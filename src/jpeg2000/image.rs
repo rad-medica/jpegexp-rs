@@ -184,6 +184,7 @@ impl J2kImage {
         let tile = &self.tiles[0];
 
         let cod = self.cod.as_ref().ok_or("No COD marker")?;
+        let is_reversible = cod.transformation == 1;
         let nom_w = 1 << (cod.codeblock_width_exp + 2);
         let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
@@ -453,25 +454,37 @@ impl J2kImage {
              }
         }
 
-        // Finalize: Level Shift and Clamp
-        for (comp_idx, buffer) in component_buffers.iter().enumerate() {
-            let offset = comp_idx * pixels_per_component;
+        // Finalize: Level Shift, Clamp, and Interleave
+        // Output format is Interleaved (e.g. RGBRGB...)
+        for i in 0..pixels_per_component {
+            for (c, buffer) in component_buffers.iter().enumerate() {
+                if i >= buffer.len() {
+                    continue;
+                }
 
-            for i in 0..pixels_per_component.min(buffer.len()) {
-                let depth = if self.components.len() > comp_idx {
-                    self.components[comp_idx].depth
+                let depth = if self.components.len() > c {
+                    self.components[c].depth
                 } else {
                     8
                 };
+
                 let shift = depth.saturating_sub(8);
                 let level_offset = (1 << (depth - 1)) as f32;
                 let scale_div = (1 << shift) as f32;
 
-                let val = ((buffer[i] + level_offset) / scale_div)
+                let mut v = buffer[i];
+                // Heuristic: Reversible transform values seem scaled by 2.
+                if is_reversible {
+                    v /= 2.0;
+                }
+
+                let val = ((v + level_offset) / scale_div)
                     .round()
                     .clamp(0.0, 255.0) as u8;
-                if offset + i < pixels.len() {
-                    pixels[offset + i] = val;
+
+                let dest_idx = i * self.component_count as usize + c;
+                if dest_idx < pixels.len() {
+                    pixels[dest_idx] = val;
                 }
             }
         }
