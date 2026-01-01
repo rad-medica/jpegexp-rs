@@ -10,59 +10,25 @@ impl std::fmt::Display for BitIoError {
     }
 }
 
-impl<'a> J2kBitReader<'a> {
-    // ...existing code...
-    pub fn position(&self) -> usize {
-        self.pos
-    }
-    // ...existing code...
-}
-
 impl std::error::Error for BitIoError {}
 
-pub struct J2kBitReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-    bit_buffer: u8,
-    bits_left: u8,
+pub struct J2kBitReader<'a, 'b> {
+    reader: &'a mut crate::jpeg_stream_reader::JpegStreamReader<'b>,
 }
 
-impl<'a> J2kBitReader<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
+impl<'a, 'b> J2kBitReader<'a, 'b> {
+    pub fn new(reader: &'a mut crate::jpeg_stream_reader::JpegStreamReader<'b>) -> Self {
         Self {
-            data,
-            pos: 0,
-            bit_buffer: 0,
-            bits_left: 0,
+            reader,
         }
     }
 
     pub fn read_bit(&mut self) -> Result<u8, BitIoError> {
-        if self.bits_left == 0 {
-            if self.pos >= self.data.len() {
-                return Err(BitIoError);
-            }
-            let b = self.data[self.pos];
+        self.reader.read_bit().map_err(|_| BitIoError)
+    }
 
-            self.pos += 1;
-
-            // Byte stuffing handling for J2K Packet Headers
-            if b == 0xFF && self.pos < self.data.len() {
-                let next = self.data[self.pos];
-                if next == 0x00 {
-                    self.pos += 1; // Skip stuffing
-                }
-            }
-
-            self.bit_buffer = b;
-            self.bits_left = 8;
-        }
-
-        let shift = self.bits_left - 1;
-        let bit = (self.bit_buffer >> shift) & 1;
-
-        self.bits_left -= 1;
-        Ok(bit)
+    pub fn align_to_byte(&mut self) {
+        self.reader.align_to_byte();
     }
 
     pub fn read_bits(&mut self, mut count: u8) -> Result<u32, BitIoError> {

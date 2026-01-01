@@ -434,24 +434,25 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                             // Read Packet Header
                             let mut header = None;
-                            let mut pos_to_advance = 0;
+                            let mut _pos_to_advance = 0;
                             {
                                 let remaining = parser.reader.remaining_data();
-                                // Skip bits? No, usually byte aligned after body.
                                 if !remaining.is_empty() {
-                                    let mut bit_reader =
-                                        crate::jpeg2000::bit_io::J2kBitReader::new(remaining);
-                                    let h = crate::jpeg2000::packet::PacketHeader::read(
-                                        &mut bit_reader,
-                                        precinct_state,
-                                        l as u32,
-                                        grid_w as usize,
-                                        grid_h as usize,
-                                        num_subbands,
-                                    );
+                                    // J2kBitReader now uses parser.reader internal bit state, so creating/destroying it is safe
+                                    // We create a new scope to limit lifetime of bit_reader
+                                    let h = {
+                                        let mut bit_reader = crate::jpeg2000::bit_io::J2kBitReader::new(&mut parser.reader);
+                                        crate::jpeg2000::packet::PacketHeader::read(
+                                            &mut bit_reader,
+                                            precinct_state,
+                                            l as u32,
+                                            grid_w as usize,
+                                            grid_h as usize,
+                                            num_subbands,
+                                        )
+                                    };
                                     match h {
                                         Ok(h) => {
-                                            pos_to_advance = bit_reader.position();
                                             header = Some(h);
                                         }
                                         Err(_) => {
@@ -461,7 +462,11 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 }
                             }
                             if let Some(h) = header {
-                                parser.reader.advance(pos_to_advance);
+                                // If body follows, we must align to byte boundary
+                                // Note: JpegStreamReader alignment logic handles bits_left
+                                if !h.empty {
+                                    parser.reader.align_to_byte();
+                                }
 
                                 // EPH Marker Handling
                                 if (cod.coding_style & 0x04) != 0 {
@@ -601,6 +606,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     } else {
                         guard_bits + epsilon_b - 1
                     };
+
                     let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);
 
                     let cb_idx = subband
@@ -622,7 +628,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         bpc.state = block.state.clone();
                         bpc.num_passes_decoded = block.coding_passes as u32;
 
-                        let _ = bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes);
+                        let _ = bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8);
 
                         block.coefficients = bpc.coefficients;
                         block.state = bpc.state;
@@ -643,7 +649,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             &[],
                         );
                         if let Ok(coefficients) =
-                            bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes)
+                            bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8)
                         {
                             block.coefficients = coefficients;
                             block.state = bpc.state;

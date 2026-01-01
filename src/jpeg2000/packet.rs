@@ -63,7 +63,7 @@ pub struct CodeBlockInfo {
 impl PacketHeader {
     /// Read a packet header from the bit stream.
     pub fn read(
-        reader: &mut J2kBitReader,
+        reader: &mut J2kBitReader<'_, '_>,
         state: &mut PrecinctState,
         layer: u32,
         grid_width: usize,
@@ -167,7 +167,7 @@ impl PacketHeader {
     }
 
     /// Reads the number of coding passes using J2K codeword table (Table B.4).
-    fn read_coding_passes(reader: &mut J2kBitReader) -> Result<u8, BitIoError> {
+    fn read_coding_passes(reader: &mut J2kBitReader<'_, '_>) -> Result<u8, BitIoError> {
         if reader.read_bit()? == 0 {
             // eprintln!("DEBUG: passes codework 0 -> 1");
             return Ok(1);
@@ -289,7 +289,8 @@ mod tests {
     #[test]
     fn test_packet_read_empty() {
         let data = vec![0x00];
-        let mut reader = J2kBitReader::new(&data);
+        let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&data);
+        let mut reader = J2kBitReader::new(&mut buf_reader);
         let mut state = PrecinctState::new(2, 2);
 
         let header = PacketHeader::read(&mut reader, &mut state, 0, 2, 2, 1).unwrap();

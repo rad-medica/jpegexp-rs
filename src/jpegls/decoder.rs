@@ -65,6 +65,8 @@ impl<'a> JpeglsDecoder<'a> {
         let stride = width * components * bytes_per_sample;
 
         scan_decoder.decode_scan(destination, stride)?;
+
+
         Ok(())
     }
 }

@@ -372,41 +372,27 @@ impl MqCoder {
                     if b_next > 0x8F {
                         self.c += 0xFF00;
                         self.ct = 8;
-                        self.src_pos += 1; // Consume marker? No, stop reading?
-                    // Spec rules for markers inside stream are complex.
-                    // For now assume simple stuffing 0xFF00.
-                    // If 0xFF 0x90 (SOT), it terminates?
-                    // "If the byte is 0xFF, the next byte is examined..."
+                        // Don't consume marker
                     } else {
                         self.buffer_byte = b;
-                        self.src_pos += 1;
-                        self.ct = 8; // Should correspond to bits?
-                        // Actually standard says if 0xFF is found, next byte might be 0x00 (stuffing)
-                        // If 0xFF 0x00, we take 0xFF.
-                        // If 0xFF >0x8F, it's a marker.
-                        // Use simplified logic: Assume raw stream or 0xFF00 stuffing.
-                        if b_next == 0x00 {
-                            self.buffer_byte = 0xFF;
-                            self.src_pos += 1; // skip 0x00
-                            self.ct = 8;
-                        } else {
-                            // Marker. Stop?
-                            self.buffer_byte = 0xFF; // ?
-                            self.ct = 8;
-                        }
+                        self.src_pos += 1; // consume b_next (stuffing or data)
+                        self.ct = 7; // ISO 15444-1 C.3.1: "cT is set to 7" if 0xFF
+                        // Actually, if 0xFF 0x00, we load 0xFF. cT should be 7?
+                        // "If the byte is 0xFF, the next byte is examined... if 0x00, B = 0xFF, cT = 7, advance."
+                        // My code had cT=8. This shifts 8 bits?
+                        // If B=FF, only 7 bits are used.
                     }
                 } else {
-                    self.buffer_byte = 0xFF; // EOF
-                    self.ct = 8;
+                    self.buffer_byte = 0xFF;
+                    self.ct = 7;
                 }
             } else {
                 self.buffer_byte = b;
                 self.ct = 8;
             }
         } else {
-            // EOF: feed 0xFF
-            self.buffer_byte = 0xFF; // or 0?
-            self.ct = 8;
+            self.buffer_byte = 0xFF;
+            self.ct = 8; // EOF logic varies, but usually just feed FF
         }
     }
 

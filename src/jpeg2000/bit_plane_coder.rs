@@ -41,11 +41,8 @@ impl<'a> BitPlaneCoder<'a> {
     const REFINE: u8 = 1 << 2;
     const SIGN: u8 = 1 << 3; // 0=pos, 1=neg
 
-    // Zero Coding Tables (LL, HL, LH, HH) - Simplified for LL (Index 0)
-    // Actually J2K has specific tables based on band.
-    // Let's assume LL for simplicity for now or implement full logic.
+    // Zero Coding Tables (LL, HL, LH, HH)
     // Table C-1: Contexts for SigProp (ZC)
-    // We need logic to map neighbor counts (H, V, D) to Context (0-8)
 
     pub fn get_neighbors(&self, x: u32, y: u32) -> (u8, u8, u8) {
         // Returns count of significant neighbors (H, V, D)
@@ -96,8 +93,7 @@ impl<'a> BitPlaneCoder<'a> {
     fn get_zc_context(&self, band: u8, h: u8, v: u8, d: u8) -> usize {
         // Table C-2: Contexts for the significance propagation and cleanup passes
         match band {
-            0 | 1 => {
-                // LL and LH (Vertical High-Pass, Horiz Low-Pass -> Horiz dominant)
+            0 | 2 => { // LL (0) and LH (2) - Vertical High Pass
                 match (h, v, d) {
                     (2, _, _) => 8,
                     (1, v, _) if v >= 1 => 7,
@@ -110,10 +106,8 @@ impl<'a> BitPlaneCoder<'a> {
                     _ => 0,
                 }
             }
-            2 => {
-                // HL (Horiz High-Pass, Vert Low-Pass -> Vert dominant)
+            1 => { // HL (1) - Horizontal High Pass
                 match (v, h, d) {
-                    // Transpose H and V
                     (2, _, _) => 8,
                     (1, h, _) if h >= 1 => 7,
                     (1, 0, d) if d >= 1 => 6,
@@ -159,6 +153,7 @@ impl<'a> BitPlaneCoder<'a> {
         data: &[u8],
         max_bit_plane: u8,
         num_new_passes: u8,
+        orientation: u8,
     ) -> Result<Vec<i32>, crate::jpeg2000::bit_io::BitIoError> {
         if num_new_passes == 0 {
             return Ok(self.coefficients.clone());
@@ -201,9 +196,9 @@ impl<'a> BitPlaneCoder<'a> {
             }
 
             match pass_type {
-                PassType::SigProp => self.decode_significance_propagation(bp)?,
+                PassType::SigProp => self.decode_significance_propagation(bp, orientation)?,
                 PassType::MagRef => self.decode_magnitude_refinement(bp)?,
-                PassType::Cleanup => self.decode_cleanup(bp)?,
+                PassType::Cleanup => self.decode_cleanup(bp, orientation)?,
             }
             self.num_passes_decoded += 1;
         }
@@ -214,6 +209,7 @@ impl<'a> BitPlaneCoder<'a> {
     fn decode_significance_propagation(
         &mut self,
         bit_plane: u8,
+        orientation: u8,
     ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
         // Scan in stripe order (4 rows at a time)
         let stripe_height = 4;
@@ -237,7 +233,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let (hc, vc, dc) = self.get_neighbors(x, y);
                         if hc > 0 || vc > 0 || dc > 0 {
                             // Decode significance bit
-                            let cx = self.get_zc_context(0, hc, vc, dc);
+                        let cx = self.get_zc_context(orientation, hc, vc, dc);
                             let bit = self.mq.decode_bit(cx);
 
                             if bit != 0 {
@@ -308,7 +304,7 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(())
     }
 
-    fn decode_cleanup(&mut self, bit_plane: u8) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
+    fn decode_cleanup(&mut self, bit_plane: u8, orientation: u8) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
         // Scan in stripe order
         let stripe_height = 4;
         let width = self.width;
@@ -331,7 +327,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let (hc, vc, dc) = self.get_neighbors(x, y);
 
                         // Decode significance bit
-                        let cx = self.get_zc_context(0, hc, vc, dc);
+                        let cx = self.get_zc_context(orientation, hc, vc, dc);
                         let bit = self.mq.decode_bit(cx);
 
                         if bit != 0 {
