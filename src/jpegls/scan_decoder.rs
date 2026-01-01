@@ -5,6 +5,21 @@ use crate::jpegls::regular_mode_context::RegularModeContext;
 use crate::jpegls::run_mode_context::RunModeContext;
 use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
 
+// Debug logging support
+#[cfg(debug_assertions)]
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        if std::env::var("JPEGLS_DEBUG").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! debug_log {
+    ($($arg:tt)*) => {};
+}
+
 pub struct ScanDecoder<'a> {
     frame_info: FrameInfo,
     _pc_parameters: JpeglsPcParameters,
@@ -29,6 +44,12 @@ pub struct ScanDecoder<'a> {
     _limit: i32,
     _quantized_bits_per_sample: i32,
     _quantization_lut: Vec<i32>,
+    
+    // Debug tracking
+    #[cfg(debug_assertions)]
+    bits_consumed: usize,
+    #[cfg(debug_assertions)]
+    pixels_decoded: usize,
 }
 
 impl<'a> ScanDecoder<'a> {
@@ -67,9 +88,21 @@ impl<'a> ScanDecoder<'a> {
             _limit: 0,
             _quantized_bits_per_sample: frame_info.bits_per_sample,
             _quantization_lut: Vec::new(),
+            #[cfg(debug_assertions)]
+            bits_consumed: 0,
+            #[cfg(debug_assertions)]
+            pixels_decoded: 0,
         };
 
         decoder.fill_read_cache()?;
+        
+        debug_log!("=== ScanDecoder Initialized ===");
+        debug_log!("  Source length: {} bytes", source.len());
+        debug_log!("  Frame: {}x{}, {} components, {} bpp", 
+                  frame_info.width, frame_info.height, 
+                  frame_info.component_count, frame_info.bits_per_sample);
+        debug_log!("  Initial cache: {} valid bits, position: {}", 
+                  decoder.valid_bits, decoder.position);
 
         Ok(decoder)
     }
@@ -113,9 +146,18 @@ impl<'a> ScanDecoder<'a> {
             1
         };
 
+        debug_log!("=== Starting decode_lines ===");
+        debug_log!("  Image: {}x{}, components: {}, pixel_stride: {}", 
+                  width, height, components, pixel_stride);
+
         let mut line_buffer: Vec<T> = vec![T::default(); components * pixel_stride * 2];
 
         for line in 0..height {
+            #[cfg(debug_assertions)]
+            let line_start_pos = self.position;
+            #[cfg(debug_assertions)]
+            let line_start_bits = self.bits_consumed;
+            
             let (prev_line_slice, curr_line_slice) =
                 line_buffer.split_at_mut(components * pixel_stride);
             let (prev, curr) = if (line & 1) == 1 {
@@ -129,6 +171,17 @@ impl<'a> ScanDecoder<'a> {
 
             curr_line[0] = prev_line[1];
             self.decode_sample_line::<T>(prev_line, curr_line, width)?;
+            
+            #[cfg(debug_assertions)]
+            {
+                self.pixels_decoded += width;
+                let bits_for_line = self.bits_consumed - line_start_bits;
+                if line % 8 == 0 || line == height - 1 {
+                    debug_log!("  Line {}/{}: pos {} → {}, {} bits consumed (total: {}), {} pixels decoded", 
+                              line, height, line_start_pos, self.position, 
+                              bits_for_line, self.bits_consumed, self.pixels_decoded);
+                }
+            }
 
             // Copy decoded samples from curr_line to destination
             // curr_line has decoded samples at indices 1..=width
@@ -347,6 +400,12 @@ impl<'a> ScanDecoder<'a> {
     fn read_bits(&mut self, count: i32) -> Result<i32, JpeglsError> {
         let val = self.peek_bits(count)?;
         self.skip_bits(count)?;
+        
+        #[cfg(debug_assertions)]
+        {
+            self.bits_consumed += count as usize;
+        }
+        
         Ok(val)
     }
 
@@ -355,6 +414,8 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         if self.valid_bits < count {
+            debug_log!("  ✗ peek_bits({}) FAILED: only {} bits available at pos {}", 
+                      count, self.valid_bits, self.position);
             return Err(JpeglsError::InvalidData);
         }
         Ok(((self.read_cache >> (self.valid_bits - count)) & ((1 << count) - 1)) as i32)
