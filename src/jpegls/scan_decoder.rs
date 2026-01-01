@@ -252,11 +252,13 @@ impl<'a> ScanDecoder<'a> {
             let qs = self.compute_context_id(q1, q2, q3);
 
             if qs != 0 {
+                debug_log!("    Regular mode: index={}, qs={}", index, qs);
                 let predicted = self.compute_predicted_value(ra, rb, rc);
                 let error_value = self.decode_regular::<T>(qs, predicted)?;
                 curr_line[index] = T::from_i32(error_value);
                 index += 1;
             } else {
+                debug_log!("    Run mode: index={}", index);
                 index += self.decode_run_mode::<T>(index, prev_line, curr_line, width)?;
                 if index <= width {
                     rb = prev_line[index - 1].to_i32();
@@ -296,7 +298,10 @@ impl<'a> ScanDecoder<'a> {
         }
 
         error_value = Self::apply_sign(error_value, sign);
-        Ok(T::compute_reconstructed_sample(predicted, error_value))
+        let reconstructed = T::compute_reconstructed_sample(predicted, error_value);
+        debug_log!("      Reconstructed: predicted={}, error={}, result={}", 
+                  predicted, error_value, reconstructed);
+        Ok(reconstructed)
     }
 
     fn decode_mapped_error_value(&mut self, k: i32) -> Result<i32, JpeglsError> {
@@ -520,6 +525,7 @@ impl<'a> ScanDecoder<'a> {
         width: usize,
     ) -> Result<usize, JpeglsError> {
         let mut run_length = 0;
+        debug_log!("    decode_run_mode: start_index={}, width={}", start_index, width);
         loop {
             let run_index_val = crate::constants::J[self.run_index];
             let bit = self.read_bits(1)?;
@@ -576,9 +582,13 @@ impl<'a> ScanDecoder<'a> {
             }
         }
 
+        debug_log!("    Run length decoded: {}", run_length);
+
         if start_index + run_length <= width {
             let rb = prev_line[start_index + run_length].to_i32();
             let ra = curr_line[start_index + run_length - 1].to_i32();
+            debug_log!("    Run interruption pixel at index {}, ra={}, rb={}", 
+                      start_index + run_length, ra, rb);
             let x = self.decode_run_interruption_pixel::<T>(ra, rb)?;
             curr_line[start_index + run_length] = T::from_i32(x);
             run_length += 1;
@@ -615,6 +625,9 @@ impl<'a> ScanDecoder<'a> {
         } else {
             T::compute_reconstructed_sample(rb, error_value * sign)
         };
+
+        debug_log!("    Run interruption: ra={}, rb={}, ctx={}, sign={}, error={}, reconstructed={}", 
+                  ra, rb, context_index, sign, error_value, reconstructed);
 
         Ok(reconstructed)
     }
