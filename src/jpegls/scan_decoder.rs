@@ -303,20 +303,28 @@ impl<'a> ScanDecoder<'a> {
         let mut value = 0;
         let mut bit_count = 0;
 
+        // Read unary code (count zeros until we hit a 1)
         while self.peek_bits(1)? == 0 {
             value += 1;
             bit_count += 1;
             self.skip_bits(1)?;
             if bit_count > 32 {
+                debug_log!("    Golomb: unary code too long (>32 zeros)");
                 return Err(JpeglsError::InvalidData);
             }
         }
-        self.skip_bits(1)?;
+        self.skip_bits(1)?;  // Skip the terminating 1
 
+        // Read fixed-length remainder
         if k > 0 {
             let remainder = self.read_bits(k)?;
             value = (value << k) | remainder;
+            debug_log!("    Golomb decode: k={}, unary={}, remainder={}, result={}", 
+                      k, bit_count, remainder, value);
+        } else {
+            debug_log!("    Golomb decode: k=0, unary={}, result={}", bit_count, value);
         }
+        
         Ok(value)
     }
 
