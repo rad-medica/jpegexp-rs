@@ -29,13 +29,28 @@ impl<'a> Jpeg1Decoder<'a> {
         let frame_info = self.reader.frame_info();
         let width = frame_info.width as usize;
         let height = frame_info.height as usize;
-        #[allow(clippy::manual_div_ceil)]
-        let blocks_w = (width + 7) / 8;
-        #[allow(clippy::manual_div_ceil)]
-        let blocks_h = (height + 7) / 8;
         let components_count = self.reader.components.len();
 
-        let mut coefficient_buffers = vec![vec![0i16; blocks_w * blocks_h * 64]; components_count];
+        // Calculate MCU dimensions based on maximum sampling factors
+        let max_h_samp = self.reader.components.iter().map(|c| c.h_samp_factor as usize).max().unwrap_or(1);
+        let max_v_samp = self.reader.components.iter().map(|c| c.v_samp_factor as usize).max().unwrap_or(1);
+        let mcu_width = max_h_samp * 8;
+        let mcu_height = max_v_samp * 8;
+        
+        // Calculate number of MCUs
+        #[allow(clippy::manual_div_ceil)]
+        let mcus_w = (width + mcu_width - 1) / mcu_width;
+        #[allow(clippy::manual_div_ceil)]
+        let mcus_h = (height + mcu_height - 1) / mcu_height;
+        
+        // Calculate blocks per component based on sampling factors
+        let mut coefficient_buffers = Vec::new();
+        for comp in &self.reader.components {
+            let comp_blocks_w = mcus_w * comp.h_samp_factor as usize;
+            let comp_blocks_h = mcus_h * comp.v_samp_factor as usize;
+            coefficient_buffers.push(vec![0i16; comp_blocks_w * comp_blocks_h * 64]);
+        }
+        
         let mut dc_preds = vec![0i16; components_count];
         let mut eob_runs = vec![0u16; components_count];
 
@@ -79,9 +94,10 @@ impl<'a> Jpeg1Decoder<'a> {
             let al = self.reader.al;
 
             if scan_components.len() > 1 {
-                let total_mcus = blocks_h * blocks_w;
-                for block_y in 0..blocks_h {
-                    for block_x in 0..blocks_w {
+                // Interleaved scan - need to handle subsampling
+                let total_mcus = mcus_h * mcus_w;
+                for mcu_y in 0..mcus_h {
+                    for mcu_x in 0..mcus_w {
                         if restart_interval > 0
                             && mcus_decoded > 0
                             && (mcus_decoded % restart_interval == 0)
@@ -94,8 +110,86 @@ impl<'a> Jpeg1Decoder<'a> {
                             }
                         }
 
+                        // Decode blocks for each component in this MCU
                         for &comp_idx in &scan_components {
-                            let block_offset = (block_y * blocks_w + block_x) * 64;
+                            let comp = &self.reader.components[comp_idx];
+                            let h_samp = comp.h_samp_factor as usize;
+                            let v_samp = comp.v_samp_factor as usize;
+                            let comp_blocks_w = mcus_w * h_samp;
+                            
+                            // Decode h_samp * v_samp blocks for this component
+                            for v in 0..v_samp {
+                                for h in 0..h_samp {
+                                    let block_x = mcu_x * h_samp + h;
+                                    let block_y = mcu_y * v_samp + v;
+                                    let block_offset = (block_y * comp_blocks_w + block_x) * 64;
+                                    
+                                    if block_offset + 64 <= coefficient_buffers[comp_idx].len() {
+                                        let target_block =
+                                            &mut coefficient_buffers[comp_idx][block_offset..block_offset + 64];
+
+                                        if self.reader.is_progressive {
+                                            if ss == 0 {
+                                                self.decode_dc_progressive(
+                                                    &mut bit_reader,
+                                                    &mut dc_preds[comp_idx],
+                                                    target_block,
+                                                    ah,
+                                                    al,
+                                                    comp_idx,
+                                                )?;
+                                            } else {
+                                                self.decode_ac_progressive(
+                                                    &mut bit_reader,
+                                                    target_block,
+                                                    ss,
+                                                    se,
+                                                    ah,
+                                                    al,
+                                                    &mut eob_runs[comp_idx],
+                                                    comp_idx,
+                                                )?;
+                                            }
+                                        } else {
+                                            Self::decode_block_internal(
+                                                &mut bit_reader,
+                                                self,
+                                                &mut dc_preds[comp_idx],
+                                                target_block,
+                                                comp_idx,
+                                            )?;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        mcus_decoded += 1;
+                    }
+                }
+            } else {
+                // Non-interleaved (planar) scan - one component at a time
+                let comp_idx = scan_components[0];
+                let comp = &self.reader.components[comp_idx];
+                let h_samp = comp.h_samp_factor as usize;
+                let v_samp = comp.v_samp_factor as usize;
+                let comp_blocks_w = mcus_w * h_samp;
+                let comp_blocks_h = mcus_h * v_samp;
+                let total_blocks = comp_blocks_h * comp_blocks_w;
+                
+                for block_y in 0..comp_blocks_h {
+                    for block_x in 0..comp_blocks_w {
+                        if restart_interval > 0
+                            && mcus_decoded > 0
+                            && (mcus_decoded % restart_interval == 0)
+                            && mcus_decoded < total_blocks
+                        {
+                            let _ = bit_reader.read_marker_code()?;
+                            dc_preds[comp_idx] = 0;
+                            eob_runs[comp_idx] = 0;
+                        }
+
+                        let block_offset = (block_y * comp_blocks_w + block_x) * 64;
+                        if block_offset + 64 <= coefficient_buffers[comp_idx].len() {
                             let target_block =
                                 &mut coefficient_buffers[comp_idx][block_offset..block_offset + 64];
 
@@ -134,102 +228,94 @@ impl<'a> Jpeg1Decoder<'a> {
                         mcus_decoded += 1;
                     }
                 }
-            } else {
-                let comp_idx = scan_components[0];
-                let total_blocks = blocks_h * blocks_w;
-                for block_y in 0..blocks_h {
-                    for block_x in 0..blocks_w {
-                        if restart_interval > 0
-                            && mcus_decoded > 0
-                            && (mcus_decoded % restart_interval == 0)
-                            && mcus_decoded < total_blocks
-                        {
-                            let _ = bit_reader.read_marker_code()?;
-                            dc_preds[comp_idx] = 0;
-                            eob_runs[comp_idx] = 0;
-                        }
-
-                        let block_offset = (block_y * blocks_w + block_x) * 64;
-                        let target_block =
-                            &mut coefficient_buffers[comp_idx][block_offset..block_offset + 64];
-
-                        if self.reader.is_progressive {
-                            if ss == 0 {
-                                self.decode_dc_progressive(
-                                    &mut bit_reader,
-                                    &mut dc_preds[comp_idx],
-                                    target_block,
-                                    ah,
-                                    al,
-                                    comp_idx,
-                                )?;
-                            } else {
-                                self.decode_ac_progressive(
-                                    &mut bit_reader,
-                                    target_block,
-                                    ss,
-                                    se,
-                                    ah,
-                                    al,
-                                    &mut eob_runs[comp_idx],
-                                    comp_idx,
-                                )?;
-                            }
-                        } else {
-                            Self::decode_block_internal(
-                                &mut bit_reader,
-                                self,
-                                &mut dc_preds[comp_idx],
-                                target_block,
-                                comp_idx,
-                            )?;
-                        }
-                        mcus_decoded += 1;
-                    }
-                }
             }
             self.reader.advance(bit_reader.position());
         }
 
-        let mut component_buffers_f32 =
-            vec![vec![0.0f32; blocks_w * blocks_h * 64]; components_count];
+        // Dequantize and IDCT all blocks for each component
+        let mut component_buffers_f32 = Vec::new();
         for c in 0..components_count {
-            let quant_idx = self.reader.components[c].quant_table_dest as usize;
+            let comp = &self.reader.components[c];
+            let h_samp = comp.h_samp_factor as usize;
+            let v_samp = comp.v_samp_factor as usize;
+            let comp_blocks_w = mcus_w * h_samp;
+            let comp_blocks_h = mcus_h * v_samp;
+            
+            let quant_idx = comp.quant_table_dest as usize;
             let quant_table = &self.reader.quantization_tables[quant_idx];
-            for b in 0..(blocks_w * blocks_h) {
+            
+            let mut comp_buffer = vec![0.0f32; comp_blocks_w * comp_blocks_h * 64];
+            for b in 0..(comp_blocks_w * comp_blocks_h) {
                 let block_offset = b * 64;
-                let mut block_data = [0i16; 64];
-                block_data
-                    .copy_from_slice(&coefficient_buffers[c][block_offset..block_offset + 64]);
-                let mut dequant_coeffs = [0.0f32; 64];
-                dequantize_block(&block_data, quant_table, &mut dequant_coeffs);
-                let mut idct_out = [0.0f32; 64];
-                crate::jpeg1::dct::idct_8x8_fixed_point(&dequant_coeffs, &mut idct_out);
-                component_buffers_f32[c][block_offset..block_offset + 64]
-                    .copy_from_slice(&idct_out);
+                if block_offset + 64 <= coefficient_buffers[c].len() {
+                    let mut block_data = [0i16; 64];
+                    block_data
+                        .copy_from_slice(&coefficient_buffers[c][block_offset..block_offset + 64]);
+                    let mut dequant_coeffs = [0.0f32; 64];
+                    dequantize_block(&block_data, quant_table, &mut dequant_coeffs);
+                    let mut idct_out = [0.0f32; 64];
+                    crate::jpeg1::dct::idct_8x8_fixed_point(&dequant_coeffs, &mut idct_out);
+                    comp_buffer[block_offset..block_offset + 64].copy_from_slice(&idct_out);
+                }
             }
+            component_buffers_f32.push(comp_buffer);
         }
 
+        // Reconstruct output pixels, handling subsampling
         for py in 0..height {
             for px in 0..width {
-                let bx = px / 8;
-                let by = py / 8;
-                let tx = px % 8;
-                let ty = py % 8;
-                let block_idx = (by * blocks_w + bx) * 64 + (ty * 8 + tx);
-
                 if components_count == 1 {
-                    let val = (component_buffers_f32[0][block_idx] + 128.0)
-                        .round()
-                        .clamp(0.0, 255.0) as u8;
-                    destination[py * width + px] = val;
+                    // Grayscale - no subsampling
+                    let comp = &self.reader.components[0];
+                    let h_samp = comp.h_samp_factor as usize;
+                    let comp_blocks_w = mcus_w * h_samp;
+                    
+                    let bx = px / 8;
+                    let by = py / 8;
+                    let tx = px % 8;
+                    let ty = py % 8;
+                    let block_idx = (by * comp_blocks_w + bx) * 64 + (ty * 8 + tx);
+                    
+                    if block_idx < component_buffers_f32[0].len() {
+                        let val = (component_buffers_f32[0][block_idx] + 128.0)
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                        destination[py * width + px] = val;
+                    }
                 } else if components_count == 3 {
-                    let y_val = component_buffers_f32[0][block_idx];
-                    let cb_val = component_buffers_f32[1][block_idx];
-                    let cr_val = component_buffers_f32[2][block_idx];
+                    // RGB/YCbCr - may have subsampling
+                    let mut component_values = [0.0f32; 3];
+                    
+                    for c in 0..3 {
+                        let comp = &self.reader.components[c];
+                        let h_samp = comp.h_samp_factor as usize;
+                        let v_samp = comp.v_samp_factor as usize;
+                        let comp_blocks_w = mcus_w * h_samp;
+                        
+                        // Calculate position in component's coordinate system
+                        // For subsampled components, we need to scale down the pixel position
+                        let comp_px = (px * h_samp) / max_h_samp;
+                        let comp_py = (py * v_samp) / max_v_samp;
+                        
+                        let bx = comp_px / 8;
+                        let by = comp_py / 8;
+                        let tx = comp_px % 8;
+                        let ty = comp_py % 8;
+                        let block_idx = (by * comp_blocks_w + bx) * 64 + (ty * 8 + tx);
+                        
+                        if block_idx < component_buffers_f32[c].len() {
+                            component_values[c] = component_buffers_f32[c][block_idx];
+                        }
+                    }
+                    
+                    // Convert YCbCr to RGB
+                    let y_val = component_values[0];
+                    let cb_val = component_values[1];
+                    let cr_val = component_values[2];
                     let r = y_val + 1.402 * cr_val + 128.0;
                     let g = y_val - 0.344136 * cb_val - 0.714136 * cr_val + 128.0;
                     let b = y_val + 1.772 * cb_val + 128.0;
+                    
                     let pixel_idx = (py * width + px) * 3;
                     if pixel_idx + 2 < destination.len() {
                         destination[pixel_idx] = r.clamp(0.0, 255.0) as u8;
