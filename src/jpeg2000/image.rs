@@ -184,7 +184,6 @@ impl J2kImage {
         let tile = &self.tiles[0];
 
         let cod = self.cod.as_ref().ok_or("No COD marker")?;
-        let is_reversible = cod.transformation == 1;
         let nom_w = 1 << (cod.codeblock_width_exp + 2);
         let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
