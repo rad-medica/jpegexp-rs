@@ -183,18 +183,50 @@ impl<'a> JpegBitReader<'a> {
     }
 
     fn read_byte_unstuffed(&mut self) -> Result<u8, JpeglsError> {
-        if self.position >= self.source.len() { return Err(JpeglsError::InvalidData); }
-        let byte = self.source[self.position];
-        self.position += 1;
-        if byte == 0xFF && self.position < self.source.len() && self.source[self.position] == 0x00 {
-            self.position += 1;
+        if self.position >= self.source.len() {
+            return Err(JpeglsError::InvalidData);
         }
+        let byte = self.source[self.position];
+
+        if byte == 0xFF {
+            if self.position + 1 < self.source.len() {
+                let next = self.source[self.position + 1];
+                if next == 0x00 {
+                    // Stuffed FF. Skip the 00 byte.
+                    self.position += 2;
+                    return Ok(0xFF);
+                } else {
+                    // Marker found!
+                    // Do NOT consume the 0xFF or the marker.
+                    // Return InvalidData so the decoder can handle it (or stop).
+                    // This prevents reading marker bytes as Huffman data.
+                    return Err(JpeglsError::InvalidData);
+                }
+            } else {
+                // FF at end of file. Consume it.
+                self.position += 1;
+                return Ok(0xFF);
+            }
+        }
+
+        self.position += 1;
         Ok(byte)
     }
 
     pub fn align_to_byte(&mut self) {
         self.bits_in_buffer = 0;
         self.bit_buffer = 0;
+    }
+
+    pub fn read_marker_code(&mut self) -> Result<u16, JpeglsError> {
+        self.align_to_byte();
+        if self.position + 1 >= self.source.len() {
+            return Err(JpeglsError::InvalidData);
+        }
+        let b1 = self.source[self.position];
+        let b2 = self.source[self.position + 1];
+        self.position += 2;
+        Ok(((b1 as u16) << 8) | (b2 as u16))
     }
 
     pub fn position(&self) -> usize {

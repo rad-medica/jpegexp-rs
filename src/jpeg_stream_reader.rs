@@ -272,10 +272,8 @@ impl<'a> JpegStreamReader<'a> {
         let _point_transform = self.read_u8()?;
         consumed += 3;
 
-        // eprintln!("DEBUG: SOS parsed. Len={} Consumed={}", length, consumed);
         if (length as i32) > consumed {
             let skip = (length as i32) - consumed;
-            // eprintln!("DEBUG: SOS skipping {} bytes", skip);
             self.advance(skip as usize);
         } else if (length as i32) < consumed {
         }

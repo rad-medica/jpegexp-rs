@@ -80,7 +80,6 @@ impl PacketHeader {
         // 1. Zero-length packet bit
         let bit = reader.read_bit()?;
         if bit == 0 {
-            // eprintln!("DEBUG: Packet Empty bit=0");
             header.empty = true;
             return Ok(header);
         }
