@@ -284,6 +284,18 @@ impl<'a> ScanDecoder<'a> {
         }
     }
 
+    fn is_valid_jpeg_marker(code: u8) -> bool {
+        // Check if code is a valid JPEG/JPEG-LS marker second byte
+        matches!(code,
+            0xC0..=0xCF | // SOF markers
+            0xD0..=0xD9 | // RST markers, SOI, EOI
+            0xDA..=0xDF | // SOS, DHP, EXP, markers  
+            0xE0..=0xEF | // APPn markers
+            0xF0..=0xFE | // JPGn, COM, and other markers
+            0xC8          // JPG marker
+        )
+    }
+
     fn fill_read_cache(&mut self) -> Result<(), JpeglsError> {
         while self.valid_bits <= (std::mem::size_of::<usize>() * 8 - 16) as i32 {
             if self.position >= self.source.len() {
@@ -309,20 +321,21 @@ impl<'a> ScanDecoder<'a> {
                         self.position += 1;
                         // Do not add bits from the stuffed byte to the cache.
                         // The 0xFF is already in the cache.
-                    } else if next_byte & 0x80 != 0 {
-                        // Real marker (MSB is 1, e.g. 0x80..0xFE).
+                    } else if next_byte == 0xFF {
+                        // FF FF: invalid, but treat first FF as data, second will be processed next iteration
+                        // The 0xFF is already in the cache.
+                    } else if Self::is_valid_jpeg_marker(next_byte) {
+                        // Valid JPEG/JPEG-LS marker found.
                         // Back up, remove 0xFF from cache so it can be handled as a marker later.
                         self.position -= 1;
                         self.valid_bits -= 8;
                         self.read_cache >>= 8;
                         break;
                     } else {
-                        // 0xFF followed by non-zero, non-marker byte (e.g. 0x01..0x7F).
-                        // This technically violates the spec if 'byte stuffing' is assumed strictly 0x00.
-                        // However, seeing 0x7F here suggests the encoder might have emitted a raw 0xFF
-                        // without stuffing, or we are in a mode where 0xFF is valid if next is not marker.
-                        // We treat the 0xFF as valid data (already in cache) and DO NOT consume next_byte.
-                        // The next_byte will be read in the next iteration.
+                        // FF followed by non-marker code (< 0xC0 and not in valid ranges).
+                        // According to JPEG-LS spec, this should not happen - all FF should be escaped as FF 00.
+                        // However, since these codes are not valid markers, treat the FF as data.
+                        // The 0xFF is already in the cache, next_byte will be read in next iteration.
                     }
                 } else {
                     // End of data after 0xFF. Keep 0xFF in cache.
