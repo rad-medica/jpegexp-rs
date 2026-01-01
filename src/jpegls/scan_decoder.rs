@@ -130,8 +130,23 @@ impl<'a> ScanDecoder<'a> {
             curr_line[0] = prev_line[1];
             self.decode_sample_line::<T>(prev_line, curr_line, width)?;
 
-            let _destination_row = &mut destination
-                [(line * stride)..(line * stride + width * components * std::mem::size_of::<T>())];
+            // Copy decoded samples from curr_line to destination
+            // curr_line has decoded samples at indices 1..=width
+            let dest_start = line * stride;
+            let dest_end = dest_start + width * components * std::mem::size_of::<T>();
+            let destination_row = &mut destination[dest_start..dest_end];
+            
+            // Convert T samples to bytes and write to destination
+            let samples_slice = &curr_line[1..=width];
+            let bytes_ptr = samples_slice.as_ptr() as *const u8;
+            let bytes_len = width * std::mem::size_of::<T>();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    bytes_ptr,
+                    destination_row.as_mut_ptr(),
+                    bytes_len,
+                );
+            }
         }
         Ok(())
     }
