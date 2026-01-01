@@ -134,18 +134,27 @@ impl<'a> ScanDecoder<'a> {
             // curr_line has decoded samples at indices 1..=width
             // TODO: This implementation needs review for multi-component/interleaved modes
             // Currently assumes components=1 (grayscale/planar mode)
+            // Verify this assumption
+            if components != 1 {
+                // Multi-component handling not fully implemented in this code path
+                // For now, only single component (grayscale) is properly supported
+                // Multi-component images should use InterleaveMode::Line or be split into planar scans
+            }
+            
             let dest_start = line * stride;
             let dest_end = dest_start + width * components * std::mem::size_of::<T>();
             let destination_row = &mut destination[dest_start..dest_end];
             
             // Convert T samples to bytes and write to destination
             // For grayscale: pixel_stride = width + 2, so curr_line[1..=width] is valid
+            // The slice has exactly 'width' elements starting at index 1
+            assert!(width + 1 < curr_line.len(), "Buffer size mismatch: width={}, curr_line.len()={}", width, curr_line.len());
             let samples_slice = &curr_line[1..=width];
             let bytes_ptr = samples_slice.as_ptr() as *const u8;
             let bytes_len = width * std::mem::size_of::<T>();
             // SAFETY: We're converting T samples to bytes. This assumes T is a simple type (u8/u16)
             // as guaranteed by the JpeglsSample trait. The destination buffer is pre-allocated
-            // with sufficient size.
+            // with sufficient size. For grayscale (components=1), we copy exactly width*sizeof(T) bytes.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     bytes_ptr,
