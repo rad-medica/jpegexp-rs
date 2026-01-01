@@ -287,12 +287,11 @@ impl<'a> ScanDecoder<'a> {
     fn is_valid_jpeg_marker(code: u8) -> bool {
         // Check if code is a valid JPEG/JPEG-LS marker second byte
         matches!(code,
-            0xC0..=0xCF | // SOF markers
+            0xC0..=0xCF | // SOF markers (includes 0xC8 JPG marker)
             0xD0..=0xD9 | // RST markers, SOI, EOI
-            0xDA..=0xDF | // SOS, DHP, EXP, markers  
+            0xDA..=0xDF | // SOS, DHP, EXP markers  
             0xE0..=0xEF | // APPn markers
-            0xF0..=0xFE | // JPGn, COM, and other markers
-            0xC8          // JPG marker
+            0xF0..=0xFE   // JPGn, COM, and other markers
         )
     }
 
