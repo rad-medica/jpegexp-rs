@@ -42,6 +42,8 @@ pub enum JpegStreamReaderState {
 pub struct JpegStreamReader<'a> {
     source: &'a [u8],
     position: usize,
+    bit_buffer: u8,
+    bits_left: u8,
     state: JpegStreamReaderState,
     frame_info: FrameInfo,
     parameters: CodingParameters,
@@ -68,6 +70,8 @@ impl<'a> JpegStreamReader<'a> {
         Self {
             source,
             position: 0,
+            bit_buffer: 0,
+            bits_left: 0,
             state: JpegStreamReaderState::BeforeStartOfImage,
             frame_info: FrameInfo::default(),
             parameters: CodingParameters::default(),
@@ -253,7 +257,6 @@ impl<'a> JpegStreamReader<'a> {
 
     pub fn read_start_of_scan_segment_jpegls(&mut self) -> Result<(), JpeglsError> {
         if self.read_marker()? != JpegMarkerCode::StartOfScan {
-            // eprintln!("DEBUG: SOS Marker NOT FOUND");
             return Err(JpeglsError::InvalidData);
         }
         let length = self.read_u16()?;
@@ -261,7 +264,6 @@ impl<'a> JpegStreamReader<'a> {
 
         let components_in_scan = self.read_u8()? as i32;
         consumed += 1;
-        // eprintln!("DEBUG: SOS components_in_scan={}", components_in_scan);
         for _ in 0..components_in_scan {
             let _id = self.read_u8()?;
             let _mapping = self.read_u8()?;
@@ -275,7 +277,6 @@ impl<'a> JpegStreamReader<'a> {
         if (length as i32) > consumed {
             let skip = (length as i32) - consumed;
             self.advance(skip as usize);
-        } else if (length as i32) < consumed {
         }
 
         self.state = JpegStreamReaderState::ScanSection;
@@ -386,7 +387,37 @@ impl<'a> JpegStreamReader<'a> {
     // Helper to align to the next byte boundary.
     // Since this reader operates on a byte slice, it is always byte-aligned.
     // This is a no-op for now but kept for API compatibility with bit-stream readers.
-    pub fn align_to_byte(&mut self) {}
+    pub fn align_to_byte(&mut self) {
+        self.bits_left = 0;
+        self.bit_buffer = 0;
+    }
+
+    pub fn read_bit(&mut self) -> Result<u8, JpeglsError> {
+        if self.bits_left == 0 {
+            if self.position >= self.source.len() {
+                return Err(JpeglsError::InvalidData);
+            }
+            let b = self.source[self.position];
+            self.position += 1;
+
+            // Byte stuffing handling for J2K Packet Headers
+            if b == 0xFF && self.position < self.source.len() {
+                let next = self.source[self.position];
+                if next == 0x00 {
+                    self.position += 1; // Skip stuffing
+                }
+            }
+
+            self.bit_buffer = b;
+            self.bits_left = 8;
+        }
+
+        let shift = self.bits_left - 1;
+        let bit = (self.bit_buffer >> shift) & 1;
+
+        self.bits_left -= 1;
+        Ok(bit)
+    }
 
     // JPEG 1 Headers
 

@@ -184,7 +184,6 @@ impl J2kImage {
         let tile = &self.tiles[0];
 
         let cod = self.cod.as_ref().ok_or("No COD marker")?;
-        let is_reversible = cod.transformation == 1;
         let nom_w = 1 << (cod.codeblock_width_exp + 2);
         let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
@@ -261,9 +260,9 @@ impl J2kImage {
             }
 
             let cod = self.cod.as_ref().ok_or("No COD marker")?;
-            let is_reversible = cod.transformation == 1;
+            let _is_reversible = cod.transformation == 1;
 
-            if !is_reversible {
+            if !_is_reversible {
                 let qcd = self.qcd.as_ref().ok_or("No QCD for Irreversible")?;
                 let guard_bits = (qcd.quant_style >> 5) & 0x07;
                 // Helper to decode step size
@@ -301,7 +300,7 @@ impl J2kImage {
 
                 let mut output = vec![0.0f32; (res.width * res.height) as usize];
 
-                if is_reversible {
+                if _is_reversible {
                     // Reversible 5-3 (Integers)
                     let ll_i32: Vec<i32> = current_ll.iter().map(|&f| f as i32).collect();
                     let hl_i32: Vec<i32> = hl.iter().map(|&f| f as i32).collect();
@@ -456,6 +455,9 @@ impl J2kImage {
 
         // Finalize: Level Shift, Clamp, and Interleave
         // Output format is Interleaved (e.g. RGBRGB...)
+        let cod = self.cod.as_ref().ok_or("No COD marker")?;
+        let is_reversible = cod.transformation == 1;
+
         for i in 0..pixels_per_component {
             for (c, buffer) in component_buffers.iter().enumerate() {
                 if i >= buffer.len() {
@@ -472,11 +474,11 @@ impl J2kImage {
                 let level_offset = (1 << (depth - 1)) as f32;
                 let scale_div = (1 << shift) as f32;
 
-                let mut v = buffer[i];
-                // Heuristic: Reversible transform values seem scaled by 2.
-                if is_reversible {
-                    v /= 2.0;
-                }
+                let v = if is_reversible {
+                     buffer[i] / 2.0
+                } else {
+                     buffer[i]
+                };
 
                 let val = ((v + level_offset) / scale_div)
                     .round()

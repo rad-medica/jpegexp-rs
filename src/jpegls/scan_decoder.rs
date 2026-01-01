@@ -307,7 +307,6 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         if self.valid_bits < count {
-            // eprintln!("[DEBUG JLS] Peek bits failed: need {}, have {}, pos {}", count, self.valid_bits, self.position);
             return Err(JpeglsError::InvalidData);
         }
         Ok(((self.read_cache >> (self.valid_bits - count)) & ((1 << count) - 1)) as i32)
@@ -402,30 +401,50 @@ impl<'a> ScanDecoder<'a> {
             let bit = self.read_bits(1)?;
             if bit == 1 {
                 let length = 1 << run_index_val;
+                let mut hit_width = false;
                 for i in 0..length {
                     let i_usize = i as usize;
-                    if start_index + run_length + i_usize > width {
-                        return Err(JpeglsError::InvalidData);
+                    if start_index + run_length + i_usize >= width {
+                        hit_width = true;
+                        break;
                     }
                     curr_line[start_index + run_length + i_usize] = curr_line[start_index - 1];
                 }
                 run_length += length as usize;
+                // If we hit width (or exceeded it in run_length counting), we clamp effectively.
+                // But run_length variable keeps increasing to track the "virtual" run?
+                // Spec says run is terminated at EOL.
+                // If we hit width, we should break out of the loop and return run_length = width - start_index?
+                if hit_width || start_index + run_length >= width {
+                    // Clamp run_length to match width exactly
+                    run_length = width - start_index;
+                    if self.run_index < 31 {
+                         self.run_index += 1;
+                    }
+                    break;
+                }
                 if self.run_index < 31 {
                     self.run_index += 1;
                 }
-                if start_index + run_length > width {
-                    break;
-                }
             } else {
                 let remainder = self.read_bits(run_index_val)?;
+                let mut hit_width = false;
                 for i in 0..remainder {
                     let i_usize = i as usize;
-                    if start_index + run_length + i_usize > width {
-                        return Err(JpeglsError::InvalidData);
+                    if start_index + run_length + i_usize >= width {
+                        hit_width = true;
+                        break;
                     }
                     curr_line[start_index + run_length + i_usize] = curr_line[start_index - 1];
                 }
                 run_length += remainder as usize;
+                if hit_width || start_index + run_length >= width {
+                    run_length = width - start_index;
+                    if self.run_index > 0 {
+                        self.run_index -= 1;
+                    }
+                    break;
+                }
                 if self.run_index > 0 {
                     self.run_index -= 1;
                 }

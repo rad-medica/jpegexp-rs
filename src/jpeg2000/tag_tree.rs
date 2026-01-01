@@ -140,7 +140,7 @@ impl TagTree {
     /// Decode the tag tree for leaf (x,y) up to threshold.
     pub fn decode(
         &mut self,
-        reader: &mut J2kBitReader,
+        reader: &mut J2kBitReader<'_, '_>,
         x: usize,
         y: usize,
         threshold: i32,
@@ -226,7 +226,8 @@ mod tests {
         let buffer = writer.finish();
 
         let mut tt_dec = TagTree::new(2, 2);
-        let mut reader = J2kBitReader::new(&buffer);
+        let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&buffer);
+        let mut reader = J2kBitReader::new(&mut buf_reader);
 
         let res1 = tt_dec.decode(&mut reader, 0, 0, 6).unwrap();
         assert!(!res1);
@@ -241,7 +242,8 @@ mod tests {
         let buf3 = writer3.finish();
 
         let mut tt_dec3 = TagTree::new(1, 1);
-        let mut reader3 = J2kBitReader::new(&buf3);
+        let mut buf_reader3 = crate::jpeg_stream_reader::JpegStreamReader::new(&buf3);
+        let mut reader3 = J2kBitReader::new(&mut buf_reader3);
         let res3 = tt_dec3.decode(&mut reader3, 0, 0, 5).unwrap();
         assert!(res3);
     }

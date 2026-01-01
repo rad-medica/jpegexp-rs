@@ -82,7 +82,11 @@ impl<'a> JpeglsEncoder<'a> {
 
         self.writer.write_start_of_image()?;
         self.writer.write_start_of_frame_jpegls(&frame_info)?;
-        self.writer.write_jpegls_preset_parameters_segment(&pc)?;
+
+        let defaults = compute_default(max_sample_value, self.near_lossless);
+        if !crate::jpegls::coding_parameters::is_default(&pc, &defaults) {
+            self.writer.write_jpegls_preset_parameters_segment(&pc)?;
+        }
 
         if interleave_mode == InterleaveMode::None && frame_info.component_count > 1 {
             // Encode separate scans for each component
