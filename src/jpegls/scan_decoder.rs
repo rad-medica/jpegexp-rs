@@ -303,6 +303,9 @@ impl<'a> ScanDecoder<'a> {
         let mut value = 0;
         let mut bit_count = 0;
 
+        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}", 
+                  k, self.read_cache, self.valid_bits, self.position);
+
         // Read unary code (count zeros until we hit a 1)
         while self.peek_bits(1)? == 0 {
             value += 1;
@@ -381,21 +384,25 @@ impl<'a> ScanDecoder<'a> {
                         self.position += 1;
                         // Do not add bits from the stuffed byte to the cache.
                         // The 0xFF is already in the cache.
-                    } else if next_byte == 0xFF {
-                        // FF FF: invalid, but treat first FF as data, second will be processed next iteration
-                        // The 0xFF is already in the cache.
+                        debug_log!("    Byte stuffing: FF 00 → FF (data)");
+                    } else if next_byte == 0x7F {
+                        // Special case: FF 7F appears in CharLS-encoded files at scan end.
+                        // This might be scan termination padding or bit-stuffing variant.
+                        // Don't consume the 7F, just keep FF in cache and continue.
+                        // The 7F will be read in the next iteration if needed.
+                        debug_log!("    Special pattern: FF 7F detected, keeping FF as data");
                     } else if Self::is_valid_jpeg_marker(next_byte) {
-                        // Valid JPEG/JPEG-LS marker found.
-                        // Back up, remove 0xFF from cache so it can be handled as a marker later.
+                        // Valid JPEG/JPEG-LS marker found (EOI, etc.)
+                        // Back up, remove 0xFF from cache, and stop.
                         self.position -= 1;
                         self.valid_bits -= 8;
                         self.read_cache >>= 8;
+                        debug_log!("    Marker: FF {:02X} detected, stopping cache fill", next_byte);
                         break;
                     } else {
-                        // FF followed by non-marker code (< 0xC0 and not in valid ranges).
-                        // According to JPEG-LS spec, this should not happen - all FF should be escaped as FF 00.
-                        // However, since these codes are not valid markers, treat the FF as data.
-                        // The 0xFF is already in the cache, next_byte will be read in next iteration.
+                        // FF followed by other non-marker, non-00, non-7F codes.
+                        // Keep FF as data, will read next_byte in next iteration.
+                        debug_log!("    Non-marker after FF: {:02X}, keeping FF as data", next_byte);
                     }
                 } else {
                     // End of data after 0xFF. Keep 0xFF in cache.
