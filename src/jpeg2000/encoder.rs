@@ -112,13 +112,18 @@ impl J2kEncoder {
                  (0..num_subbands).map(|i| self.encode_step_size(base_step, i)).collect()
             } else {
                  // Reversible: Exponent = depth + 1 (guard bit)
-                 // Or rather: Exponent = bit depth of the subband range?
-                 // Standard says for 5-3: exponent = dynamic range.
-                 // Depth 8 -> Range 8. + 1 guard = 9?
-                 // Let's use (depth + guard) << 3 ?
-                 // No, Exponent field in QCD is 5 bits.
-                 // Val = (exponent << 3).
-                 vec![((depth as u16 + guard_bits as u16) << 3); num_subbands]
+                 // According to standard (Annex E), for reversible 5-3:
+                 // The exponent epsilon_b should be such that:
+                 // epsilon_b >= magnitude bits + guard bits.
+                 // For 8-bit image: magnitude can be up to 10 bits (DWT gain).
+                 // Let's set epsilon = 16 (arbitrary safe high value) to ensure range?
+                 // Or rather: base epsilon = 10 (8 bits + ~2 bits gain).
+                 // Actually, standard says epsilon_b is dynamic range.
+                 // Let's try epsilon = 12 (allowing 11 magnitude bits + 1 guard).
+                 // And mantissa = 0.
+                 // Value = (exponent << 3).
+                 // Let's try 16 (0x10).
+                 vec![16 << 3; num_subbands]
             },
         };
         writer.write_qcd(&qcd)?;
@@ -128,6 +133,9 @@ impl J2kEncoder {
         for i in 0..(width * height) {
             for c in 0..components {
                 // DC Level Shift: subtract 2^(depth-1) = 128 for 8-bit
+                // But only if signed? No, standard says always shift unsigned to signed.
+                // However, our decoder shifts back.
+                // Let's verify shift.
                 planes[c][i] = pixels[i * components + c] as i32 - 128;
             }
         }
@@ -349,29 +357,19 @@ impl J2kEncoder {
                         // e.g. 127 -> log2=6.9 -> floor=6. 0..6 is 7 planes.
                         let num_bitplanes = if max_val > 0 { msb + 1 } else { 0 };
                         
-                        // Guard=1. Depth=8. M_b = 8 + 1 - 1 = 8.
-                        // Decoder max_bp = M_b - 1 - zero_bp = 7 - zero_bp.
-                        // We want max_bp = msb.
-                        // msb = 7 - zero_bp => zero_bp = 7 - msb.
-                        // For 127: msb=6. zero_bp = 7 - 6 = 1.
-                        // check: max_bp = 7 - 1 = 6. Correct.
-                        // For 255: msb=7. zero_bp = 7 - 7 = 0.
-                        // check: max_bp = 7 - 0 = 7. Correct.
-                        // For 28: msb=4. zero_bp = 7 - 4 = 3.
-                        // check: max_bp = 7 - 3 = 4. Correct.
-                        // General formula: zero_bp = (depth + guard - 1 - 1) - msb = depth + guard - 2 - msb.
-                        // Wait, M_b formula in decoder:
-                        // m_b = guard_bits + depth - 1. (if reversible)
-                        // max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp)
-                        // max_bp = guard + depth - 2 - zero_bp.
-                        // msb = guard + depth - 2 - zero_bp
-                        // zero_bp = guard + depth - 2 - msb.
-                        // For Depth 8, Guard 1: zero_bp = 1 + 8 - 2 - msb = 7 - msb.
-                        
+                        // M_b = guard + epsilon - 1.
+                        // If guard=1, epsilon=12, M_b = 12.
+                        // We want Decoder MaxBP = M_b - 1 - zero_bp = 11 - zero_bp.
+                        // We have `msb` as the highest bit index (0-based) that is 1.
+                        // e.g. val=255, msb=7.
+                        // We want MaxBP to be 7.
+                        // 7 = 11 - zero_bp => zero_bp = 4.
+                        // General: zero_bp = (M_b - 1) - msb.
+                        let m_b: u8 = 16; // Must match QCD epsilon
                         let zero_bp = if max_val > 0 {
-                            (depth + guard_bits - 2).saturating_sub(msb)
+                            (m_b - 1).saturating_sub(msb)
                         } else {
-                            0 // Doesn't matter for empty
+                            0
                         };
 
                             

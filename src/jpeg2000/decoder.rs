@@ -593,19 +593,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         8
                     };
 
-                    let m_b = if cod.transformation == 1 {
-                        // Reversible: Use Depth instead of Epsilon?
-                        // Epsilon from file is 10. Depth is 8.
-                        // Experiment: Force based on depth
-                        guard_bits
-                            + if comp < parser.image.components.len() {
-                                parser.image.components[comp].depth - 1
-                            } else {
-                                7
-                            }
-                    } else {
-                        guard_bits + epsilon_b - 1
-                    };
+                    let m_b = guard_bits + epsilon_b - 1;
 
                     let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);
 
