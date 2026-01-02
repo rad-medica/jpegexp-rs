@@ -202,7 +202,7 @@ impl<'a> ScanEncoder<'a> {
                  curr[c] = prev[components + c];
             }
 
-            self.encode_sample_line(prev, curr, width, components)?;
+            self.encode_sample_line(prev, curr, width, components, line == 0)?;
             source_idx += pixel_stride;
         }
         Ok(())
@@ -210,10 +210,11 @@ impl<'a> ScanEncoder<'a> {
 
     fn encode_sample_line<T: JpeglsSample>(
         &mut self,
-        prev_line: &[T],
+        prev_line: &mut [T],
         curr_line: &mut [T],
         width: usize,
         components: usize,
+        is_first_line: bool,
     ) -> Result<(), JpeglsError> {
         let mut pixel_idx = 0;
         let mut current_buf_idx = components;
@@ -227,6 +228,20 @@ impl<'a> ScanEncoder<'a> {
         }
 
         while pixel_idx < width {
+            // Special handling for first line: after encoding first pixel,
+            // update prev_line to match so run mode can trigger for subsequent pixels
+            // This matches the decoder's behavior at scan_decoder.rs lines 247-256
+            if is_first_line && pixel_idx == 1 {
+                let first_pixel_value = curr_line[components];
+                for i in 0..prev_line.len() {
+                    prev_line[i] = first_pixel_value;
+                }
+                // Reload rb and rd after updating prev_line
+                for c in 0..components {
+                    rb[c] = prev_line[c].to_i32();
+                    rd[c] = prev_line[components + c].to_i32();
+                }
+            }
             let mut all_qs_zero = true;
             let mut component_qs = vec![0; components];
             let mut component_pred = vec![0; components];
@@ -617,8 +632,11 @@ impl<'a> ScanEncoder<'a> {
             let context = &self.run_mode_contexts[comp][context_index];
             let k = context.compute_golomb_coding_parameter();
             let map = context.compute_map(error_value, k);
+            // Mapping formula for run interruption (ITU-T T.87 Section A.7.2.2)
+            // MErrval = 2 * |Errval| - RIType + (if !map { 1 } else { 0 })
+            // This ensures the LSB encodes the map bit and decoder can reconstruct correctly
             let val =
-                2 * error_value.abs() - context.run_interruption_type() - (if map { 1 } else { 0 });
+                2 * error_value.abs() - context.run_interruption_type() + (if map { 0 } else { 1 });
             (k, val)
         };
 

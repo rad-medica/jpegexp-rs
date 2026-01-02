@@ -550,7 +550,9 @@ impl<'a> ScanDecoder<'a> {
         width: usize,
     ) -> Result<usize, JpeglsError> {
         let mut run_length = 0;
-        debug_log!("    decode_run_mode: start_index={}, width={}", start_index, width);
+        let count_type_remain = width - start_index + 1;
+        debug_log!("    decode_run_mode: start_index={}, width={}, count_type_remain={}", 
+                  start_index, width, count_type_remain);
         loop {
             let run_index_val = crate::constants::J[self.run_index];
             #[cfg(debug_assertions)]
@@ -618,7 +620,8 @@ impl<'a> ScanDecoder<'a> {
 
         debug_log!("    Run length decoded: {}", run_length);
 
-        if start_index + run_length <= width {
+        // Only decode interruption if run didn't consume all remaining pixels
+        if run_length < count_type_remain {
             let rb = prev_line[start_index + run_length].to_i32();
             let ra = curr_line[start_index + run_length - 1].to_i32();
             debug_log!("    Run interruption pixel at index {}, ra={}, rb={}", 
