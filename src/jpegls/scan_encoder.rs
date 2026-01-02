@@ -133,28 +133,70 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn flush(&mut self) {
+        // JPEG-LS bit stuffing: after writing 0xFF, the next byte only holds 7 bits
+        // (with the MSB always 0 to distinguish from markers)
         while self.free_bit_count <= 24 {
-            let byte_val = (self.bit_buffer >> 24) as u8;
-            self.bit_buffer <<= 8;
-            self.free_bit_count += 8;
-            if self.position < self.destination.len() {
+            if self.position >= self.destination.len() {
+                break;
+            }
+            
+            if self.is_ff_written {
+                // After 0xFF, output only 7 bits (with MSB = 0 for bit stuffing)
+                let byte_val = (self.bit_buffer >> 25) as u8;  // Take 7 bits
                 self.destination[self.position] = byte_val;
                 self.position += 1;
-            }
-            if byte_val == JPEG_MARKER_START_BYTE && self.position < self.destination.len() {
-                self.destination[self.position] = 0x00;
+                self.bit_buffer <<= 7;
+                self.free_bit_count += 7;
+            } else {
+                // Normal case: output 8 bits
+                let byte_val = (self.bit_buffer >> 24) as u8;
+                self.destination[self.position] = byte_val;
                 self.position += 1;
+                self.bit_buffer <<= 8;
+                self.free_bit_count += 8;
             }
+            
+            // Check if we just wrote 0xFF
+            self.is_ff_written = self.position > 0 && 
+                self.destination[self.position - 1] == JPEG_MARKER_START_BYTE;
         }
     }
 
     fn end_scan(&mut self) {
-        let used_bits = 32 - self.free_bit_count;
-        let remainder = used_bits % 8;
-        if remainder != 0 {
-            self.append_to_bit_stream(0, 8 - remainder);
-        }
+        // First flush any pending data
         self.flush();
+        
+        // If a 0xFF was written as the last byte, we MUST output one more byte
+        // with the high bit = 0 (the bit stuffing byte)
+        if self.is_ff_written {
+            // Force output of a stuffing byte with any remaining bits
+            // The stuffing byte must have high bit = 0
+            if self.position < self.destination.len() {
+                // Output 7 bits (with high bit implicitly 0)
+                let byte_val = (self.bit_buffer >> 25) as u8;
+                self.destination[self.position] = byte_val;
+                self.position += 1;
+                self.bit_buffer <<= 7;
+                self.free_bit_count += 7;
+                self.is_ff_written = byte_val == JPEG_MARKER_START_BYTE;
+            }
+        }
+        
+        // Output any remaining bits that weren't flushed (pad to byte boundary)
+        let remaining_bits = 32 - self.free_bit_count;
+        if remaining_bits > 0 && self.position < self.destination.len() {
+            // Pad to 8 bits and output
+            let byte_val = (self.bit_buffer >> 24) as u8;
+            self.destination[self.position] = byte_val;
+            self.position += 1;
+            self.is_ff_written = byte_val == JPEG_MARKER_START_BYTE;
+        }
+        
+        // If we ended with 0xFF, output a stuffing byte
+        if self.is_ff_written && self.position < self.destination.len() {
+            self.destination[self.position] = 0x00;
+            self.position += 1;
+        }
     }
 
     fn get_length(&self) -> usize {
@@ -215,7 +257,7 @@ impl<'a> ScanEncoder<'a> {
         curr_line: &mut [T],
         width: usize,
         components: usize,
-        is_first_line: bool,
+        _is_first_line: bool,
     ) -> Result<(), JpeglsError> {
         let mut pixel_idx = 0;
         let mut current_buf_idx = components;
@@ -264,10 +306,10 @@ impl<'a> ScanEncoder<'a> {
                 component_pred[c] = self.compute_predicted_value(ra, rb[c], rc);
             }
 
-            // Per JPEG-LS spec and CharLS behavior: use REGULAR mode for the very
-            // first pixel (pixel_idx=0 on first line) even when all_qs_zero.
-            // Run mode requires a valid Ra (left neighbor) to propagate.
-            let use_run_mode = all_qs_zero && !(is_first_line && pixel_idx == 0);
+            // Per CharLS: use run mode when all contexts are zero, including first pixel.
+            // For the first pixel, Ra=0 (boundary), so if pixel != 0, run length will be 0
+            // and run interruption will encode the value.
+            let use_run_mode = all_qs_zero;
 
             if !use_run_mode {
                 for c in 0..components {
@@ -339,7 +381,6 @@ impl<'a> ScanEncoder<'a> {
         let predicted_value = T::correct_prediction(predicted + Self::apply_sign(c_val, sign));
         let error_val = self.compute_error_value(Self::apply_sign(x - predicted_value, sign));
         let mapped_error = self.map_error_value(correction ^ error_val);
-
         self.encode_mapped_value(k, mapped_error, limit);
 
         let reset_threshold = self.reset_threshold;
@@ -390,8 +431,8 @@ impl<'a> ScanEncoder<'a> {
             let k_clamped = k.min(31);
             self.append_to_bit_stream((mapped_error & ((1i32 << k_clamped) - 1)) as u32, k_clamped);
         } else {
-            // Escape mode: output (limit - qbpp - 1) zeros + 1, then (MErrval - 2) in qbpp bits
-            // CharLS uses (MErrval - 2) encoding for escape values
+            // Escape mode: output (limit - qbpp - 1) zeros + 1, then (MErrval - 1) in qbpp bits
+            // Per CharLS: encoder writes (mapped_error - 1)
             let remaining = limit - qbpp;
             if remaining > 31 {
                 self.append_to_bit_stream(0, 31);
@@ -401,7 +442,7 @@ impl<'a> ScanEncoder<'a> {
                 self.append_to_bit_stream(1, remaining.min(31));
             }
             let qbpp_clamped = qbpp.min(31);
-            self.append_to_bit_stream(((mapped_error - 2) & ((1i32 << qbpp_clamped) - 1)) as u32, qbpp_clamped);
+            self.append_to_bit_stream(((mapped_error - 1) & ((1i32 << qbpp_clamped) - 1)) as u32, qbpp_clamped);
         }
     }
 
@@ -626,11 +667,11 @@ impl<'a> ScanEncoder<'a> {
             let context = &self.run_mode_contexts[comp][context_index];
             let k = context.compute_golomb_coding_parameter();
             let map = context.compute_map(error_value, k);
-            // Mapping formula for run interruption (ITU-T T.87 Section A.7.2.2)
-            // MErrval = 2 * |Errval| - RIType + (if !map { 1 } else { 0 })
-            // This ensures the LSB encodes the map bit and decoder can reconstruct correctly
-            let val =
-                2 * error_value.abs() - context.run_interruption_type() + (if map { 0 } else { 1 });
+            let ri_type = context.run_interruption_type();
+            // Mapping formula for run interruption (CharLS compatible)
+            // e_mapped = 2 * |Errval| - RIType - map
+            // The decoder adds RIType back before calling decode_error_value
+            let val = 2 * error_value.abs() - ri_type - (if map { 1 } else { 0 });
             (k, val)
         };
 

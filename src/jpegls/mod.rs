@@ -4,10 +4,52 @@
 //! image compression standard. It is particularly effective for medical
 //! images and synthetic graphics.
 //!
+//! ## Features
+//!
 //! This module provides:
 //! - `JpeglsEncoder`: Support for encoding images with custom LSE parameters.
-//! - `JpeglsDecoder`: Capability to decode scans with multiple interleave modes (None, Line, Sample).
+//! - `JpeglsDecoder`: Capability to decode scans with multiple interleave modes.
 //! - `SPIFF`: Full support for the Still Picture Interchange File Format header.
+//!
+//! ## Supported Image Types
+//!
+//! | Image Type | Encoding | Decoding | Notes |
+//! |------------|----------|----------|-------|
+//! | Grayscale 8-bit | ✅ Lossless | ✅ Lossless | Fully supported |
+//! | Grayscale 16-bit | ✅ Lossless | ✅ Lossless | Fully supported |
+//! | RGB (Sample interleave) | ❌ | ❌ | See limitations below |
+//! | RGB (Line interleave) | ❌ | ⚠️ Partial | Single-component path only |
+//! | RGB (Non-interleaved) | ❌ | ⚠️ Partial | Single-component path only |
+//!
+//! ## Current Limitations
+//!
+//! ### Multi-component / RGB Images
+//!
+//! RGB and other multi-component images are **not yet fully supported**. The main blocker
+//! is that CharLS (the reference implementation) and the JPEG-LS standard use a specialized
+//! approach for sample-interleaved multi-component images:
+//!
+//! - **Sample interleave mode** (`InterleaveMode::Sample`): Requires processing pixels as
+//!   tuples (e.g., `triplet<sample_type>` in CharLS) where all components of a pixel are
+//!   processed together. This enables cross-component prediction and context modeling.
+//!   
+//! - The current implementation processes components independently, which works for grayscale
+//!   but produces incorrect results for sample-interleaved RGB data where CharLS uses
+//!   specialized triplet prediction.
+//!
+//! ### Technical Details
+//!
+//! CharLS implements sample-interleaved processing in `process_line<strategy, triplet<sample_type>>`
+//! where each pixel's RGB components are handled as a unit. Key differences include:
+//!
+//! 1. **Prediction**: Uses component-wise median prediction within the triplet structure
+//! 2. **Context**: May use cross-component correlation for better compression
+//! 3. **Run mode**: Entire triplets must match for run encoding
+//!
+//! To add full RGB support, the encoder and decoder would need to:
+//! 1. Implement `triplet<T>` or equivalent structure for sample-interleaved processing
+//! 2. Modify `decode_sample_line` / `encode_sample_line` to handle component tuples
+//! 3. Adjust run mode detection to compare full triplets, not individual samples
 
 pub mod coding_parameters;
 pub mod decoder;

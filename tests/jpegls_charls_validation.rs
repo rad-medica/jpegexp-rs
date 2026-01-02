@@ -2,6 +2,13 @@
 //
 // These tests use images encoded by CharLS (the reference implementation) to validate
 // our JPEG-LS decoder. If CharLS can decode an image, we should be able to decode it too.
+//
+// ## Test Status
+//
+// - Grayscale 8-bit: All tests pass (lossless)
+// - Grayscale 16-bit: All tests pass (lossless)
+// - Edge cases (1x1, 1x8, 8x1): All tests pass (lossless)
+// - RGB (multi-component): IGNORED - See jpegls/mod.rs for details on sample-interleave limitations
 
 #[cfg(test)]
 mod jpegls_decoder_validation {
@@ -63,68 +70,71 @@ mod jpegls_decoder_validation {
         test_charls_decode("rect_32x16_gray_gradient", 32, 16, 1, 8);
     }
 
+    // ============= RGB TESTS (IGNORED) =============
+    // RGB/multi-component images use sample-interleave mode which requires triplet
+    // processing not yet implemented. See src/jpegls/mod.rs for details.
+
     #[test]
-    #[ignore] // RGB not yet supported
+    #[ignore = "RGB sample-interleave not yet supported (see jpegls/mod.rs)"]
     fn test_tiny_8x8_rgb_gradient() {
         test_charls_decode("tiny_8x8_rgb_gradient", 8, 8, 3, 8);
     }
 
     #[test]
-    #[ignore] // RGB not yet supported
+    #[ignore = "RGB sample-interleave not yet supported (see jpegls/mod.rs)"]
     fn test_small_16x16_rgb_gradient() {
         test_charls_decode("small_16x16_rgb_gradient", 16, 16, 3, 8);
     }
 
     #[test]
-    #[ignore] // RGB not yet supported
+    #[ignore = "RGB sample-interleave not yet supported (see jpegls/mod.rs)"]
     fn test_small_32x32_rgb_gradient() {
         test_charls_decode("small_32x32_rgb_gradient", 32, 32, 3, 8);
     }
 
     #[test]
-    #[ignore] // RGB not yet supported
+    #[ignore = "RGB sample-interleave not yet supported (see jpegls/mod.rs)"]
     fn test_medium_64x64_rgb_gradient() {
         test_charls_decode("medium_64x64_rgb_gradient", 64, 64, 3, 8);
     }
 
     #[test]
-    #[ignore] // RGB not yet supported
+    #[ignore = "RGB sample-interleave not yet supported (see jpegls/mod.rs)"]
     fn test_small_16x16_rgb_noise() {
         test_charls_decode("small_16x16_rgb_noise", 16, 16, 3, 8);
     }
 
     #[test]
-    #[ignore] // RGB not yet supported
+    #[ignore = "RGB sample-interleave not yet supported (see jpegls/mod.rs)"]
     fn test_small_16x16_rgb_checker() {
         test_charls_decode("small_16x16_rgb_checker", 16, 16, 3, 8);
     }
 
+    // ============= 16-BIT GRAYSCALE TESTS =============
+
     #[test]
-    #[ignore] // 16-bit not yet tested
     fn test_small_16x16_gray16_gradient() {
         test_charls_decode("small_16x16_gray16_gradient", 16, 16, 1, 16);
     }
 
     #[test]
-    #[ignore] // 16-bit not yet tested
     fn test_small_32x32_gray16_gradient() {
         test_charls_decode("small_32x32_gray16_gradient", 32, 32, 1, 16);
     }
 
+    // ============= EDGE CASE TESTS =============
+
     #[test]
-    #[ignore] // Edge case - may fail
     fn test_edge_1x1_gray() {
         test_charls_decode("edge_1x1_gray", 1, 1, 1, 8);
     }
 
     #[test]
-    #[ignore] // Edge case - may fail
     fn test_edge_1x8_gray() {
         test_charls_decode("edge_1x8_gray", 1, 8, 1, 8);
     }
 
     #[test]
-    #[ignore] // Edge case - may fail
     fn test_edge_8x1_gray() {
         test_charls_decode("edge_8x1_gray", 8, 1, 1, 8);
     }
