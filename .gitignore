@@ -48,3 +48,6 @@ tests/out/
 # OS
 Thumbs.db
 desktop.ini
+tests/jpegls_test_images/*.raw
+tests/jpegls_test_images/*.jls
+tests/jpegls_test_images/*.txt

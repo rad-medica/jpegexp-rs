@@ -22,6 +22,18 @@ impl RunModeContext {
         self.run_interruption_type
     }
 
+    pub fn a(&self) -> i32 {
+        self.a
+    }
+
+    pub fn n(&self) -> i32 {
+        self.n
+    }
+
+    pub fn nn(&self) -> i32 {
+        self.nn
+    }
+
     pub fn compute_golomb_coding_parameter_checked(&self) -> Result<i32, JpeglsError> {
         let temp = self.a + (self.n >> 1) * self.run_interruption_type;
         let mut n_test = self.n;
