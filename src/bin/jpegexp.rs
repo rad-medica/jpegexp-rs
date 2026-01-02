@@ -260,17 +260,8 @@ fn encode_image(
             let mut dest = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpeg1::encoder::Jpeg1Encoder::new();
 
-            // Set quality by scaling quantization tables
-            if quality != 85 {
-                // Only scale if quality is not the default
-                use jpegexp_rs::jpeg1::quantization::{
-                    STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE, get_scaled_quant_table,
-                };
-                encoder.quantization_table_lum =
-                    get_scaled_quant_table(&STD_LUMINANCE_QUANT_TABLE, quality as u32);
-                encoder.quantization_table_chrom =
-                    get_scaled_quant_table(&STD_CHROMINANCE_QUANT_TABLE, quality as u32);
-            }
+            // Set quality using the new API method
+            encoder.set_quality(quality);
 
             let len = encoder.encode(&pixels[..expected_size], &frame_info, &mut dest)?;
             dest.truncate(len);
@@ -337,16 +328,8 @@ fn transcode_image(
             let mut dest = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpeg1::encoder::Jpeg1Encoder::new();
 
-            // Set quality by scaling quantization tables
-            if quality != 85 {
-                use jpegexp_rs::jpeg1::quantization::{
-                    STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE, get_scaled_quant_table,
-                };
-                encoder.quantization_table_lum =
-                    get_scaled_quant_table(&STD_LUMINANCE_QUANT_TABLE, quality as u32);
-                encoder.quantization_table_chrom =
-                    get_scaled_quant_table(&STD_CHROMINANCE_QUANT_TABLE, quality as u32);
-            }
+            // Set quality using the new API method
+            encoder.set_quality(quality);
 
             let len = encoder.encode(&pixels, &frame_info, &mut dest)?;
             dest.truncate(len);

@@ -101,6 +101,9 @@ use jpegexp_rs::FrameInfo;
 fn encode_jpeg(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, jpegexp_rs::JpeglsError> {
     let mut output = vec![0u8; pixels.len() * 2];
     let mut encoder = Jpeg1Encoder::new();
+    
+    // Set quality (1-100). Default is 75. Higher = better quality.
+    encoder.set_quality(90);
 
     let frame_info = FrameInfo {
         width,

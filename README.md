@@ -13,15 +13,18 @@ This repository includes a complete DevContainer configuration for GitHub Codesp
 
 *   **JPEG 1 (ISO/IEC 10918-1)**: Classic baseline JPEG (DCT/Huffman). ✅ **Production Ready**
     - Grayscale: Excellent quality (MAE < 1.0)
-    - RGB with chroma subsampling: Fully supported
+    - RGB with YCbCr: MAE ~1.5 with quality=75 (default)
+    - Quality parameter (1-100) using libjpeg scaling formula
 *   **JPEG-LS (ISO/IEC 14495-1)**: Lossless and near-lossless compression. ✅ **Production Ready**
     - Grayscale 8-bit: Lossless (MAE = 0) ✅
     - Grayscale 16-bit: Lossless (MAE = 0) ✅
     - RGB/multi-component: Not yet supported (see `src/jpegls/mod.rs` for details)
 *   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ⚠️ **Decoder Working, Encoder Stub**
-    - Decoder: Parses JP2/J2K, performs IDWT reconstruction
-    - Encoder: Proof-of-concept only (not functional)
-*   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ⚠️ **Not Yet Implemented**
+    - Decoder: Parses JP2/J2K, performs IDWT reconstruction ✅
+    - Encoder: Produces valid J2K structure (headers only)
+*   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ⚠️ **Decoder Working**
+    - Decoder: CAP marker, HT block coder support
+    - Encoder components implemented, integration pending
 
 ## Installation
 

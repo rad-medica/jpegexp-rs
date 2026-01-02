@@ -1,15 +1,15 @@
 //! JPEG 1 Baseline Encoder orchestration.
 
-use crate::FrameInfo;
 use crate::error::JpeglsError;
-use crate::jpeg_stream_writer::JpegStreamWriter;
 use crate::jpeg1::dct::fdct_8x8;
 use crate::jpeg1::huffman::{
     HuffmanEncoder, HuffmanTable, JpegBitWriter, STD_LUMINANCE_DC_LENGTHS, STD_LUMINANCE_DC_VALUES,
 };
 use crate::jpeg1::quantization::{
-    STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE, quantize_block,
+    quantize_block, STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE,
 };
+use crate::jpeg_stream_writer::JpegStreamWriter;
+use crate::FrameInfo;
 
 /// Zigzag scan pattern for 8x8 blocks.
 pub const ZIGZAG_ORDER: [usize; 64] = [
@@ -27,6 +27,7 @@ pub struct Jpeg1Encoder {
     pub quantization_table_lum: [u8; 64],
     pub quantization_table_chrom: [u8; 64],
     pub restart_interval: u16,
+    pub quality: u8,
 }
 
 impl Default for Jpeg1Encoder {
@@ -40,6 +41,7 @@ impl Default for Jpeg1Encoder {
             quantization_table_lum: STD_LUMINANCE_QUANT_TABLE,
             quantization_table_chrom: STD_CHROMINANCE_QUANT_TABLE,
             restart_interval: 0,
+            quality: 75, // Default quality
         }
     }
 }
@@ -53,6 +55,29 @@ impl Jpeg1Encoder {
         self.restart_interval = interval;
     }
 
+    /// Set encoding quality (1-100). Higher values = better quality, larger files.
+    /// Quality 50 uses standard tables, quality 100 approaches lossless.
+    pub fn set_quality(&mut self, quality: u8) {
+        self.quality = quality.clamp(1, 100);
+
+        // Scale quantization tables based on quality
+        // Formula from libjpeg: scale = 5000/quality for q<50, 200-2*q for q>=50
+        let scale = if self.quality < 50 {
+            5000.0 / self.quality as f32
+        } else {
+            200.0 - 2.0 * self.quality as f32
+        };
+
+        for i in 0..64 {
+            let lum_val =
+                ((STD_LUMINANCE_QUANT_TABLE[i] as f32 * scale / 100.0).round() as u8).clamp(1, 255);
+            let chrom_val = ((STD_CHROMINANCE_QUANT_TABLE[i] as f32 * scale / 100.0).round() as u8)
+                .clamp(1, 255);
+            self.quantization_table_lum[i] = lum_val;
+            self.quantization_table_chrom[i] = chrom_val;
+        }
+    }
+
     pub fn encode(
         &mut self,
         source: &[u8],
@@ -64,8 +89,24 @@ impl Jpeg1Encoder {
         {
             use std::fs::OpenOptions;
             use std::io::Write;
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
-                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"encoder.rs:56","message":"encoder.encode entry","data":{{"source_len":{},"destination_len":{},"width":{},"height":{},"components":{}}},"timestamp":{}}}"#, source.len(), destination_len, frame_info.width, frame_info.height, frame_info.component_count, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"encoder.rs:56","message":"encoder.encode entry","data":{{"source_len":{},"destination_len":{},"width":{},"height":{},"components":{}}},"timestamp":{}}}"#,
+                    source.len(),
+                    destination_len,
+                    frame_info.width,
+                    frame_info.height,
+                    frame_info.component_count,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
             }
         }
         // #endregion
@@ -246,8 +287,22 @@ impl Jpeg1Encoder {
         {
             use std::fs::OpenOptions;
             use std::io::Write;
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
-                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"encoder.rs:232","message":"before final flush and EOI","data":{{"encoded_len":{},"writer_position":{},"destination_len":{}}},"timestamp":{}}}"#, encoded_len, writer.len(), destination_len, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"encoder.rs:232","message":"before final flush and EOI","data":{{"encoded_len":{},"writer_position":{},"destination_len":{}}},"timestamp":{}}}"#,
+                    encoded_len,
+                    writer.len(),
+                    destination_len,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
             }
         }
         // #endregion
@@ -256,8 +311,21 @@ impl Jpeg1Encoder {
         {
             use std::fs::OpenOptions;
             use std::io::Write;
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
-                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"encoder.rs:236","message":"before write_end_of_image","data":{{"writer_position":{},"destination_len":{}}},"timestamp":{}}}"#, writer.len(), destination_len, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"encoder.rs:236","message":"before write_end_of_image","data":{{"writer_position":{},"destination_len":{}}},"timestamp":{}}}"#,
+                    writer.len(),
+                    destination_len,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
             }
         }
         // #endregion
@@ -267,8 +335,21 @@ impl Jpeg1Encoder {
         {
             use std::fs::OpenOptions;
             use std::io::Write;
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
-                let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"C,D","location":"encoder.rs:243","message":"encoder.encode exit","data":{{"final_len":{},"destination_len":{}}},"timestamp":{}}}"#, final_len, destination_len, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"C,D","location":"encoder.rs:243","message":"encoder.encode exit","data":{{"final_len":{},"destination_len":{}}},"timestamp":{}}}"#,
+                    final_len,
+                    destination_len,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
             }
         }
         // #endregion
@@ -618,7 +699,7 @@ mod tests {
     fn test_encode_decode_roundtrip_restart() {
         let width = 32; // 4 blocks wide
         let height = 16; // 2 blocks high. Total 8 blocks.
-        // We set restart interval to 4. So we expect RST0 in the middle.
+                         // We set restart interval to 4. So we expect RST0 in the middle.
 
         let mut source = vec![0u8; width * height];
         for i in 0..source.len() {

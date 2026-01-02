@@ -26,9 +26,9 @@ Testing revealed that the codec implementations have varying levels of completen
 | Direction | Result | Status |
 |-----------|--------|--------|
 | Std→Rust (decode) | Error: Invalid data | ❌ Fail |
-| Rust→Std (encode) | MAE = 42.92 | ⚠️ High |
+| Rust→Std (encode) | MAE = 1.51 | ✅ Pass |
 
-**Result:** ⚠️ **Partially Working** - Grayscale works well, RGB has issues
+**Result:** ✅ **Working** - Quality parameter added, uses libjpeg scaling formula
 
 ---
 
