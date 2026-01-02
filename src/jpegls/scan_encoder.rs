@@ -179,7 +179,10 @@ impl<'a> ScanEncoder<'a> {
         let pixel_stride = width * components;
         let buffer_width = (width + 1) * components;
 
-        let mut line_buffer: Vec<T> = vec![T::default(); buffer_width * 2];
+        // Initialize line buffer with median value for better prediction
+        // For 8-bit: 1 << 7 = 128, for 16-bit: 1 << 15 = 32768
+        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
+        let mut line_buffer: Vec<T> = vec![init_value; buffer_width * 2];
         let mut source_idx = 0;
 
         for line in 0..height {
@@ -462,10 +465,16 @@ impl<'a> ScanEncoder<'a> {
 
         let base_offset = components;
 
-        // Capture Ra for all components
+        // Capture Ra for all components (left neighbor)
         let mut ra = vec![T::default(); components];
         for c in 0..components {
-             ra[c] = curr_line[base_offset + (start_pixel_idx - 1) * components + c];
+            let ra_idx = if start_pixel_idx > 0 {
+                base_offset + (start_pixel_idx - 1) * components + c
+            } else {
+                // First pixel: use boundary pixel at index c
+                c
+            };
+            ra[c] = curr_line[ra_idx];
         }
 
         while run_length < count_type_remain {
