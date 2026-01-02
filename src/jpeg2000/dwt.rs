@@ -321,6 +321,20 @@ impl Dwt97 {
 
     pub fn inverse(in_l: &[f32], in_h: &[f32], output: &mut [f32]) {
         let len = output.len();
+        if len == 0 {
+            return;
+        }
+
+        // Special-case a single-sample signal to avoid boundary indexing and to
+        // behave sensibly for 1-pixel-wide/tall images (or malformed inputs).
+        if len == 1 {
+            let mut v = in_l.get(0).copied().unwrap_or(0.0);
+            // index 0 is low-pass after interleave => apply inverse scaling for low.
+            v *= Self::K;
+            output[0] = v;
+            return;
+        }
+
         let mut x = vec![0.0f32; len];
         let mut l_idx = 0;
         let mut h_idx = 0;

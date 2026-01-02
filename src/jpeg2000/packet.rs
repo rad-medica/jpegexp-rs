@@ -2,24 +2,34 @@ use super::bit_io::{BitIoError, J2kBitReader};
 use super::tag_tree::TagTree;
 
 pub struct SubbandState {
+    pub grid_width: usize,
+    pub grid_height: usize,
     pub inclusion_tree: TagTree,
     pub zero_bp_tree: TagTree,
-    pub lblock_tree: TagTree,
+    /// Whether a code-block has been included by any previous layer (per leaf).
+    pub included: Vec<bool>,
+    /// Lblock value per code-block (per leaf). Starts at 3 per spec.
+    pub lblock: Vec<u8>,
 }
 
 impl SubbandState {
     pub fn new(w: usize, h: usize) -> Self {
+        let count = w.saturating_mul(h);
         Self {
+            grid_width: w,
+            grid_height: h,
             inclusion_tree: TagTree::new(w, h),
             zero_bp_tree: TagTree::new(w, h),
-            lblock_tree: TagTree::new(w, h),
+            included: vec![false; count],
+            lblock: vec![3u8; count],
         }
     }
 
     pub fn reset(&mut self) {
         self.inclusion_tree.reset();
         self.zero_bp_tree.reset();
-        self.lblock_tree.reset();
+        self.included.fill(false);
+        self.lblock.fill(3);
     }
 }
 
@@ -30,9 +40,8 @@ pub struct PrecinctState {
 }
 
 impl PrecinctState {
-    pub fn new(_w: usize, _h: usize) -> Self {
-        let subbands = Vec::with_capacity(3);
-        Self { subbands }
+    pub fn new() -> Self {
+        Self { subbands: Vec::new() }
     }
 
     pub fn reset(&mut self) {
@@ -66,9 +75,7 @@ impl PacketHeader {
         reader: &mut J2kBitReader<'_, '_>,
         state: &mut PrecinctState,
         layer: u32,
-        grid_width: usize,
-        grid_height: usize,
-        num_subbands: usize,
+        subband_grids: &[(usize, usize)],
     ) -> Result<Self, BitIoError> {
         let mut header = PacketHeader {
             packet_seq_num: 0,
@@ -85,32 +92,47 @@ impl PacketHeader {
         }
 
         // 2. Code-block inclusion and header info
-        for s in 0..num_subbands {
+        for (s, &(grid_width, grid_height)) in subband_grids.iter().enumerate() {
             if state.subbands.len() <= s {
                 state
                     .subbands
-                    .push(SubbandState::new(grid_width, grid_height));
+                    .resize_with(s + 1, || SubbandState::new(grid_width, grid_height));
             }
+            // If dimensions changed (can happen across subbands), reset state to avoid desync.
+            if state.subbands[s].grid_width != grid_width || state.subbands[s].grid_height != grid_height
+            {
+                state.subbands[s] = SubbandState::new(grid_width, grid_height);
+            }
+
             let subband_state = &mut state.subbands[s];
 
             for y in 0..grid_height {
                 for x in 0..grid_width {
-                    // Determine inclusion
-                    let threshold = (layer + 1) as i32;
-                    let already_included =
-                        subband_state.inclusion_tree.get_current_value(x, y) < threshold;
+                    let leaf_idx = y * grid_width + x;
+                    let was_included = subband_state
+                        .included
+                        .get(leaf_idx)
+                        .copied()
+                        .unwrap_or(false);
 
+                    // Determine inclusion
                     let mut process_block = false;
-                    if already_included {
+                    if was_included {
+                        // Already included in a previous layer: a single bit indicates whether
+                        // this code-block contributes (has new passes) in the current layer.
                         if reader.read_bit()? == 1 {
                             process_block = true;
                         }
                     } else {
+                        let threshold = (layer + 1) as i32;
                         let not_included_yet = subband_state
                             .inclusion_tree
                             .decode(reader, x, y, threshold)?;
                         if !not_included_yet {
                             process_block = true;
+                            if let Some(slot) = subband_state.included.get_mut(leaf_idx) {
+                                *slot = true;
+                            }
                         }
                     }
 
@@ -134,7 +156,7 @@ impl PacketHeader {
 
                         // Decode Zero Bit Planes
                         // Only present if this is the first time included
-                        if !already_included {
+                        if !was_included {
                             subband_state.zero_bp_tree.decode(reader, x, y, 128)?;
                         }
                         let zero_bp = subband_state.zero_bp_tree.get_current_value(x, y) as u8;
@@ -142,12 +164,29 @@ impl PacketHeader {
                         // Decode Number of Passes
                         let num_passes = Self::read_coding_passes(reader)?;
 
-                        // Data Length
-                        // Decode LBlock parameter with arbitrary threshold (32)
-                        let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
-                        let lbits = subband_state.lblock_tree.get_current_value(x, y) + 3;
-
-                        let data_len = reader.read_bits(lbits as u8)?;
+                        // Lblock + segment length (ISO/IEC 15444-1, packet header syntax).
+                        //
+                        // Lblock starts at 3 and is incremented by reading 1-bits until a 0-bit.
+                        // Then, the segment length is coded in:
+                        //   Lblock + floor(log2(num_passes)) bits.
+                        let mut lblock_val = subband_state.lblock.get(leaf_idx).copied().unwrap_or(3);
+                        while reader.read_bit()? == 1 {
+                            lblock_val = lblock_val.saturating_add(1);
+                        }
+                        if let Some(slot) = subband_state.lblock.get_mut(leaf_idx) {
+                            *slot = lblock_val;
+                        }
+                        // Spec uses ceil(log2(num_passes)) for the length information bit-width.
+                        // Using floor(log2) under-reads the segment length field for non-powers of two,
+                        // desynchronizing packet header/body parsing.
+                        let k = if num_passes <= 1 {
+                            0
+                        } else {
+                            let v = num_passes.saturating_sub(1);
+                            (7 - v.leading_zeros() as u8).saturating_add(1)
+                        };
+                        let lbits = lblock_val.saturating_add(k);
+                        let data_len = reader.read_bits(lbits)?;
 
                         header.included_cblks.push(CodeBlockInfo {
                             x,
@@ -197,9 +236,7 @@ impl PacketHeader {
         &self,
         writer: &mut crate::jpeg2000::bit_io::J2kBitWriter,
         state: &mut PrecinctState,
-        grid_width: usize,
-        grid_height: usize,
-        num_subbands: usize,
+        subband_grids: &[(usize, usize)],
     ) {
         if self.empty {
             writer.write_bit(0);
@@ -207,75 +244,89 @@ impl PacketHeader {
         }
         writer.write_bit(1);
 
-        for s in 0..num_subbands {
+        for (s, &(grid_width, grid_height)) in subband_grids.iter().enumerate() {
             if state.subbands.len() <= s {
                 state
                     .subbands
-                    .push(SubbandState::new(grid_width, grid_height));
+                    .resize_with(s + 1, || SubbandState::new(grid_width, grid_height));
+            }
+            if state.subbands[s].grid_width != grid_width || state.subbands[s].grid_height != grid_height
+            {
+                state.subbands[s] = SubbandState::new(grid_width, grid_height);
             }
             let subband_state = &mut state.subbands[s];
 
             for y in 0..grid_height {
                 for x in 0..grid_width {
+                    let leaf_idx = y * grid_width + x;
                     let cb_info = self
                         .included_cblks
                         .iter()
                         .find(|c| c.x == x && c.y == y && c.subband_index == s as u8);
 
                     let included_now = cb_info.is_some() && cb_info.unwrap().included;
+                    let was_included = subband_state
+                        .included
+                        .get(leaf_idx)
+                        .copied()
+                        .unwrap_or(false);
+
+                    if was_included {
+                        writer.write_bit(if included_now { 1 } else { 0 });
+                    } else {
+                        // Encode inclusion tag-tree for this layer threshold.
+                        subband_state
+                            .inclusion_tree
+                            .encode(writer, x, y, (self.layer_index + 1) as i32);
+                        if included_now {
+                            if let Some(slot) = subband_state.included.get_mut(leaf_idx) {
+                                *slot = true;
+                            }
+                        }
+                    }
 
                     if included_now {
-                        subband_state.inclusion_tree.encode(
-                            writer,
-                            x,
-                            y,
-                            (self.layer_index + 1) as i32,
-                        );
-
                         let cb = cb_info.unwrap();
-                        subband_state
-                            .zero_bp_tree
-                            .set_value(x, y, cb.zero_bp as i32);
-                        subband_state.zero_bp_tree.encode(
-                            writer,
-                            x,
-                            y,
-                            (self.layer_index + 1) as i32,
-                        );
+                        if !was_included {
+                            subband_state.zero_bp_tree.set_value(x, y, cb.zero_bp as i32);
+                            subband_state.zero_bp_tree.encode(writer, x, y, 128);
+                        }
 
                         let num_passes = cb.num_passes.max(1);
-                        for _ in 0..(num_passes - 1) {
-                            writer.write_bit(1);
+                        // Encode number of coding passes (inverse of read_coding_passes).
+                        match num_passes {
+                            1 => writer.write_bit(0),
+                            2 => {
+                                writer.write_bit(1);
+                                writer.write_bit(0);
+                            }
+                            3 | 4 | 5 => {
+                                writer.write_bit(1);
+                                writer.write_bit(1);
+                                writer.write_bits((num_passes - 3) as u32, 2);
+                            }
+                            _ => {
+                                // Fallback: encode using the 1111 + 5-bit form (supports up to 36).
+                                writer.write_bit(1);
+                                writer.write_bit(1);
+                                writer.write_bits(3, 2); // 11 + '11' => 1111 prefix
+                                let v = (num_passes as i32 - 6).clamp(0, 31) as u32;
+                                writer.write_bits(v, 5);
+                            }
                         }
+
+                        // Lblock increment bits (we keep lblock fixed in this stub path).
                         writer.write_bit(0);
 
-                        if cb.data_len > 0 {
-                            subband_state
-                                .lblock_tree
-                                .set_value(x, y, cb.data_len as i32);
-                            subband_state.lblock_tree.encode(
-                                writer,
-                                x,
-                                y,
-                                (self.layer_index + 1) as i32,
-                            );
-                            writer.write_bits(cb.data_len, 16);
+                        let k = if num_passes <= 1 {
+                            0
                         } else {
-                            subband_state.lblock_tree.set_value(x, y, 0);
-                            subband_state.lblock_tree.encode(
-                                writer,
-                                x,
-                                y,
-                                (self.layer_index + 1) as i32,
-                            );
-                        }
-                    } else {
-                        subband_state.inclusion_tree.encode(
-                            writer,
-                            x,
-                            y,
-                            (self.layer_index + 1) as i32,
-                        );
+                            let v = num_passes.saturating_sub(1);
+                            (7 - v.leading_zeros() as u8).saturating_add(1)
+                        };
+                        let lblock_val = subband_state.lblock.get(leaf_idx).copied().unwrap_or(3);
+                        let lbits = lblock_val.saturating_add(k);
+                        writer.write_bits(cb.data_len, lbits as u8);
                     }
                 }
             }
@@ -291,9 +342,9 @@ mod tests {
         let data = vec![0x00];
         let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&data);
         let mut reader = J2kBitReader::new(&mut buf_reader);
-        let mut state = PrecinctState::new(2, 2);
+        let mut state = PrecinctState::new();
 
-        let header = PacketHeader::read(&mut reader, &mut state, 0, 2, 2, 1).unwrap();
+        let header = PacketHeader::read(&mut reader, &mut state, 0, &[(2, 2)]).unwrap();
         assert!(header.empty);
     }
 }

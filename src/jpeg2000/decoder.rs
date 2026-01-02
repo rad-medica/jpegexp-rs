@@ -414,7 +414,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             let precinct_state = res_state
                                 .precincts
                                 .entry((px, py))
-                                .or_insert_with(|| PrecinctState::new(num_subbands, 0));
+                                .or_insert_with(PrecinctState::new);
 
                             // SOP Marker Handling
                             if (cod.coding_style & 0x02) != 0 {
@@ -442,13 +442,33 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                     // We create a new scope to limit lifetime of bit_reader
                                     let h = {
                                         let mut bit_reader = crate::jpeg2000::bit_io::J2kBitReader::new(&mut parser.reader);
+                                        // Compute per-subband code-block grids for this resolution.
+                                        // For default precincts (typically very large), there is one precinct per resolution,
+                                        // and packet headers enumerate *all* code-blocks in each subband.
+                                        let nom_w = 1usize << (cod.codeblock_width_exp + 2);
+                                        let nom_h = 1usize << (cod.codeblock_height_exp + 2);
+
+                                        let (res_w_u, res_h_u) = (res_w as usize, res_h as usize);
+                                        let subband_sizes: Vec<(usize, usize)> = if r == 0 {
+                                            vec![(res_w_u, res_h_u)] // LL only
+                                        } else {
+                                            let ll_w = res_w_u.div_ceil(2);
+                                            let ll_h = res_h_u.div_ceil(2);
+                                            vec![
+                                                (res_w_u.saturating_sub(ll_w), ll_h),         // HL
+                                                (ll_w, res_h_u.saturating_sub(ll_h)),         // LH
+                                                (res_w_u.saturating_sub(ll_w), res_h_u.saturating_sub(ll_h)), // HH
+                                            ]
+                                        };
+                                        let subband_grids: Vec<(usize, usize)> = subband_sizes
+                                            .iter()
+                                            .map(|&(w, h)| (w.div_ceil(nom_w), h.div_ceil(nom_h)))
+                                            .collect();
                                         crate::jpeg2000::packet::PacketHeader::read(
                                             &mut bit_reader,
                                             precinct_state,
                                             l as u32,
-                                            grid_w as usize,
-                                            grid_h as usize,
-                                            num_subbands,
+                                            &subband_grids,
                                         )
                                     };
                                     match h {
@@ -593,19 +613,19 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         8
                     };
 
-                    let m_b = if cod.transformation == 1 {
-                        // Reversible: Use Depth instead of Epsilon?
-                        // Epsilon from file is 10. Depth is 8.
-                        // Experiment: Force based on depth
-                        guard_bits
-                            + if comp < parser.image.components.len() {
-                                parser.image.components[comp].depth - 1
-                            } else {
-                                7
-                            }
-                    } else {
-                        guard_bits + epsilon_b - 1
-                    };
+                    // Maximum magnitude bit-plane index calculation.
+                    //
+                    // JPEG 2000 defines the number of magnitude bit-planes for a subband as:
+                    //   m_b = G_b + ε_b - 1
+                    // where:
+                    //   G_b = guard bits (Sqcd[7..5])
+                    //   ε_b = exponent (from SPqcd/SPqcc) for that subband
+                    //
+                    // This applies to both reversible (5-3) and irreversible (9-7) transforms.
+                    // Using component bit depth here is incorrect and causes systematic
+                    // under-decoding (missing the most significant bit-planes), which in
+                    // turn produces low-contrast / mid-gray reconstructions.
+                    let m_b = guard_bits.saturating_add(epsilon_b).saturating_sub(1);
 
                     let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);
 

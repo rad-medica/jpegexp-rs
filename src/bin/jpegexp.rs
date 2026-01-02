@@ -424,6 +424,15 @@ fn show_info(input: &PathBuf, extended: bool) -> Result<(), Box<dyn std::error::
                 println!("  DWT levels: {}", cod.decomposition_levels);
                 println!("  Layers:     {}", cod.number_of_layers);
                 println!(
+                    "  Transform:  {}",
+                    match cod.transformation {
+                        1 => "5-3 (reversible)",
+                        0 => "9-7 (irreversible)",
+                        _ => "Unknown",
+                    }
+                );
+                println!("  MCT:        {}", if cod.mct == 1 { "Yes" } else { "No" });
+                println!(
                     "  Progression: {}",
                     match cod.progression_order {
                         0 => "LRCP",
@@ -434,6 +443,29 @@ fn show_info(input: &PathBuf, extended: bool) -> Result<(), Box<dyn std::error::
                         _ => "Unknown",
                     }
                 );
+            }
+            if let Some(qcd) = &image.qcd {
+                let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                let quant_type = qcd.quant_style & 0x1F;
+                println!(
+                    "  Quant:      {} (guard_bits={})",
+                    match quant_type {
+                        0 => "No quantization",
+                        1 => "Scalar derived",
+                        2 => "Scalar expounded",
+                        _ => "Unknown",
+                    },
+                    guard_bits
+                );
+                if extended && !qcd.step_sizes.is_empty() {
+                    let exps: Vec<u16> = qcd
+                        .step_sizes
+                        .iter()
+                        .take(12)
+                        .map(|v| (v >> 11) & 0x1F)
+                        .collect();
+                    println!("  QCD ε (first): {:?}", exps);
+                }
             }
             if let Some(cap) = &image.cap {
                 let is_htj2k = (cap.pcap & (1 << 14)) != 0;
