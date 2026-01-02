@@ -52,19 +52,10 @@ impl<'a> JpeglsDecoder<'a> {
             preset
         };
 
-        // Build coding parameters with proper limit computation
-        let mut coding_params = self.reader.parameters();
-        coding_params.limit = crate::jpegls::coding_parameters::compute_limit_parameter(
-            frame_info.bits_per_sample,
-            coding_params.near_lossless,
-            frame_info.component_count,
-        );
-        coding_params.quantized_bits_per_sample = frame_info.bits_per_sample;
-
         let mut scan_decoder = crate::jpegls::scan_decoder::ScanDecoder::new(
             frame_info,
             preset,
-            coding_params,
+            self.reader.parameters(),
             self.reader.remaining_data(),
         )?;
 

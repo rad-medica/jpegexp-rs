@@ -86,7 +86,7 @@ impl<'a> ScanDecoder<'a> {
             t3,
             reset_threshold: reset,
             _limit: 0,
-            _quantized_bits_per_sample: coding_parameters.quantized_bits_per_sample,
+            _quantized_bits_per_sample: frame_info.bits_per_sample,
             _quantization_lut: Vec::new(),
             #[cfg(debug_assertions)]
             bits_consumed: 0,
@@ -151,10 +151,10 @@ impl<'a> ScanDecoder<'a> {
                   width, height, components, pixel_stride);
 
         // Initialize line buffer with 2 lines
-        // Per ITU-T T.87 specification, initialize previous line to 2^(P-1)
-        // For 8-bit: 1 << 7 = 128, for 16-bit: 1 << 15 = 32768
-        // This ensures neutral starting bias for predictive compression
-        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
+        // Per ITU-T T.87 specification, boundary pixels (outside the image) are
+        // initialized to ZERO for unsigned samples. This is required for proper
+        // synchronization between encoder and decoder.
+        let init_value = T::from_i32(0);
         let mut line_buffer: Vec<T> = vec![init_value; components * pixel_stride * 2];
 
         for line in 0..height {
@@ -242,6 +242,19 @@ impl<'a> ScanDecoder<'a> {
         let mut rd = prev_line[1].to_i32();
 
         while index <= width {
+            // Special handling for first line: after decoding first pixel,
+            // update prev_line to match so run mode can trigger for subsequent pixels
+            if is_first_line && index == 2 {
+                let first_pixel_value = curr_line[1];
+                for i in 0..prev_line.len() {
+                    prev_line[i] = first_pixel_value;
+                }
+                // Reload rb and rd after updating prev_line
+                rb = prev_line[0].to_i32();
+                rd = prev_line[1].to_i32();
+                debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
+            }
+            
             let ra = curr_line[index - 1].to_i32();
             let rc = rb;
             rb = rd;
@@ -257,14 +270,7 @@ impl<'a> ScanDecoder<'a> {
 
             let qs = self.compute_context_id(q1, q2, q3);
 
-            // CharLS uses REGULAR mode for the first pixel of the first line,
-            // even when qs=0. This is because run mode would expect a run of
-            // pixels matching Ra, but the first pixel has no meaningful Ra.
-            // For compatibility with CharLS-encoded files, we force regular mode
-            // for the very first pixel.
-            let use_regular_mode = qs != 0 || (is_first_line && index == 1);
-            
-            if use_regular_mode {
+            if qs != 0 {
                 debug_log!("    Regular mode: index={}, qs={}", index, qs);
                 let predicted = self.compute_predicted_value(ra, rb, rc);
                 let error_value = self.decode_regular::<T>(qs, predicted)?;
@@ -320,35 +326,15 @@ impl<'a> ScanDecoder<'a> {
     fn decode_mapped_error_value(&mut self, k: i32) -> Result<i32, JpeglsError> {
         let mut value = 0;
         let mut bit_count = 0;
-        
-        // LIMIT parameter: 2 * (bpp + max(8, bpp)) = 32 for 8-bit
-        let limit = self.coding_parameters.limit;
-        let qbpp = self._quantized_bits_per_sample;
-        let limit_threshold = limit - qbpp - 1;  // 32 - 8 - 1 = 23 for 8-bit
 
-        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}, limit_threshold={}", 
-                  k, self.read_cache, self.valid_bits, self.position, limit_threshold);
+        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}", 
+                  k, self.read_cache, self.valid_bits, self.position);
 
         // Read unary code (count zeros until we hit a 1)
         while self.peek_bits(1)? == 0 {
             value += 1;
             bit_count += 1;
             self.skip_bits(1)?;
-            
-            // Check for limited-length encoding (ITU-T T.87 A.5.3)
-            // If we've counted limit_threshold zeros, use limited encoding
-            if bit_count >= limit_threshold {
-                // Limited-length Golomb encoding
-                // Skip the terminating '1' bit
-                self.skip_bits(1)?;
-                // Read qbpp bits as (MErrval - 1)
-                let low_bits = self.read_bits(qbpp)?;
-                value = low_bits + 1;
-                debug_log!("    Golomb decode (LIMITED): unary={}, qbpp={}, low_bits={}, result={}", 
-                          bit_count, qbpp, low_bits, value);
-                return Ok(value);
-            }
-            
             if bit_count > 32 {
                 debug_log!("    Golomb: unary code too long (>32 zeros)");
                 return Err(JpeglsError::InvalidData);
@@ -356,7 +342,7 @@ impl<'a> ScanDecoder<'a> {
         }
         self.skip_bits(1)?;  // Skip the terminating 1
 
-        // Normal Golomb encoding: read fixed-length remainder
+        // Read fixed-length remainder
         if k > 0 {
             let remainder = self.read_bits(k)?;
             value = (value << k) | remainder;
@@ -370,14 +356,9 @@ impl<'a> ScanDecoder<'a> {
     }
 
     fn unmap_error_value(&self, mapped_value: i32) -> i32 {
-        // Per ITU-T T.87 specification:
-        // - MErrval even means positive error: error = MErrval / 2
-        // - MErrval odd means negative error: error = -(MErrval + 1) / 2
         if (mapped_value & 1) == 0 {
-            // Even: positive or zero
             mapped_value >> 1
         } else {
-            // Odd: negative
             -((mapped_value + 1) >> 1)
         }
     }
@@ -429,12 +410,11 @@ impl<'a> ScanDecoder<'a> {
                         // The 0xFF is already in the cache.
                         debug_log!("    Byte stuffing: FF 00 → FF (data)");
                     } else if next_byte == 0x7F {
-                        // In JPEG-LS, FF 7F means FF is data (no stuffing needed since
-                        // 7F has bit 7 = 0). Both bytes are valid entropy-coded data.
-                        // However, CharLS often places FF 7F at the end as fill bits.
-                        // We keep FF as data and continue reading normally.
-                        // The 7F will be read in the next iteration.
-                        debug_log!("    Pattern FF 7F: treating FF as data, 7F follows");
+                        // Special case: FF 7F appears in CharLS-encoded files at scan end.
+                        // This might be scan termination padding or bit-stuffing variant.
+                        // Don't consume the 7F, just keep FF in cache and continue.
+                        // The 7F will be read in the next iteration if needed.
+                        debug_log!("    Special pattern: FF 7F detected, keeping FF as data");
                     } else if Self::is_valid_jpeg_marker(next_byte) {
                         // Valid JPEG/JPEG-LS marker found (EOI, etc.)
                         // Back up, remove 0xFF from cache, and stop.
@@ -459,7 +439,12 @@ impl<'a> ScanDecoder<'a> {
     fn read_bits(&mut self, count: i32) -> Result<i32, JpeglsError> {
         let val = self.peek_bits(count)?;
         self.skip_bits(count)?;
-        // Note: bits_consumed is already incremented in skip_bits()
+        
+        #[cfg(debug_assertions)]
+        {
+            self.bits_consumed += count as usize;
+        }
+        
         Ok(val)
     }
 

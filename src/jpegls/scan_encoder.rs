@@ -179,10 +179,10 @@ impl<'a> ScanEncoder<'a> {
         let pixel_stride = width * components;
         let buffer_width = (width + 1) * components;
 
-        // Per ITU-T T.87 specification, initialize previous line to 2^(P-1)
-        // For 8-bit: 1 << 7 = 128, for 16-bit: 1 << 15 = 32768
-        // This ensures neutral starting bias for predictive compression
-        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
+        // Per ITU-T T.87 specification, boundary pixels (outside the image) are
+        // initialized to ZERO for unsigned samples. This is required for proper
+        // synchronization between encoder and decoder.
+        let init_value = T::from_i32(0);
         let mut line_buffer: Vec<T> = vec![init_value; buffer_width * 2];
         let mut source_idx = 0;
 
@@ -229,6 +229,20 @@ impl<'a> ScanEncoder<'a> {
         }
 
         while pixel_idx < width {
+            // Special handling for first line: after encoding first pixel,
+            // update prev_line to match so run mode can trigger for subsequent pixels
+            // This matches the decoder's behavior at scan_decoder.rs lines 247-256
+            if is_first_line && pixel_idx == 1 {
+                let first_pixel_value = curr_line[components];
+                for i in 0..prev_line.len() {
+                    prev_line[i] = first_pixel_value;
+                }
+                // Reload rb and rd after updating prev_line
+                for c in 0..components {
+                    rb[c] = prev_line[c].to_i32();
+                    rd[c] = prev_line[components + c].to_i32();
+                }
+            }
             let mut all_qs_zero = true;
             let mut component_qs = vec![0; components];
             let mut component_pred = vec![0; components];
@@ -264,12 +278,7 @@ impl<'a> ScanEncoder<'a> {
                 component_pred[c] = self.compute_predicted_value(ra, rb[c], rc);
             }
 
-            // CharLS uses REGULAR mode for the first pixel of the first line,
-            // even when all_qs_zero is true. This ensures compatibility with
-            // CharLS decoder. For the very first pixel, use regular mode.
-            let use_regular_mode = !all_qs_zero || (is_first_line && pixel_idx == 0);
-            
-            if use_regular_mode {
+            if !all_qs_zero {
                 for c in 0..components {
                     let idx = current_buf_idx + c;
                     let val = curr_line[idx].to_i32();
@@ -374,10 +383,6 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn map_error_value(&self, error_value: i32) -> i32 {
-        // Per ITU-T T.87 specification:
-        // - Positive error (>= 0): MErrval = 2 × error (produces EVEN)
-        // - Negative error (< 0): MErrval = -2 × error - 1 (produces ODD)
-        // This can be expressed as XOR-based formula:
         let bit_count = 32;
         (error_value >> (bit_count - 2)) ^ (2 * error_value)
     }
