@@ -628,7 +628,12 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         bpc.state = block.state.clone();
                         bpc.num_passes_decoded = block.coding_passes as u32;
 
-                        let _ = bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8);
+                        let res = bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8);
+                        if let Err(e) = res {
+                            eprintln!("Error decoding codeblock: {:?}", e);
+                        } else {
+                            // eprintln!("Decoded codeblock: passes={}, max_bp={}, data_len={}", cb_info.num_passes, max_bit_plane, data.len());
+                        }
 
                         block.coefficients = bpc.coefficients;
                         block.state = bpc.state;

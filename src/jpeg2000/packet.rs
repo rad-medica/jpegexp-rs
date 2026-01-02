@@ -250,16 +250,19 @@ impl PacketHeader {
                         writer.write_bit(0);
 
                         if cb.data_len > 0 {
+                            let bits_needed = (32 - cb.data_len.leading_zeros()).max(3);
+                            let val = bits_needed as i32 - 3;
+
                             subband_state
                                 .lblock_tree
-                                .set_value(x, y, cb.data_len as i32);
+                                .set_value(x, y, val);
                             subband_state.lblock_tree.encode(
                                 writer,
                                 x,
                                 y,
                                 (self.layer_index + 1) as i32,
                             );
-                            writer.write_bits(cb.data_len, 16);
+                            writer.write_bits(cb.data_len, bits_needed as u8);
                         } else {
                             subband_state.lblock_tree.set_value(x, y, 0);
                             subband_state.lblock_tree.encode(

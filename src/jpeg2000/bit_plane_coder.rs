@@ -51,11 +51,11 @@ impl<'a> BitPlaneCoder<'a> {
         let ix = x as i32;
         let iy = y as i32;
 
+        let idx = |cnx, cny| (cny * w + cnx) as usize;
+
         let mut h_cnt = 0;
         let mut v_cnt = 0;
         let mut d_cnt = 0;
-
-        let idx = |cnx, cny| (cny * w + cnx) as usize;
 
         // H: (x-1, y), (x+1, y)
         if ix > 0 && (self.state[idx(ix - 1, iy)] & Self::SIG) != 0 {
@@ -139,14 +139,14 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn encode_codeblock(&mut self) {
+    pub fn encode_codeblock(&mut self, orientation: u8) {
         // Iterate bitplanes from MSB to LSB
         // Assume 30 down to 0? Or determined by max value.
         // For testing, let's start at bit 5.
         for bp in (0..5).rev() {
-            self.significance_propagation(bp);
+            self.significance_propagation(bp, orientation);
             self.magnitude_refinement(bp);
-            self.cleanup(bp);
+            self.cleanup(bp, orientation);
         }
     }
 
@@ -311,21 +311,93 @@ impl<'a> BitPlaneCoder<'a> {
         bit_plane: u8,
         orientation: u8,
     ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
-        // Scan in stripe order
         let stripe_height = 4;
         let width = self.width;
         let height = self.height;
+        const CX_RUN: usize = 17;
+        const CX_UNIFORM: usize = 18;
 
         for y_stripe in (0..height).step_by(stripe_height as usize) {
             for x in 0..width {
-                for y_offset in 0..stripe_height.min(height - y_stripe) {
-                    let y = y_stripe + y_offset;
-                    let idx = (y * width + x) as usize;
+                let remaining_height = stripe_height.min(height - y_stripe) as usize;
+                let mut start_offset = 0;
 
-                    if idx >= self.state.len() {
-                        continue;
+                // Check for RLC condition
+                let mut run_possible = false;
+                if remaining_height == 4 {
+                     let idx0 = (y_stripe * width + x) as usize;
+                     let idx1 = idx0 + width as usize;
+                     let idx2 = idx1 + width as usize;
+                     let idx3 = idx2 + width as usize;
+
+                     // All must be currently insignificant and unvisited
+                     if (self.state[idx0] & (Self::SIG | Self::VISITED)) == 0 &&
+                        (self.state[idx1] & (Self::SIG | Self::VISITED)) == 0 &&
+                        (self.state[idx2] & (Self::SIG | Self::VISITED)) == 0 &&
+                        (self.state[idx3] & (Self::SIG | Self::VISITED)) == 0 {
+
+                        // All neighbors must be insignificant
+                        let (hc0, vc0, dc0) = self.get_neighbors(x, y_stripe);
+                        let (hc1, vc1, dc1) = self.get_neighbors(x, y_stripe + 1);
+                        let (hc2, vc2, dc2) = self.get_neighbors(x, y_stripe + 2);
+                        let (hc3, vc3, dc3) = self.get_neighbors(x, y_stripe + 3);
+
+                        if self.get_zc_context(orientation, hc0, vc0, dc0) == 0 &&
+                           self.get_zc_context(orientation, hc1, vc1, dc1) == 0 &&
+                           self.get_zc_context(orientation, hc2, vc2, dc2) == 0 &&
+                           self.get_zc_context(orientation, hc3, vc3, dc3) == 0 {
+                               run_possible = true;
+                           }
+                     }
+                }
+
+                if run_possible {
+                    let sym = self.mq.decode_bit(CX_RUN);
+                    if sym == 1 {
+                        // Run Mode
+                        let msb = self.mq.decode_bit(CX_UNIFORM);
+                        let lsb = self.mq.decode_bit(CX_UNIFORM);
+                        let run_len = ((msb << 1) | lsb) as usize;
+
+                        // Start AFTER the run (all samples in run stay 0)
+                        start_offset = run_len;
+
+                        let y = y_stripe + start_offset as u32;
+                        let idx = (y * width + x) as usize;
+
+                        // The sample at run_len becomes significant
+                        self.state[idx] |= Self::SIG | Self::VISITED;
+
+                        // Decode sign
+                        let sc_data = self.get_sign_context(x, y, width, height);
+                        let sc_ctx = sc_data & 0xFF;
+                        let xor = (sc_data >> 8) & 1;
+                        let sym = self.mq.decode_bit(sc_ctx);
+                        let sign_bit = sym ^ (xor as u8);
+
+                        if sign_bit != 0 {
+                            self.state[idx] |= Self::SIGN;
+                            self.coefficients[idx] = -(1 << bit_plane);
+                        } else {
+                            self.coefficients[idx] = 1 << bit_plane;
+                        }
+
+                        // We processed this sample, so continue loop from next
+                        start_offset += 1;
+                    } else {
+                        // No run, but RLC context was used for the "0" bit.
+                        // All 4 samples processed as normal? No.
+                        // "If the run-length context is used and the symbol is 0,
+                        // this indicates that there is at least one significant sample...
+                        // processing continues with the first sample of the column using normal ZC."
+                        // So we just continue with start_offset = 0.
+                        start_offset = 0;
                     }
+                }
 
+                for y_offset in start_offset..remaining_height {
+                    let y = y_stripe + y_offset as u32;
+                    let idx = (y * width + x) as usize;
                     let state = self.state[idx];
 
                     // If not visited, must be insignificant
@@ -338,7 +410,7 @@ impl<'a> BitPlaneCoder<'a> {
 
                         if bit != 0 {
                             // Became significant
-                            self.state[idx] |= Self::SIG;
+                            self.state[idx] |= Self::SIG | Self::VISITED;
 
                             // Decode sign
                             let sc_data = self.get_sign_context(x, y, width, height);
@@ -355,6 +427,8 @@ impl<'a> BitPlaneCoder<'a> {
                             }
                         }
                     }
+                    // Reset VISITED for next bitplane
+                    self.state[idx] &= !Self::VISITED;
                 }
             }
         }
@@ -401,8 +475,6 @@ impl<'a> BitPlaneCoder<'a> {
 
         // Context label 9..13
         // XOR bit (0 or 1) implies if we should invert the sign bit before coding.
-        // Returns (context, xor_bit) - but mq only needs context?
-        // Wait, sign coding uses xor bit!
 
         let (ctx_offset, xor) = match (h_contrib, v_contrib) {
             (2, 2) => (13, 1),
@@ -433,12 +505,6 @@ impl<'a> BitPlaneCoder<'a> {
             _ => (9, 0),
         };
 
-        // We need to return the combined context?
-        // Or handle XOR outside?
-        // My MqCoder doesn't handle XOR.
-        // So I should return (ctx, xor).
-        // But the function returns usize.
-        // I'll return ctx | (xor << 8).
         ctx_offset | (xor << 8)
     }
 
@@ -463,7 +529,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn significance_propagation(&mut self, bit_plane: u8) {
+    pub fn significance_propagation(&mut self, bit_plane: u8, orientation: u8) {
         // Iterate scan order (simple raster for simplicity, J2K stripes 4 rows)
         // Correct J2K is stripe order: 4 rows column-wise.
         let w = self.width;
@@ -483,7 +549,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let bit = (val.abs() >> bit_plane) & 1;
 
                         // Encode ZC
-                        let cx = self.get_zc_context(0, hc, vc, dc); // band 0 assumed
+                        let cx = self.get_zc_context(orientation, hc, vc, dc);
                         self.mq.encode(bit as u8, cx);
 
                         if bit == 1 {
@@ -495,8 +561,6 @@ impl<'a> BitPlaneCoder<'a> {
                             }
 
                             // Encode Sign (SC)
-                            // Context depends on neighbor signs
-                            // Context depends on neighbor signs
                             let sc_data = self.get_sign_context(x, y, self.width, self.height);
                             let sc_ctx = sc_data & 0xFF;
                             let xor = (sc_data >> 8) & 1;
@@ -532,45 +596,122 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn cleanup(&mut self, bit_plane: u8) {
+    pub fn cleanup(&mut self, bit_plane: u8, orientation: u8) {
         // Encode remaining insignificant samples
         let w = self.width;
         let h = self.height;
+        let stripe_height = 4;
+        const CX_RUN: usize = 17;
+        const CX_UNIFORM: usize = 18;
 
-        // RLC logic would go here: check if run of 4 is all insignificant
-
-        for y in 0..h {
+        for y_stripe in (0..h).step_by(stripe_height as usize) {
             for x in 0..w {
-                let idx = (y * w + x) as usize;
-                let state = self.state[idx];
-                if (state & Self::VISITED) == 0 {
-                    // Not visited: Must be insignificant so far
-                    let (hc, vc, dc) = self.get_neighbors(x, y);
+                let remaining_height = stripe_height.min(h - y_stripe) as usize;
+                let mut start_offset = 0;
 
-                    // ZC Context
-                    let cx = self.get_zc_context(0, hc, vc, dc);
-                    let val = self.data[idx];
-                    let bit = (val.abs() >> bit_plane) & 1;
+                // Check for RLC condition
+                let mut run_possible = false;
+                if remaining_height == 4 {
+                     let idx0 = (y_stripe * w + x) as usize;
+                     let idx1 = idx0 + w as usize;
+                     let idx2 = idx1 + w as usize;
+                     let idx3 = idx2 + w as usize;
 
-                    self.mq.encode(bit as u8, cx);
+                     if (self.state[idx0] & (Self::SIG | Self::VISITED)) == 0 &&
+                        (self.state[idx1] & (Self::SIG | Self::VISITED)) == 0 &&
+                        (self.state[idx2] & (Self::SIG | Self::VISITED)) == 0 &&
+                        (self.state[idx3] & (Self::SIG | Self::VISITED)) == 0 {
 
-                    if bit == 1 {
-                        // Became Significant
+                        let (hc0, vc0, dc0) = self.get_neighbors(x, y_stripe);
+                        let (hc1, vc1, dc1) = self.get_neighbors(x, y_stripe + 1);
+                        let (hc2, vc2, dc2) = self.get_neighbors(x, y_stripe + 2);
+                        let (hc3, vc3, dc3) = self.get_neighbors(x, y_stripe + 3);
+
+                        if self.get_zc_context(orientation, hc0, vc0, dc0) == 0 &&
+                           self.get_zc_context(orientation, hc1, vc1, dc1) == 0 &&
+                           self.get_zc_context(orientation, hc2, vc2, dc2) == 0 &&
+                           self.get_zc_context(orientation, hc3, vc3, dc3) == 0 {
+                               run_possible = true;
+                           }
+                     }
+                }
+
+                if run_possible {
+                    let mut has_sig = false;
+                    let mut run_len = 0;
+
+                    for i in 0..4 {
+                        let idx = ((y_stripe + i as u32) * w + x) as usize;
+                        let val = self.data[idx];
+                        let bit = (val.abs() >> bit_plane) & 1;
+                        if bit == 1 {
+                            has_sig = true;
+                            run_len = i;
+                            break;
+                        }
+                    }
+
+                    if has_sig {
+                        // RUN mode, run_len < 4
+                        self.mq.encode(1, CX_RUN);
+                        self.mq.encode((run_len >> 1) as u8, CX_UNIFORM);
+                        self.mq.encode((run_len & 1) as u8, CX_UNIFORM);
+
+                        start_offset = run_len as usize;
+
+                        let idx = ((y_stripe + start_offset as u32) * w + x) as usize;
+                        let val = self.data[idx];
                         let sign = if val < 0 { 1 } else { 0 };
-                        self.state[idx] |= Self::SIG;
+
+                        self.state[idx] |= Self::SIG | Self::VISITED;
                         if sign == 1 {
                             self.state[idx] |= Self::SIGN;
                         }
 
-                        let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                        let sc_data = self.get_sign_context(x, y_stripe + start_offset as u32, w, h);
                         let sc_ctx = sc_data & 0xFF;
                         let xor = (sc_data >> 8) & 1;
-                        let sym = sign ^ (xor as u8); // Invert if xor is set
+                        let sym = sign ^ (xor as u8);
                         self.mq.encode(sym, sc_ctx);
+
+                        start_offset += 1;
+                    } else {
+                        // NO RUN (all 0)
+                        self.mq.encode(0, CX_RUN);
+                        start_offset = 4;
                     }
                 }
-                // Reset VISITED for next bitplane
-                self.state[idx] &= !Self::VISITED;
+
+                for y_offset in start_offset..remaining_height {
+                    let y = y_stripe + y_offset as u32;
+                    let idx = (y * w + x) as usize;
+                    let state = self.state[idx];
+
+                    if (state & Self::VISITED) == 0 {
+                        let (hc, vc, dc) = self.get_neighbors(x, y);
+
+                        let cx = self.get_zc_context(orientation, hc, vc, dc);
+                        let val = self.data[idx];
+                        let bit = (val.abs() >> bit_plane) & 1;
+
+                        self.mq.encode(bit as u8, cx);
+
+                        if bit == 1 {
+                            let sign = if val < 0 { 1 } else { 0 };
+                            self.state[idx] |= Self::SIG | Self::VISITED;
+                            if sign == 1 {
+                                self.state[idx] |= Self::SIGN;
+                            }
+
+                            let sc_data = self.get_sign_context(x, y, w, h);
+                            let sc_ctx = sc_data & 0xFF;
+                            let xor = (sc_data >> 8) & 1;
+                            let sym = sign ^ (xor as u8);
+                            self.mq.encode(sym, sc_ctx);
+                        }
+                    }
+                    self.state[idx] &= !Self::VISITED;
+                }
             }
         }
     }
@@ -582,24 +723,15 @@ mod tests {
 
     #[test]
     fn test_bit_plane_coding_simple() {
-        // 4x4 block
         let data = [10, 0, 0, 0, 0, 5, 0, 0, 0, 0, -3, 0, 0, 0, 0, 1];
         let mut bpc = BitPlaneCoder::new(4, 4, &data);
 
         // This should not panic
-        bpc.encode_codeblock();
+        bpc.encode_codeblock(0);
 
-        // We can't easily verify exact bytes without full J2K compliance check,
-        // but we can check that state updated (e.g., significant samples marked)
-
-        // At end, indices 0, 5, 10, 15 should be SIGNIFICANT
         let sig = BitPlaneCoder::SIG;
         assert_eq!(bpc.state[0] & sig, sig, "Index 0 should be significant");
         assert_eq!(bpc.state[5] & sig, sig, "Index 5 should be significant");
-        // -3 is abs 3. Max bit plane was 5. 3 is binary 011. It should eventually become significant.
-        // wait, we ran loop 5..0. 0..5 rev.
-        // 3 is 000011.
-        // Bit 1: 3>>1 & 1 = 1. Yes.
         assert_eq!(
             bpc.state[10] & sig,
             sig,
