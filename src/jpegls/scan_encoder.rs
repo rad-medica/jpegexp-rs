@@ -233,6 +233,8 @@ impl<'a> ScanEncoder<'a> {
             // update prev_line to match so run mode can trigger for subsequent pixels
             // This matches the decoder's behavior at scan_decoder.rs lines 247-256
             if is_first_line && pixel_idx == 1 {
+                // For multi-component images, the first pixel starts at index 'components'
+                // (indices 0 to components-1 are boundary padding)
                 let first_pixel_value = curr_line[components];
                 for i in 0..prev_line.len() {
                     prev_line[i] = first_pixel_value;

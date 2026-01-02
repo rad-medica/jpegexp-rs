@@ -245,11 +245,13 @@ impl<'a> ScanDecoder<'a> {
             // Special handling for first line: after decoding first pixel,
             // update prev_line to match so run mode can trigger for subsequent pixels
             if is_first_line && index == 2 {
+                // Index 1 is the first decoded pixel (index 0 is boundary padding)
                 let first_pixel_value = curr_line[1];
                 for i in 0..prev_line.len() {
                     prev_line[i] = first_pixel_value;
                 }
                 // Reload rb and rd after updating prev_line
+                // Index 0 and 1 are the first two pixels in the previous line buffer
                 rb = prev_line[0].to_i32();
                 rd = prev_line[1].to_i32();
                 debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
@@ -439,12 +441,7 @@ impl<'a> ScanDecoder<'a> {
     fn read_bits(&mut self, count: i32) -> Result<i32, JpeglsError> {
         let val = self.peek_bits(count)?;
         self.skip_bits(count)?;
-        
-        #[cfg(debug_assertions)]
-        {
-            self.bits_consumed += count as usize;
-        }
-        
+        // Note: bits_consumed is already incremented in skip_bits()
         Ok(val)
     }
 
