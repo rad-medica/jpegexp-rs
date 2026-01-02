@@ -209,7 +209,8 @@ impl J2kEncoder {
             destination[psot_offset + 3] = (tile_len & 0xFF) as u8;
         }
 
-        let _ = sod_pos; // Suppress unused warning
+        // sod_pos could be used for validation in debug builds
+        debug_assert!(sod_pos > sot_pos, "SOD should come after SOT");
 
         Ok(total_len)
     }
@@ -438,8 +439,10 @@ impl J2kEncoder {
                     let encoded_data = bpc.mq.get_buffer().to_vec();
 
                     // Calculate number of coding passes
+                    // Each bitplane has 3 passes (sig prop, mag ref, cleanup)
+                    // But the first bitplane only has cleanup, so: 1 + (n-1)*3 = 3n - 2
                     let num_passes = if num_bitplanes > 0 {
-                        1 + (num_bitplanes - 1) * 3 // First cleanup + 3 passes per remaining bitplane
+                        3 * num_bitplanes - 2
                     } else {
                         0
                     };

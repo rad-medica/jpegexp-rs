@@ -561,8 +561,7 @@ impl MqCoder {
             self.ct -= 1;
             if self.ct == 0 {
                 self.byte_out();
-                // ct is set by byte_out: 7 if previous byte was 0xFF, otherwise keep it
-                // We don't reset to 8 here; byte_out handles it
+                // ct is set by byte_out based on whether the output byte was 0xFF
             }
             if self.a >= 0x8000 {
                 break;
