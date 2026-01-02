@@ -175,7 +175,7 @@ impl<'a> ScanDecoder<'a> {
             let curr_line = &mut curr[0..pixel_stride];
 
             curr_line[0] = prev_line[1];
-            self.decode_sample_line::<T>(prev_line, curr_line, width)?;
+            self.decode_sample_line::<T>(prev_line, curr_line, width, line == 0)?;
             
             #[cfg(debug_assertions)]
             {
@@ -232,9 +232,10 @@ impl<'a> ScanDecoder<'a> {
 
     fn decode_sample_line<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
-        prev_line: &[T],
+        prev_line: &mut [T],
         curr_line: &mut [T],
         width: usize,
+        is_first_line: bool,
     ) -> Result<(), JpeglsError> {
         let mut index = 1;
         let mut rb = prev_line[0].to_i32();
@@ -269,6 +270,21 @@ impl<'a> ScanDecoder<'a> {
                     rb = prev_line[index - 1].to_i32();
                     rd = prev_line[index].to_i32();
                 }
+            }
+            
+            // Special handling for first line: after decoding first pixel,
+            // update prev_line to match so run mode can trigger for subsequent pixels
+            if is_first_line && index == 2 {
+                let first_pixel_value = curr_line[1];
+                for i in 0..prev_line.len() {
+                    prev_line[i] = first_pixel_value;
+                }
+                // Reload rb and rd after updating prev_line
+                if index <= width {
+                    rb = prev_line[index - 1].to_i32();
+                    rd = prev_line[index].to_i32();
+                }
+                debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
             }
         }
         Ok(())
