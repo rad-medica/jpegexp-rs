@@ -8,7 +8,12 @@
 Testing revealed that the codec implementations have varying levels of completeness:
 - **JPEG 1**: Production ready for grayscale and RGB
 - **JPEG-LS**: ✅ **Fixed!** Lossless grayscale (8-bit and 16-bit) fully working
-- **JPEG 2000**: Stub implementation, not functional
+- **JPEG 2000**: ❌ **Non-functional** - Decoder has packet parsing bugs; Encoder is stub only
+
+**JPEG 2000 Issues Diagnosed (2026-01-02):**
+- Decoder reads only Resolution 0 correctly; higher resolutions marked as "empty"
+- Only 1 bit-plane coding pass decoded instead of ~25 needed for lossless
+- Results in MAE = 48-103 (should be 0 for lossless)
 
 ## Detailed Test Results
 
@@ -78,14 +83,23 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 
 ### JPEG 2000 (ISO/IEC 15444-1)
 
-#### Decoder Tests ✅ (Fixed 2026-01-02)
+#### Decoder Tests ❌ (Detailed Analysis 2026-01-02)
 | Test | Status | Notes |
 |------|--------|-------|
-| Header Parsing | ✅ Pass | SIZ, COD, QCD, CAP markers |
-| kakadu61.jp2 | ✅ Pass | 2717x3701 RGB decoded |
-| graphicsMagick.jp2 | ✅ Pass | Pixel variance verified (0-255 range) |
+| Header Parsing | ✅ Pass | SIZ, COD, QCD, CAP markers correctly parsed |
+| JP2 Container | ✅ Pass | JP2 box structure correctly extracted |
+| kakadu61.jp2 | ❌ Fail | MAE = 103.5 vs OpenJPEG reference |
+| Lossless decode | ❌ Fail | MAE = 48-78 (should be 0) |
 
-**Fix Applied:** Removed incorrect `/2.0` divisor in `image.rs:reconstruct_pixels()` that halved all pixel values for reversible DWT mode.
+**Decoder Root Causes (Identified):**
+1. **Packet parsing issue**: Only Resolution 0 packets are read correctly; Resolutions 1-3 are incorrectly marked as empty
+2. **Bit-plane decoding**: Only 1 coding pass decoded instead of ~25 needed for lossless
+3. **Coefficient values**: Only MSB bit-plane values reconstructed (e.g., -256, 0 instead of actual gradient values)
+
+**Technical Details:**
+- After reading packet 0 (res 0) with 10 bytes of codeblock data, the next byte's MSB is 0
+- This causes packets for resolutions 1, 2, 3 to be incorrectly marked as empty
+- The issue is in the packet header parsing not correctly tracking bit positions across packets
 
 #### Encoder Tests ❌
 | Direction | MAE | Status |
@@ -95,8 +109,8 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 **Result:** ⚠️ Encoder remains a **Stub Implementation** - writes empty packets
 
 **Encoder Root Cause (Not Fixed):**
-- Encoder (`src/jpeg2000/encoder.rs:52`) has `_pixels` parameter unused
-- Encoder only writes empty packets (line 150)
+- Encoder (`src/jpeg2000/encoder.rs:52`) has working DWT implementation but bit-plane coding not connected
+- Encoder writes empty packets (line 150) instead of actual encoded data
 
 
 ---
@@ -115,9 +129,11 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 | Codec | Expected MAE | Actual MAE | Delta |
 |-------|--------------|------------|-------|
 | JPEG 1 Grayscale | < 5.0 | 0.23-0.75 | ✅ Better than expected |
-| JPEG 1 RGB | < 5.0 | Error/42.92 | ❌ Much worse |
-| JPEG-LS | 0 | 255 | ❌ Maximum possible error |
-| JPEG 2000 | 0 | 63.75-68.54 | ❌ Stub returns constant |
+| JPEG 1 RGB | < 5.0 | 1.51 | ✅ Working |
+| JPEG-LS (8-bit) | 0 | 0 | ✅ Perfect lossless |
+| JPEG-LS (16-bit) | 0 | 0 | ✅ Perfect lossless |
+| JPEG 2000 Decode | 0 | 48-103 | ❌ Packet parsing bugs |
+| JPEG 2000 Encode | 0 | 64 | ❌ Stub (empty packets) |
 
 ---
 
@@ -182,11 +198,17 @@ let pixels = vec![128u8; (width * height * components) as usize];
    - Requires triplet processing (see `src/jpegls/mod.rs`)
    - Estimated 2-3 days of work
 
-4. **JPEG 2000**: Complete stub implementation
-   - Implement actual DWT coefficient encoding
-   - Implement proper packet formation
-   - Fix decoder reconstruction logic
-   - This is a major undertaking (weeks of work)
+4. **JPEG 2000 Decoder** (Critical fixes needed):
+   - **Packet header parsing** (`src/jpeg2000/packet.rs`): Fix bit-position tracking between packets
+   - **Bit-plane coder** (`src/jpeg2000/bit_plane_coder.rs`): Ensure all passes are decoded (not just 1)
+   - **Stream alignment**: Fix byte boundary handling after packet data sections
+   - Estimated: 1-2 weeks of focused work
+
+5. **JPEG 2000 Encoder** (Stub implementation):
+   - Connect DWT coefficient output to bit-plane encoder
+   - Implement proper MQ arithmetic coder integration
+   - Generate valid packet structures with actual data
+   - Estimated: 3-4 weeks of work
 
 ### Low Priority
 5. **Add more unit tests**: Expand test coverage
@@ -220,11 +242,11 @@ let pixels = vec![128u8; (width * height * components) as usize];
 
 ## Files Requiring Work
 
-1. `src/jpegls/scan_decoder.rs` - Buffer layout fixes needed
-2. `src/jpegls/scan_encoder.rs` - May need corresponding fixes
-3. `src/jpeg2000/encoder.rs` - Stub, needs full implementation
-4. `src/jpeg2000/decoder.rs` - Needs reconstruction fixes
-5. `src/jpeg1/decoder.rs` - RGB decoding issues
+1. `src/jpeg2000/packet.rs` - **Critical**: Fix bit-position tracking between packets
+2. `src/jpeg2000/bit_plane_coder.rs` - Ensure all coding passes are decoded
+3. `src/jpeg2000/decoder.rs` - Fix stream alignment after packet data
+4. `src/jpeg2000/encoder.rs` - Stub, needs complete implementation
+5. `src/jpegls/mod.rs` - Add RGB sample-interleave support
 
 ---
 
@@ -234,13 +256,21 @@ The codec implementations are at different stages of completion:
 
 - **JPEG 1**: ✅ Production-ready for grayscale and RGB
 - **JPEG-LS**: ✅ Production-ready for grayscale (8-bit and 16-bit), RGB pending
-- **JPEG 2000**: ⚠️ Proof-of-concept only, not functional
+- **JPEG 2000**: ❌ Non-functional - decoder has packet parsing bugs, encoder is stub
 
 **Current test results:**
 - JPEG-LS Decoder: 17/17 tests pass (6 RGB tests ignored)
 - JPEG-LS Encoder: 9/9 tests pass (CharLS-verified lossless)
 - All grayscale images achieve MAE = 0 (perfect lossless compression)
+- JPEG 2000 decoder produces MAE = 48-103 (should be 0 for lossless)
+
+**JPEG 2000 Diagnosis Summary:**
+1. Only Resolution 0 packets are parsed correctly
+2. Only 1 coding pass is decoded (instead of ~25 for lossless)
+3. Coefficient reconstruction gets only MSB values (e.g., -256, 0)
+4. The root cause is in `src/jpeg2000/packet.rs` - bit-position tracking between packets
 
 **Remaining effort:**
 - JPEG-LS RGB: 2-3 days (sample-interleave triplet processing)
-- JPEG 2000: 4-8 weeks (major implementation work)
+- JPEG 2000 Decoder fixes: 1-2 weeks (packet parsing, bit-plane coder)
+- JPEG 2000 Encoder: 3-4 weeks (complete implementation needed)
