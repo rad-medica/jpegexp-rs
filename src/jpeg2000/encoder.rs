@@ -112,21 +112,25 @@ impl J2kEncoder {
         };
         writer.write_qcd(&qcd)?;
 
-        // NOTE: Full implementation would:
-        // 1. Apply forward DWT to pixel data
-        // 2. Partition into code-blocks
-        // 3. Encode coefficients via bit-plane coding + MQ
-        // Currently, we write empty packets which produces a valid J2K
-        // that decodes to a constant (level-shifted) value.
+        // TODO: Full JPEG2000 encoding requires EBCOT (Tier-1) bit-plane coding:
+        // 1. Apply forward DWT (implemented in apply_forward_dwt below)
+        // 2. Partition coefficients into code-blocks (64x64)
+        // 3. Encode each code-block using bit-plane coding passes:
+        //    - Significance propagation pass
+        //    - Magnitude refinement pass
+        //    - Cleanup pass (with MQ arithmetic coder)
+        // 4. Write Tier-2 packet headers with tag trees
+        //
+        // Currently, we write empty packets which produces a valid J2K that
+        // decodes to 0 (after level shift = 128 for 8-bit).
+
         // Write SOT (Start of Tile)
         writer.write_sot(0, 0, 0, 1)?;
 
         // Write SOD (Start of Data)
         writer.write_sod()?;
 
-        // For now, write empty packets for valid J2K structure
-        // This produces valid J2K that decodes to the DC level shift value
-        // A full implementation would encode DWT coefficients through bit-plane coding
+        // Write empty packets for valid J2K structure
         let num_resolutions = (self.decomposition_levels + 1) as usize;
 
         // LRCP order: Layer -> Resolution -> Component -> Precinct
