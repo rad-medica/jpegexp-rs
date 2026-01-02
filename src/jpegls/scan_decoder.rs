@@ -645,6 +645,12 @@ impl<'a> ScanDecoder<'a> {
             (0, Self::bit_wise_sign(rb - ra))
         };
 
+        debug_log!("    Run interruption context[{}]: a={}, n={}, nn={}", 
+                  context_index,
+                  self.run_mode_contexts[context_index].a(),
+                  self.run_mode_contexts[context_index].n(),
+                  self.run_mode_contexts[context_index].nn());
+
         let k = self.run_mode_contexts[context_index].compute_golomb_coding_parameter();
         let mapped_error = self.decode_mapped_error_value(k)?;
 
