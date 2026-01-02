@@ -242,6 +242,19 @@ impl<'a> ScanDecoder<'a> {
         let mut rd = prev_line[1].to_i32();
 
         while index <= width {
+            // Special handling for first line: after decoding first pixel,
+            // update prev_line to match so run mode can trigger for subsequent pixels
+            if is_first_line && index == 2 {
+                let first_pixel_value = curr_line[1];
+                for i in 0..prev_line.len() {
+                    prev_line[i] = first_pixel_value;
+                }
+                // Reload rb and rd after updating prev_line
+                rb = prev_line[0].to_i32();
+                rd = prev_line[1].to_i32();
+                debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
+            }
+            
             let ra = curr_line[index - 1].to_i32();
             let rc = rb;
             rb = rd;
@@ -270,21 +283,6 @@ impl<'a> ScanDecoder<'a> {
                     rb = prev_line[index - 1].to_i32();
                     rd = prev_line[index].to_i32();
                 }
-            }
-            
-            // Special handling for first line: after decoding first pixel,
-            // update prev_line to match so run mode can trigger for subsequent pixels
-            if is_first_line && index == 2 {
-                let first_pixel_value = curr_line[1];
-                for i in 0..prev_line.len() {
-                    prev_line[i] = first_pixel_value;
-                }
-                // Reload rb and rd after updating prev_line
-                if index <= width {
-                    rb = prev_line[index - 1].to_i32();
-                    rd = prev_line[index].to_i32();
-                }
-                debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
             }
         }
         Ok(())
