@@ -179,10 +179,10 @@ impl<'a> ScanEncoder<'a> {
         let pixel_stride = width * components;
         let buffer_width = (width + 1) * components;
 
-        // For JPEG-LS compatibility with CharLS, initialize previous line to 0
-        // CharLS uses 0 initialization, which ensures encoder/decoder symmetry
-        // and compatibility with CharLS-encoded files
-        let init_value = T::from_i32(0);
+        // Per ITU-T T.87 specification, initialize previous line to 2^(P-1)
+        // For 8-bit: 1 << 7 = 128, for 16-bit: 1 << 15 = 32768
+        // This ensures neutral starting bias for predictive compression
+        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
         let mut line_buffer: Vec<T> = vec![init_value; buffer_width * 2];
         let mut source_idx = 0;
 
@@ -374,14 +374,12 @@ impl<'a> ScanEncoder<'a> {
     }
 
     fn map_error_value(&self, error_value: i32) -> i32 {
-        // CharLS-compatible mapping:
-        // - positive error maps to odd: 2*error - 1
-        // - negative/zero error maps to even: -2*error
-        if error_value > 0 {
-            2 * error_value - 1
-        } else {
-            -2 * error_value
-        }
+        // Per ITU-T T.87 specification:
+        // - Positive error (>= 0): MErrval = 2 × error (produces EVEN)
+        // - Negative error (< 0): MErrval = -2 × error - 1 (produces ODD)
+        // This can be expressed as XOR-based formula:
+        let bit_count = 32;
+        (error_value >> (bit_count - 2)) ^ (2 * error_value)
     }
 
     fn encode_mapped_value(&mut self, k: i32, mapped_error: i32, limit: i32) {

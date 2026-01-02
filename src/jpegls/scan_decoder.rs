@@ -151,11 +151,10 @@ impl<'a> ScanDecoder<'a> {
                   width, height, components, pixel_stride);
 
         // Initialize line buffer with 2 lines
-        // For JPEG-LS compatibility with CharLS, initialize previous line to 0
-        // CharLS uses 0 initialization for the first line, which differs from
-        // the ITU-T T.87 spec recommendation of 2^(P-1). Using 0 ensures
-        // compatibility with CharLS-encoded files.
-        let init_value = T::from_i32(0);
+        // Per ITU-T T.87 specification, initialize previous line to 2^(P-1)
+        // For 8-bit: 1 << 7 = 128, for 16-bit: 1 << 15 = 32768
+        // This ensures neutral starting bias for predictive compression
+        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
         let mut line_buffer: Vec<T> = vec![init_value; components * pixel_stride * 2];
 
         for line in 0..height {
@@ -371,15 +370,15 @@ impl<'a> ScanDecoder<'a> {
     }
 
     fn unmap_error_value(&self, mapped_value: i32) -> i32 {
-        // CharLS uses inverted mapping from standard JPEG-LS:
-        // - MErrval odd means positive error: error = (MErrval + 1) / 2
-        // - MErrval even means negative or zero error: error = -(MErrval / 2)
+        // Per ITU-T T.87 specification:
+        // - MErrval even means positive error: error = MErrval / 2
+        // - MErrval odd means negative error: error = -(MErrval + 1) / 2
         if (mapped_value & 1) == 0 {
-            // Even: negative or zero
-            -(mapped_value >> 1)
+            // Even: positive or zero
+            mapped_value >> 1
         } else {
-            // Odd: positive
-            (mapped_value + 1) >> 1
+            // Odd: negative
+            -((mapped_value + 1) >> 1)
         }
     }
 
