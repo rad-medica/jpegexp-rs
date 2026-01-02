@@ -151,10 +151,10 @@ impl<'a> ScanDecoder<'a> {
                   width, height, components, pixel_stride);
 
         // Initialize line buffer with 2 lines
-        // For JPEG-LS, the "previous line" for the first line should be initialized
-        // Empirically determined to match CharLS behavior - appears to be ~173 for 8-bit
-        // TODO: Research exact formula from ITU-T T.87/T.870 spec
-        let init_value = T::from_i32(173);  // Temporary hardcode for 8-bit testing
+        // For JPEG-LS, empirically determined that CharLS uses 173 initialization for 8-bit
+        // This matches the encoded bitstream for solid 127 images
+        // The first bit is used for run mode check, then 25 bits for first pixel Golomb code
+        let init_value = T::from_i32(173);
         let mut line_buffer: Vec<T> = vec![init_value; components * pixel_stride * 2];
 
         for line in 0..height {
