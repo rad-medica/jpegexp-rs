@@ -151,10 +151,11 @@ impl<'a> ScanDecoder<'a> {
                   width, height, components, pixel_stride);
 
         // Initialize line buffer with 2 lines
-        // Initialize line buffer with median value for better prediction
-        // For JPEG-LS, using midpoint value (128 for 8-bit, 32768 for 16-bit)
-        // This matches common JPEG-LS implementations and minimizes initial prediction error
-        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
+        // For JPEG-LS compatibility with CharLS, initialize previous line to 0
+        // CharLS uses 0 initialization for the first line, which differs from
+        // the ITU-T T.87 spec recommendation of 2^(P-1). Using 0 ensures
+        // compatibility with CharLS-encoded files.
+        let init_value = T::from_i32(0);
         let mut line_buffer: Vec<T> = vec![init_value; components * pixel_stride * 2];
 
         for line in 0..height {
@@ -270,7 +271,14 @@ impl<'a> ScanDecoder<'a> {
 
             let qs = self.compute_context_id(q1, q2, q3);
 
-            if qs != 0 {
+            // CharLS uses REGULAR mode for the first pixel of the first line,
+            // even when qs=0. This is because run mode would expect a run of
+            // pixels matching Ra, but the first pixel has no meaningful Ra.
+            // For compatibility with CharLS-encoded files, we force regular mode
+            // for the very first pixel.
+            let use_regular_mode = qs != 0 || (is_first_line && index == 1);
+            
+            if use_regular_mode {
                 debug_log!("    Regular mode: index={}, qs={}", index, qs);
                 let predicted = self.compute_predicted_value(ra, rb, rc);
                 let error_value = self.decode_regular::<T>(qs, predicted)?;
@@ -326,15 +334,35 @@ impl<'a> ScanDecoder<'a> {
     fn decode_mapped_error_value(&mut self, k: i32) -> Result<i32, JpeglsError> {
         let mut value = 0;
         let mut bit_count = 0;
+        
+        // LIMIT parameter: 2 * (bpp + max(8, bpp)) = 32 for 8-bit
+        let limit = self.coding_parameters.limit;
+        let qbpp = self._quantized_bits_per_sample;
+        let limit_threshold = limit - qbpp - 1;  // 32 - 8 - 1 = 23 for 8-bit
 
-        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}", 
-                  k, self.read_cache, self.valid_bits, self.position);
+        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}, limit_threshold={}", 
+                  k, self.read_cache, self.valid_bits, self.position, limit_threshold);
 
         // Read unary code (count zeros until we hit a 1)
         while self.peek_bits(1)? == 0 {
             value += 1;
             bit_count += 1;
             self.skip_bits(1)?;
+            
+            // Check for limited-length encoding (ITU-T T.87 A.5.3)
+            // If we've counted limit_threshold zeros, use limited encoding
+            if bit_count >= limit_threshold {
+                // Limited-length Golomb encoding
+                // Skip the terminating '1' bit
+                self.skip_bits(1)?;
+                // Read qbpp bits as (MErrval - 1)
+                let low_bits = self.read_bits(qbpp)?;
+                value = low_bits + 1;
+                debug_log!("    Golomb decode (LIMITED): unary={}, qbpp={}, low_bits={}, result={}", 
+                          bit_count, qbpp, low_bits, value);
+                return Ok(value);
+            }
+            
             if bit_count > 32 {
                 debug_log!("    Golomb: unary code too long (>32 zeros)");
                 return Err(JpeglsError::InvalidData);
@@ -342,7 +370,7 @@ impl<'a> ScanDecoder<'a> {
         }
         self.skip_bits(1)?;  // Skip the terminating 1
 
-        // Read fixed-length remainder
+        // Normal Golomb encoding: read fixed-length remainder
         if k > 0 {
             let remainder = self.read_bits(k)?;
             value = (value << k) | remainder;
@@ -356,10 +384,15 @@ impl<'a> ScanDecoder<'a> {
     }
 
     fn unmap_error_value(&self, mapped_value: i32) -> i32 {
+        // CharLS uses inverted mapping from standard JPEG-LS:
+        // - MErrval odd means positive error: error = (MErrval + 1) / 2
+        // - MErrval even means negative or zero error: error = -(MErrval / 2)
         if (mapped_value & 1) == 0 {
-            mapped_value >> 1
+            // Even: negative or zero
+            -(mapped_value >> 1)
         } else {
-            -((mapped_value + 1) >> 1)
+            // Odd: positive
+            (mapped_value + 1) >> 1
         }
     }
 
@@ -439,12 +472,7 @@ impl<'a> ScanDecoder<'a> {
     fn read_bits(&mut self, count: i32) -> Result<i32, JpeglsError> {
         let val = self.peek_bits(count)?;
         self.skip_bits(count)?;
-        
-        #[cfg(debug_assertions)]
-        {
-            self.bits_consumed += count as usize;
-        }
-        
+        // Note: bits_consumed is already incremented in skip_bits()
         Ok(val)
     }
 
