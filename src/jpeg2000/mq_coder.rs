@@ -377,10 +377,10 @@ impl MqCoder {
                         self.buffer_byte = b;
                         self.src_pos += 1; // consume b_next (stuffing or data)
                         self.ct = 7; // ISO 15444-1 C.3.1: "cT is set to 7" if 0xFF
-                        // Actually, if 0xFF 0x00, we load 0xFF. cT should be 7?
-                        // "If the byte is 0xFF, the next byte is examined... if 0x00, B = 0xFF, cT = 7, advance."
-                        // My code had cT=8. This shifts 8 bits?
-                        // If B=FF, only 7 bits are used.
+                                     // Actually, if 0xFF 0x00, we load 0xFF. cT should be 7?
+                                     // "If the byte is 0xFF, the next byte is examined... if 0x00, B = 0xFF, cT = 7, advance."
+                                     // My code had cT=8. This shifts 8 bits?
+                                     // If B=FF, only 7 bits are used.
                     }
                 } else {
                     self.buffer_byte = 0xFF;
@@ -580,6 +580,28 @@ impl MqCoder {
         self.c &= 0x7FFFF;
         self.bp.push(b_out);
         self.bp_idx += 1;
+    }
+
+    /// Flush the encoder - must be called after encoding to finalize the bitstream
+    /// Per JPEG2000 spec C.2.9
+    pub fn flush(&mut self) {
+        // Set bits in c to 1 (SETBITS procedure)
+        let temp = self.c + self.a as u32;
+        self.c |= 0xFFFF;
+        if self.c >= temp {
+            self.c -= 0x8000;
+        }
+
+        // Shift out the final bytes
+        self.c <<= self.ct;
+        self.byte_out();
+        self.c <<= self.ct;
+        self.byte_out();
+
+        // Remove trailing 0xFF if present (marker avoidance)
+        while self.bp.len() > 1 && *self.bp.last().unwrap_or(&0) == 0xFF {
+            self.bp.pop();
+        }
     }
 
     pub fn get_buffer(&self) -> &[u8] {

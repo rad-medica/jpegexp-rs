@@ -370,8 +370,8 @@ impl J2kImage {
                             let factor_common = 2.0f32.powi(base_exp as i32 - derived_exp as i32);
 
                             (
-                                base_step_ll * factor_common, // HL
-                                base_step_ll * factor_common, // LH
+                                base_step_ll * factor_common,       // HL
+                                base_step_ll * factor_common,       // LH
                                 base_step_ll * factor_common * 2.0, // HH
                             )
                         }
@@ -381,9 +381,18 @@ impl J2kImage {
                         let idx_lh = idx_hl + 1;
                         let idx_hh = idx_hl + 2;
                         (
-                            decode_step_val(qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)], false),
-                            decode_step_val(qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)], false),
-                            decode_step_val(qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)], true),
+                            decode_step_val(
+                                qcd.step_sizes[idx_hl.min(qcd.step_sizes.len() - 1)],
+                                false,
+                            ),
+                            decode_step_val(
+                                qcd.step_sizes[idx_lh.min(qcd.step_sizes.len() - 1)],
+                                false,
+                            ),
+                            decode_step_val(
+                                qcd.step_sizes[idx_hh.min(qcd.step_sizes.len() - 1)],
+                                true,
+                            ),
                         )
                     };
 
@@ -411,52 +420,51 @@ impl J2kImage {
         // Apply Multiple Component Transform (MCT) if enabled
         let cod = self.cod.as_ref().ok_or("No COD marker")?;
         if cod.mct == 1 && component_buffers.len() >= 3 {
-             let count = component_buffers[0].len();
-             if component_buffers[1].len() == count && component_buffers[2].len() == count {
-                 if cod.transformation == 1 {
-                     // Reversible (RCT)
-                     // G = Y - floor((Cb + Cr) / 4)
-                     // R = Cr + G
-                     // B = Cb + G
-                     for i in 0..count {
-                         let y = component_buffers[0][i] as i32;
-                         let cb = component_buffers[1][i] as i32;
-                         let cr = component_buffers[2][i] as i32;
+            let count = component_buffers[0].len();
+            if component_buffers[1].len() == count && component_buffers[2].len() == count {
+                if cod.transformation == 1 {
+                    // Reversible (RCT)
+                    // G = Y - floor((Cb + Cr) / 4)
+                    // R = Cr + G
+                    // B = Cb + G
+                    for i in 0..count {
+                        let y = component_buffers[0][i] as i32;
+                        let cb = component_buffers[1][i] as i32;
+                        let cr = component_buffers[2][i] as i32;
 
-                         let g = y - ((cb + cr) >> 2);
-                         let r = cr + g;
-                         let b = cb + g;
+                        let g = y - ((cb + cr) >> 2);
+                        let r = cr + g;
+                        let b = cb + g;
 
-                         component_buffers[0][i] = r as f32;
-                         component_buffers[1][i] = g as f32;
-                         component_buffers[2][i] = b as f32;
-                     }
-                 } else {
-                     // Irreversible (ICT)
-                     // R = Y + 1.402 * Cr
-                     // G = Y - 0.34413 * Cb - 0.71414 * Cr
-                     // B = Y + 1.772 * Cb
-                     for i in 0..count {
-                         let y = component_buffers[0][i];
-                         let cb = component_buffers[1][i];
-                         let cr = component_buffers[2][i];
+                        component_buffers[0][i] = r as f32;
+                        component_buffers[1][i] = g as f32;
+                        component_buffers[2][i] = b as f32;
+                    }
+                } else {
+                    // Irreversible (ICT)
+                    // R = Y + 1.402 * Cr
+                    // G = Y - 0.34413 * Cb - 0.71414 * Cr
+                    // B = Y + 1.772 * Cb
+                    for i in 0..count {
+                        let y = component_buffers[0][i];
+                        let cb = component_buffers[1][i];
+                        let cr = component_buffers[2][i];
 
-                         let r = y + 1.402 * cr;
-                         let g = y - 0.34413 * cb - 0.71414 * cr;
-                         let b = y + 1.772 * cb;
+                        let r = y + 1.402 * cr;
+                        let g = y - 0.34413 * cb - 0.71414 * cr;
+                        let b = y + 1.772 * cb;
 
-                         component_buffers[0][i] = r;
-                         component_buffers[1][i] = g;
-                         component_buffers[2][i] = b;
-                     }
-                 }
-             }
+                        component_buffers[0][i] = r;
+                        component_buffers[1][i] = g;
+                        component_buffers[2][i] = b;
+                    }
+                }
+            }
         }
 
         // Finalize: Level Shift, Clamp, and Interleave
         // Output format is Interleaved (e.g. RGBRGB...)
-        let cod = self.cod.as_ref().ok_or("No COD marker")?;
-        let is_reversible = cod.transformation == 1;
+        let _cod = self.cod.as_ref().ok_or("No COD marker")?;
 
         for i in 0..pixels_per_component {
             for (c, buffer) in component_buffers.iter().enumerate() {
@@ -474,15 +482,9 @@ impl J2kImage {
                 let level_offset = (1 << (depth - 1)) as f32;
                 let scale_div = (1 << shift) as f32;
 
-                let v = if is_reversible {
-                     buffer[i] / 2.0
-                } else {
-                     buffer[i]
-                };
+                let v = buffer[i];
 
-                let val = ((v + level_offset) / scale_div)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                let val = ((v + level_offset) / scale_div).round().clamp(0.0, 255.0) as u8;
 
                 let dest_idx = i * self.component_count as usize + c;
                 if dest_idx < pixels.len() {

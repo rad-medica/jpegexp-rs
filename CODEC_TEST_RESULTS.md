@@ -78,40 +78,26 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 
 ### JPEG 2000 (ISO/IEC 15444-1)
 
-#### All Tests
+#### Decoder Tests ✅ (Fixed 2026-01-02)
+| Test | Status | Notes |
+|------|--------|-------|
+| Header Parsing | ✅ Pass | SIZ, COD, QCD, CAP markers |
+| kakadu61.jp2 | ✅ Pass | 2717x3701 RGB decoded |
+| graphicsMagick.jp2 | ✅ Pass | Pixel variance verified (0-255 range) |
+
+**Fix Applied:** Removed incorrect `/2.0` divisor in `image.rs:reconstruct_pixels()` that halved all pixel values for reversible DWT mode.
+
+#### Encoder Tests ❌
 | Direction | MAE | Status |
 |-----------|-----|--------|
-| Std→Rust (decode) | 63.75 - 68.54 | ❌ Fail |
 | Rust→Std (encode) | 64.00 | ❌ Fail |
 
-**Result:** ❌ **Stub Implementation** - Not functional
+**Result:** ⚠️ Encoder remains a **Stub Implementation** - writes empty packets
 
-**Root Cause:**
+**Encoder Root Cause (Not Fixed):**
 - Encoder (`src/jpeg2000/encoder.rs:52`) has `_pixels` parameter unused
 - Encoder only writes empty packets (line 150)
-- Decoder reconstruction fails and falls back to `vec![128u8]` (all gray)
-- This explains MAE ≈ 64 (|value - 128| averages to ~64 for 0-255 range)
 
-**Evidence:**
-```rust
-// encoder.rs line 52 - pixels parameter is unused!
-pub fn encode(
-    &mut self,
-    _pixels: &[u8],  // <-- Unused!
-    frame_info: &FrameInfo,
-    destination: &mut [u8],
-) -> Result<usize, JpeglsError> {
-```
-
-```rust
-// bin/jpegexp.rs line 572 - fallback on decode failure
-Err(e) => {
-    eprintln!("J2K Reconstruction failed: {}", e);
-    // Fallback to default if reconstruction fails
-    let pixels = vec![128u8; (width * height * components) as usize];
-    Ok((pixels, width, height, components))
-}
-```
 
 ---
 

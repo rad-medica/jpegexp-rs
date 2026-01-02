@@ -93,7 +93,8 @@ impl<'a> BitPlaneCoder<'a> {
     fn get_zc_context(&self, band: u8, h: u8, v: u8, d: u8) -> usize {
         // Table C-2: Contexts for the significance propagation and cleanup passes
         match band {
-            0 | 2 => { // LL (0) and LH (2) - Vertical High Pass
+            0 | 2 => {
+                // LL (0) and LH (2) - Vertical High Pass
                 match (h, v, d) {
                     (2, _, _) => 8,
                     (1, v, _) if v >= 1 => 7,
@@ -106,7 +107,8 @@ impl<'a> BitPlaneCoder<'a> {
                     _ => 0,
                 }
             }
-            1 => { // HL (1) - Horizontal High Pass
+            1 => {
+                // HL (1) - Horizontal High Pass
                 match (v, h, d) {
                     (2, _, _) => 8,
                     (1, h, _) if h >= 1 => 7,
@@ -233,7 +235,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let (hc, vc, dc) = self.get_neighbors(x, y);
                         if hc > 0 || vc > 0 || dc > 0 {
                             // Decode significance bit
-                        let cx = self.get_zc_context(orientation, hc, vc, dc);
+                            let cx = self.get_zc_context(orientation, hc, vc, dc);
                             let bit = self.mq.decode_bit(cx);
 
                             if bit != 0 {
@@ -304,7 +306,11 @@ impl<'a> BitPlaneCoder<'a> {
         Ok(())
     }
 
-    fn decode_cleanup(&mut self, bit_plane: u8, orientation: u8) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
+    fn decode_cleanup(
+        &mut self,
+        bit_plane: u8,
+        orientation: u8,
+    ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
         // Scan in stripe order
         let stripe_height = 4;
         let width = self.width;
@@ -367,7 +373,11 @@ impl<'a> BitPlaneCoder<'a> {
         let get_sign_val = |pos: usize| -> i8 {
             let s = self.state[pos];
             if (s & Self::SIG) != 0 {
-                if (s & Self::SIGN) != 0 { -1 } else { 1 }
+                if (s & Self::SIGN) != 0 {
+                    -1
+                } else {
+                    1
+                }
             } else {
                 0
             }
@@ -443,13 +453,17 @@ impl<'a> BitPlaneCoder<'a> {
         let sigma_prime = if hc + vc + dc > 0 { 1 } else { 0 };
 
         if refined == 0 {
-            if sigma_prime == 1 { 15 } else { 14 }
+            if sigma_prime == 1 {
+                15
+            } else {
+                14
+            }
         } else {
             16
         }
     }
 
-    fn significance_propagation(&mut self, bit_plane: u8) {
+    pub fn significance_propagation(&mut self, bit_plane: u8) {
         // Iterate scan order (simple raster for simplicity, J2K stripes 4 rows)
         // Correct J2K is stripe order: 4 rows column-wise.
         let w = self.width;
@@ -498,7 +512,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    fn magnitude_refinement(&mut self, bit_plane: u8) {
+    pub fn magnitude_refinement(&mut self, bit_plane: u8) {
         let w = self.width;
         let h = self.height;
         for i in 0..(w * h) as usize {
@@ -518,7 +532,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    fn cleanup(&mut self, bit_plane: u8) {
+    pub fn cleanup(&mut self, bit_plane: u8) {
         // Encode remaining insignificant samples
         let w = self.width;
         let h = self.height;

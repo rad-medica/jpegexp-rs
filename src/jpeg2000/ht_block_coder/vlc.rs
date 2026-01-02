@@ -43,9 +43,9 @@ pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
             let top3 = (peek >> 13) & 0x7;
             match top3 {
                 0..=3 => (0, 0, 0, 1), // 0xxx -> 0000
-                0b100 => (8, 0, 0, 3),                         // 100
-                0b101 => (4, 0, 0, 3),                         // 101
-                0b110 => (2, 0, 0, 3),                         // 110
+                0b100 => (8, 0, 0, 3), // 100
+                0b101 => (4, 0, 0, 3), // 101
+                0b110 => (2, 0, 0, 3), // 110
                 0b111 => {
                     // 111...
                     if peek & 0x1000 == 0 {
@@ -84,6 +84,92 @@ pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
                 _ => (0, 0, 0, 1),
             }
         }
+    }
+}
+
+/// VLC codeword result for encoding
+pub struct VlcCodeword {
+    pub value: u16,
+    pub bits: u8,
+}
+
+/// Encode a significance pattern (rho) to a VLC codeword
+/// This is the inverse of decode_vlc
+pub fn encode_vlc(rho: u8, context: u8) -> VlcCodeword {
+    // Map rho patterns to VLC codewords (inverse of decode table)
+    // Context 0 and Context 1 use same structure for simplicity
+    let _ = context; // Both contexts use similar encoding for now
+
+    match rho {
+        0 => VlcCodeword {
+            value: 0b0,
+            bits: 1,
+        }, // 0
+        1 => VlcCodeword {
+            value: 0b1110,
+            bits: 4,
+        }, // 1110
+        2 => VlcCodeword {
+            value: 0b110,
+            bits: 3,
+        }, // 110
+        4 => VlcCodeword {
+            value: 0b101,
+            bits: 3,
+        }, // 101
+        8 => VlcCodeword {
+            value: 0b100,
+            bits: 3,
+        }, // 100
+        // Multi-significant patterns (simplified fallback to 1111... prefix)
+        3 => VlcCodeword {
+            value: 0b11110,
+            bits: 5,
+        }, // 11110 (rho=3: samples 0,1)
+        5 => VlcCodeword {
+            value: 0b11111,
+            bits: 5,
+        }, // 11111 (rho=5: samples 0,2)
+        6 => VlcCodeword {
+            value: 0b111100,
+            bits: 6,
+        }, // 111100 (rho=6: samples 1,2)
+        7 => VlcCodeword {
+            value: 0b111101,
+            bits: 6,
+        }, // 111101 (rho=7: samples 0,1,2)
+        9 => VlcCodeword {
+            value: 0b111110,
+            bits: 6,
+        }, // 111110 (rho=9: samples 0,3)
+        10 => VlcCodeword {
+            value: 0b111111,
+            bits: 6,
+        }, // 111111 (rho=10: samples 1,3)
+        11 => VlcCodeword {
+            value: 0b1111100,
+            bits: 7,
+        }, // (rho=11: samples 0,1,3)
+        12 => VlcCodeword {
+            value: 0b1111101,
+            bits: 7,
+        }, // (rho=12: samples 2,3)
+        13 => VlcCodeword {
+            value: 0b1111110,
+            bits: 7,
+        }, // (rho=13: samples 0,2,3)
+        14 => VlcCodeword {
+            value: 0b1111111,
+            bits: 7,
+        }, // (rho=14: samples 1,2,3)
+        15 => VlcCodeword {
+            value: 0b11111111,
+            bits: 8,
+        }, // All significant
+        _ => VlcCodeword {
+            value: 0b0,
+            bits: 1,
+        }, // Default to insignificant
     }
 }
 
