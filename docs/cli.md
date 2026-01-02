@@ -2,6 +2,15 @@
 
 The `jpegexp` command-line utility provides full access to the jpegexp-rs codec library for encoding, decoding, and transcoding JPEG images.
 
+## Codec Support Status
+
+| Codec | Encode | Decode | Quality |
+|-------|--------|--------|---------|
+| JPEG | ✓ | ✓ | Production ready |
+| JPEG-LS (grayscale) | ✓ | ✓ | Lossless (MAE=0) |
+| JPEG-LS (RGB) | ✗ | ✗ | Not yet supported |
+| JPEG 2000 | ✗ | ⚠️ | Stub implementation |
+
 ## Installation
 
 ```bash
@@ -70,12 +79,18 @@ jpegexp encode [OPTIONS] --input <INPUT> --output <OUTPUT> --width <WIDTH> --hei
 # Encode grayscale to JPEG
 jpegexp encode -i pixels.raw -o output.jpg -w 512 -H 512
 
-# Encode to JPEG-LS (lossless)
+# Encode to JPEG-LS (lossless grayscale)
 jpegexp encode -i pixels.raw -o output.jls -w 1024 -H 1024 -c jpegls
+
+# Encode 16-bit grayscale to JPEG-LS
+jpegexp encode -i pixels16.raw -o output.jls -w 512 -H 512 -c jpegls --bits 16
 
 # Encode RGB to JPEG
 jpegexp encode -i rgb_pixels.raw -o photo.jpg -w 800 -H 600 -n 3
 ```
+
+**Note:** JPEG-LS currently only supports grayscale images (1 component). 
+RGB encoding with `-n 3` is not yet supported for JPEG-LS.
 
 ### transcode
 

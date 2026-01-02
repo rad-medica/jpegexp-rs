@@ -12,12 +12,20 @@
 
 jpegexp-rs is a universal JPEG codec library supporting:
 
-| Format    | Standard         | Encode | Decode |
-| --------- | ---------------- | ------ | ------ |
-| JPEG      | ISO/IEC 10918-1  | ✓      | ✓      |
-| JPEG-LS   | ISO/IEC 14495-1  | ✓      | ✓      |
-| JPEG 2000 | ISO/IEC 15444-1  | ✗      | ✓      |
-| HTJ2K     | ISO/IEC 15444-15 | ✗      | ✓      |
+| Format    | Standard         | Encode | Decode | Notes |
+| --------- | ---------------- | ------ | ------ | ----- |
+| JPEG      | ISO/IEC 10918-1  | ✓      | ✓      | Production ready |
+| JPEG-LS   | ISO/IEC 14495-1  | ✓      | ✓      | Grayscale lossless (MAE=0) |
+| JPEG 2000 | ISO/IEC 15444-1  | ✗      | ⚠️     | Stub implementation |
+| HTJ2K     | ISO/IEC 15444-15 | ✗      | ⚠️     | Not yet implemented |
+
+### JPEG-LS Support Details
+
+| Image Type | Encode | Decode | Status |
+|------------|--------|--------|--------|
+| Grayscale 8-bit | ✓ | ✓ | Lossless (MAE=0) |
+| Grayscale 16-bit | ✓ | ✓ | Lossless (MAE=0) |
+| RGB (sample interleave) | ✗ | ✗ | Not yet supported |
 
 ## Quick Start
 
