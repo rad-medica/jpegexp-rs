@@ -102,15 +102,23 @@ impl J2kEncoder {
 
         // Create QCD marker
         let num_subbands = 1 + 3 * self.decomposition_levels as usize; // LL + 3 per level
+        let guard_bits = 1;
+        let quant_style = (guard_bits << 5) | if self.use_irreversible { 2 } else { 0 };
         
         let qcd = J2kQcd {
-            quant_style: if self.use_irreversible { 2 } else { 0 }, // 2=expounded, 0=no quant
+            quant_style, 
             step_sizes: if self.use_irreversible {
                  let base_step = self.calculate_step_size(depth);
                  (0..num_subbands).map(|i| self.encode_step_size(base_step, i)).collect()
             } else {
                  // Reversible: Exponent = depth + 1 (guard bit)
-                 vec![(depth as u16 + 1) << 3; num_subbands]
+                 // Or rather: Exponent = bit depth of the subband range?
+                 // Standard says for 5-3: exponent = dynamic range.
+                 // Depth 8 -> Range 8. + 1 guard = 9?
+                 // Let's use (depth + guard) << 3 ?
+                 // No, Exponent field in QCD is 5 bits.
+                 // Val = (exponent << 3).
+                 vec![((depth as u16 + guard_bits as u16) << 3); num_subbands]
             },
         };
         writer.write_qcd(&qcd)?;
@@ -270,6 +278,7 @@ impl J2kEncoder {
         depth: u8,
     ) -> Result<Vec<Vec<u8>>, JpeglsError> {
         let mut packets = Vec::new();
+        let guard_bits = 1;
         
         let mut dims = vec![(width, height)];
         for _ in 0..num_levels {
@@ -331,16 +340,39 @@ impl J2kEncoder {
                         let max_val = cb_coeffs.iter().map(|&v| v.abs()).max().unwrap_or(0);
                         if max_val > 0 {
                             let mut bpc = super::bit_plane_coder::BitPlaneCoder::new(w as u32, h as u32, &cb_coeffs);
-                        let msb = (max_val as f32).log2().ceil() as u8;
-                        let num_bitplanes = msb;
-                        // Correct zero_bp calculation based on QCD M_b?
-                        // For now assuming M_b approx depth + 1 + gain?
-                        // Let's just use 0 zero_bp and assume we encode from true MSB?
-                        // But decoder expects to start at M_b - zero_bp.
-                        // If M_b is 9, and we encode 9 planes, zero_bp=0.
-                        // If we encode 10 planes, we have a problem.
-                        // Let's cap at 30?
-                        let zero_bp = 0; // Simplified
+                        let msb = if max_val > 0 {
+                            (max_val as f32).log2().floor() as u8
+                        } else {
+                            0
+                        };
+                        // Bitplane index is 0..msb. Count is msb+1.
+                        // e.g. 127 -> log2=6.9 -> floor=6. 0..6 is 7 planes.
+                        let num_bitplanes = if max_val > 0 { msb + 1 } else { 0 };
+                        
+                        // Guard=1. Depth=8. M_b = 8 + 1 - 1 = 8.
+                        // Decoder max_bp = M_b - 1 - zero_bp = 7 - zero_bp.
+                        // We want max_bp = msb.
+                        // msb = 7 - zero_bp => zero_bp = 7 - msb.
+                        // For 127: msb=6. zero_bp = 7 - 6 = 1.
+                        // check: max_bp = 7 - 1 = 6. Correct.
+                        // For 255: msb=7. zero_bp = 7 - 7 = 0.
+                        // check: max_bp = 7 - 0 = 7. Correct.
+                        // For 28: msb=4. zero_bp = 7 - 4 = 3.
+                        // check: max_bp = 7 - 3 = 4. Correct.
+                        // General formula: zero_bp = (depth + guard - 1 - 1) - msb = depth + guard - 2 - msb.
+                        // Wait, M_b formula in decoder:
+                        // m_b = guard_bits + depth - 1. (if reversible)
+                        // max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp)
+                        // max_bp = guard + depth - 2 - zero_bp.
+                        // msb = guard + depth - 2 - zero_bp
+                        // zero_bp = guard + depth - 2 - msb.
+                        // For Depth 8, Guard 1: zero_bp = 1 + 8 - 2 - msb = 7 - msb.
+                        
+                        let zero_bp = if max_val > 0 {
+                            (depth + guard_bits - 2).saturating_sub(msb)
+                        } else {
+                            0 // Doesn't matter for empty
+                        };
 
                             
                             // Determine orientation for context (LL=0, HL=1, LH=2, HH=3)
