@@ -467,6 +467,12 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         self.valid_bits -= count;
+        
+        #[cfg(debug_assertions)]
+        {
+            self.bits_consumed += count as usize;
+        }
+        
         Ok(())
     }
 
@@ -549,9 +555,15 @@ impl<'a> ScanDecoder<'a> {
         debug_log!("    decode_run_mode: start_index={}, width={}", start_index, width);
         loop {
             let run_index_val = crate::constants::J[self.run_index];
+            #[cfg(debug_assertions)]
+            let bits_before = self.bits_consumed;
             let bit = self.read_bits(1)?;
+            #[cfg(debug_assertions)]
+            debug_log!("      [bit {}] run_index={}, J={}, bit={}, run_length={}", 
+                      bits_before, self.run_index, run_index_val, bit, run_length);
             if bit == 1 {
                 let length = 1 << run_index_val;
+                debug_log!("      → Full run of {} pixels", length);
                 let mut hit_width = false;
                 for i in 0..length {
                     let i_usize = i as usize;
@@ -569,6 +581,7 @@ impl<'a> ScanDecoder<'a> {
                 if hit_width || start_index + run_length >= width {
                     // Clamp run_length to match width exactly
                     run_length = width - start_index;
+                    debug_log!("      → Hit width, clamping run_length to {}", run_length);
                     if self.run_index < 31 {
                          self.run_index += 1;
                     }
@@ -579,6 +592,7 @@ impl<'a> ScanDecoder<'a> {
                 }
             } else {
                 let remainder = self.read_bits(run_index_val)?;
+                debug_log!("      → Partial run of {} pixels", remainder);
                 let mut hit_width = false;
                 for i in 0..remainder {
                     let i_usize = i as usize;
@@ -591,6 +605,7 @@ impl<'a> ScanDecoder<'a> {
                 run_length += remainder as usize;
                 if hit_width || start_index + run_length >= width {
                     run_length = width - start_index;
+                    debug_log!("      → Hit width, clamping run_length to {}", run_length);
                     if self.run_index > 0 {
                         self.run_index -= 1;
                     }
