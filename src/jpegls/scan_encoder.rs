@@ -229,22 +229,6 @@ impl<'a> ScanEncoder<'a> {
         }
 
         while pixel_idx < width {
-            // Special handling for first line: after encoding first pixel,
-            // update prev_line to match so run mode can trigger for subsequent pixels
-            // This matches the decoder's behavior at scan_decoder.rs lines 247-256
-            if is_first_line && pixel_idx == 1 {
-                // For multi-component images, the first pixel starts at index 'components'
-                // (indices 0 to components-1 are boundary padding)
-                let first_pixel_value = curr_line[components];
-                for i in 0..prev_line.len() {
-                    prev_line[i] = first_pixel_value;
-                }
-                // Reload rb and rd after updating prev_line
-                for c in 0..components {
-                    rb[c] = prev_line[c].to_i32();
-                    rd[c] = prev_line[components + c].to_i32();
-                }
-            }
             let mut all_qs_zero = true;
             let mut component_qs = vec![0; components];
             let mut component_pred = vec![0; components];
@@ -280,7 +264,12 @@ impl<'a> ScanEncoder<'a> {
                 component_pred[c] = self.compute_predicted_value(ra, rb[c], rc);
             }
 
-            if !all_qs_zero {
+            // Per JPEG-LS spec and CharLS behavior: use REGULAR mode for the very
+            // first pixel (pixel_idx=0 on first line) even when all_qs_zero.
+            // Run mode requires a valid Ra (left neighbor) to propagate.
+            let use_run_mode = all_qs_zero && !(is_first_line && pixel_idx == 0);
+
+            if !use_run_mode {
                 for c in 0..components {
                     let idx = current_buf_idx + c;
                     let val = curr_line[idx].to_i32();
@@ -401,6 +390,8 @@ impl<'a> ScanEncoder<'a> {
             let k_clamped = k.min(31);
             self.append_to_bit_stream((mapped_error & ((1i32 << k_clamped) - 1)) as u32, k_clamped);
         } else {
+            // Escape mode: output (limit - qbpp - 1) zeros + 1, then (MErrval - 2) in qbpp bits
+            // CharLS uses (MErrval - 2) encoding for escape values
             let remaining = limit - qbpp;
             if remaining > 31 {
                 self.append_to_bit_stream(0, 31);
@@ -410,7 +401,7 @@ impl<'a> ScanEncoder<'a> {
                 self.append_to_bit_stream(1, remaining.min(31));
             }
             let qbpp_clamped = qbpp.min(31);
-            self.append_to_bit_stream(((mapped_error - 1) & ((1i32 << qbpp_clamped) - 1)) as u32, qbpp_clamped);
+            self.append_to_bit_stream(((mapped_error - 2) & ((1i32 << qbpp_clamped) - 1)) as u32, qbpp_clamped);
         }
     }
 

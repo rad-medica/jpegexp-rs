@@ -85,7 +85,7 @@ impl<'a> ScanDecoder<'a> {
             t2,
             t3,
             reset_threshold: reset,
-            _limit: 0,
+            _limit: coding_parameters.limit,
             _quantized_bits_per_sample: frame_info.bits_per_sample,
             _quantization_lut: Vec::new(),
             #[cfg(debug_assertions)]
@@ -242,21 +242,6 @@ impl<'a> ScanDecoder<'a> {
         let mut rd = prev_line[1].to_i32();
 
         while index <= width {
-            // Special handling for first line: after decoding first pixel,
-            // update prev_line to match so run mode can trigger for subsequent pixels
-            if is_first_line && index == 2 {
-                // Index 1 is the first decoded pixel (index 0 is boundary padding)
-                let first_pixel_value = curr_line[1];
-                for i in 0..prev_line.len() {
-                    prev_line[i] = first_pixel_value;
-                }
-                // Reload rb and rd after updating prev_line
-                // Index 0 and 1 are the first two pixels in the previous line buffer
-                rb = prev_line[0].to_i32();
-                rd = prev_line[1].to_i32();
-                debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
-            }
-            
             let ra = curr_line[index - 1].to_i32();
             let rc = rb;
             rb = rd;
@@ -272,7 +257,13 @@ impl<'a> ScanDecoder<'a> {
 
             let qs = self.compute_context_id(q1, q2, q3);
 
-            if qs != 0 {
+            // Per JPEG-LS spec and CharLS behavior: use REGULAR mode for the very
+            // first pixel (index=1 on first line) even when qs=0. Run mode requires
+            // a valid Ra (left neighbor) to propagate, which doesn't exist for the
+            // first pixel in the image.
+            let use_run_mode = qs == 0 && !(is_first_line && index == 1);
+
+            if !use_run_mode {
                 debug_log!("    Regular mode: index={}, qs={}", index, qs);
                 let predicted = self.compute_predicted_value(ra, rb, rc);
                 let error_value = self.decode_regular::<T>(qs, predicted)?;
@@ -328,15 +319,34 @@ impl<'a> ScanDecoder<'a> {
     fn decode_mapped_error_value(&mut self, k: i32) -> Result<i32, JpeglsError> {
         let mut value = 0;
         let mut bit_count = 0;
+        
+        // Limited-length Golomb code threshold
+        let limit = self._limit;
+        let qbpp = self._quantized_bits_per_sample;
+        let limit_threshold = limit - qbpp - 1;
 
-        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}", 
-                  k, self.read_cache, self.valid_bits, self.position);
+        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}, limit_threshold={}", 
+                  k, self.read_cache, self.valid_bits, self.position, limit_threshold);
 
         // Read unary code (count zeros until we hit a 1)
         while self.peek_bits(1)? == 0 {
             value += 1;
             bit_count += 1;
             self.skip_bits(1)?;
+            
+            // Check if we've reached the limit threshold (escape mode)
+            if bit_count >= limit_threshold {
+                // This is an escape sequence - read the terminating 1 and then qbpp bits
+                // Per ITU-T T.87 A.5.3: escape stores (MErrval - 1), so MErrval = escape + 1
+                // However, CharLS uses (MErrval - 2) for escape encoding, so MErrval = escape + 2
+                self.skip_bits(1)?;  // Skip the terminating 1
+                let escape_value = self.read_bits(qbpp)?;
+                value = escape_value + 2;  // CharLS encodes as (MErrval - 2)
+                debug_log!("    Golomb decode (escape): unary={}, escape_value={}, result={}", 
+                          bit_count, escape_value, value);
+                return Ok(value);
+            }
+            
             if bit_count > 32 {
                 debug_log!("    Golomb: unary code too long (>32 zeros)");
                 return Err(JpeglsError::InvalidData);
