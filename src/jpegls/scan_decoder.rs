@@ -243,19 +243,6 @@ impl<'a> ScanDecoder<'a> {
         let mut rd = prev_line[1].to_i32();
 
         while index <= width {
-            // Special handling for first line: after decoding first pixel,
-            // update prev_line to match so run mode can trigger for subsequent pixels
-            if is_first_line && index == 2 {
-                let first_pixel_value = curr_line[1];
-                for i in 0..prev_line.len() {
-                    prev_line[i] = first_pixel_value;
-                }
-                // Reload rb and rd after updating prev_line
-                rb = prev_line[0].to_i32();
-                rd = prev_line[1].to_i32();
-                debug_log!("    First line: Updated prev_line to {} for efficient run mode", first_pixel_value.to_i32());
-            }
-            
             let ra = curr_line[index - 1].to_i32();
             let rc = rb;
             rb = rd;
@@ -443,11 +430,12 @@ impl<'a> ScanDecoder<'a> {
                         // The 0xFF is already in the cache.
                         debug_log!("    Byte stuffing: FF 00 → FF (data)");
                     } else if next_byte == 0x7F {
-                        // Special case: FF 7F appears in CharLS-encoded files at scan end.
-                        // This might be scan termination padding or bit-stuffing variant.
-                        // Don't consume the 7F, just keep FF in cache and continue.
-                        // The 7F will be read in the next iteration if needed.
-                        debug_log!("    Special pattern: FF 7F detected, keeping FF as data");
+                        // In JPEG-LS, FF 7F means FF is data (no stuffing needed since
+                        // 7F has bit 7 = 0). Both bytes are valid entropy-coded data.
+                        // However, CharLS often places FF 7F at the end as fill bits.
+                        // We keep FF as data and continue reading normally.
+                        // The 7F will be read in the next iteration.
+                        debug_log!("    Pattern FF 7F: treating FF as data, 7F follows");
                     } else if Self::is_valid_jpeg_marker(next_byte) {
                         // Valid JPEG/JPEG-LS marker found (EOI, etc.)
                         // Back up, remove 0xFF from cache, and stop.

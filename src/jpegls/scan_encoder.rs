@@ -229,20 +229,6 @@ impl<'a> ScanEncoder<'a> {
         }
 
         while pixel_idx < width {
-            // Special handling for first line: after encoding first pixel,
-            // update prev_line to match so run mode can trigger for subsequent pixels
-            // This matches the decoder's behavior at scan_decoder.rs lines 247-256
-            if is_first_line && pixel_idx == 1 {
-                let first_pixel_value = curr_line[components];
-                for i in 0..prev_line.len() {
-                    prev_line[i] = first_pixel_value;
-                }
-                // Reload rb and rd after updating prev_line
-                for c in 0..components {
-                    rb[c] = prev_line[c].to_i32();
-                    rd[c] = prev_line[components + c].to_i32();
-                }
-            }
             let mut all_qs_zero = true;
             let mut component_qs = vec![0; components];
             let mut component_pred = vec![0; components];
