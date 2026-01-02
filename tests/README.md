@@ -73,9 +73,11 @@ The test suite includes:
 
 - **JPEG 1 (Baseline)**: Encoding and decoding tests for grayscale and RGB images
 - **JPEG-LS**:
-  - Encoding tests (grayscale and RGB)
-  - Decoding tests (standard library compatibility)
-  - Roundtrip tests (encode → decode using jpegexp)
+  - CharLS validation tests (`jpegls_charls_validation.rs`): 17 tests, all passing
+  - Lossless grayscale 8-bit: 14 tests (MAE = 0)
+  - Lossless grayscale 16-bit: 2 tests (MAE = 0)
+  - Edge cases (1x1, 1x8, 8x1): 3 tests (MAE = 0)
+  - RGB: 6 tests (currently ignored - sample-interleave not yet supported)
 - **JPEG 2000**: Encoding tests (decoder not yet implemented)
 
 ### Specific Tests

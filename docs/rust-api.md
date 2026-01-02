@@ -17,6 +17,14 @@ jpegexp-rs = "0.1.0"
 
 ## JPEG-LS
 
+**Status:** ✅ Production ready for grayscale (8-bit and 16-bit)
+
+| Image Type | Encode | Decode | Quality |
+|------------|--------|--------|---------|
+| Grayscale 8-bit | ✓ | ✓ | Lossless (MAE=0) |
+| Grayscale 16-bit | ✓ | ✓ | Lossless (MAE=0) |
+| RGB | ✗ | ✗ | Not yet supported |
+
 ### Decoding
 
 ```rust
@@ -29,7 +37,10 @@ fn decode_jpegls(data: &[u8]) -> Result<Vec<u8>, jpegexp_rs::JpeglsError> {
     let info = decoder.frame_info();
     println!("Image: {}x{}", info.width, info.height);
 
-    let size = (info.width * info.height * info.component_count as u32) as usize;
+    // Calculate buffer size (account for 16-bit samples)
+    let bytes_per_sample = if info.bits_per_sample > 8 { 2 } else { 1 };
+    let size = (info.width * info.height * info.component_count as u32) as usize 
+               * bytes_per_sample;
     let mut pixels = vec![0u8; size];
     decoder.decode(&mut pixels)?;
 

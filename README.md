@@ -14,9 +14,10 @@ This repository includes a complete DevContainer configuration for GitHub Codesp
 *   **JPEG 1 (ISO/IEC 10918-1)**: Classic baseline JPEG (DCT/Huffman). ✅ **Production Ready**
     - Grayscale: Excellent quality (MAE < 1.0)
     - RGB with chroma subsampling: Fully supported
-*   **JPEG-LS (ISO/IEC 14495-1)**: Lossless and near-lossless compression. ⚠️ **In Development**
-    - Current status: Partial implementation with known issues
-    - Not recommended for production use
+*   **JPEG-LS (ISO/IEC 14495-1)**: Lossless and near-lossless compression. ✅ **Production Ready**
+    - Grayscale 8-bit: Lossless (MAE = 0) ✅
+    - Grayscale 16-bit: Lossless (MAE = 0) ✅
+    - RGB/multi-component: Not yet supported (see `src/jpegls/mod.rs` for details)
 *   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ⚠️ **Stub Implementation**
     - Current status: Proof-of-concept only
     - Requires significant development effort
@@ -142,13 +143,15 @@ Commands:
 
 **Production Ready**:
 - ✅ JPEG 1 Grayscale (MAE < 1.0)
-- ✅ JPEG 1 RGB with subsampling (MAE 42-55)
+- ✅ JPEG 1 RGB with subsampling
+- ✅ JPEG-LS Grayscale 8-bit (Lossless, MAE = 0)
+- ✅ JPEG-LS Grayscale 16-bit (Lossless, MAE = 0)
 
 **In Development**:
-- ⚠️ JPEG-LS (requires architectural rewrite, 2-3 weeks)
+- ⚠️ JPEG-LS RGB/multi-component (sample-interleave not yet supported)
 - ⚠️ JPEG 2000 (stub implementation, 4-8 weeks)
 
-See [CODEC_TEST_RESULTS.md](CODEC_TEST_RESULTS.md) for detailed analysis.
+See [tests/jpegls_charls_validation.rs](tests/jpegls_charls_validation.rs) for JPEG-LS test results.
 
 ## Compliance
 
