@@ -561,7 +561,8 @@ impl MqCoder {
             self.ct -= 1;
             if self.ct == 0 {
                 self.byte_out();
-                self.ct = 8;
+                // ct is set by byte_out: 7 if previous byte was 0xFF, otherwise keep it
+                // We don't reset to 8 here; byte_out handles it
             }
             if self.a >= 0x8000 {
                 break;
@@ -570,15 +571,25 @@ impl MqCoder {
     }
 
     fn byte_out(&mut self) {
-        if self.bp_idx == 0 {
-            // First byte?
-        }
         let b_out = (self.c >> 19) as u8;
-        if b_out == 0xFF {
-            self.ct = 7;
-        }
         self.c &= 0x7FFFF;
-        self.bp.push(b_out);
+        
+        // Check if previous byte was 0xFF
+        let prev_was_ff = !self.bp.is_empty() && *self.bp.last().unwrap() == 0xFF;
+        
+        if prev_was_ff {
+            // After 0xFF, only 7 bits are used (bit stuffing)
+            // The MSB of this byte should be 0
+            self.bp.push(b_out & 0x7F);
+            self.ct = 8; // Reset to 8 for next byte
+        } else {
+            self.bp.push(b_out);
+            if b_out == 0xFF {
+                self.ct = 7; // Next byte_out will use only 7 bits
+            } else {
+                self.ct = 8;
+            }
+        }
         self.bp_idx += 1;
     }
 

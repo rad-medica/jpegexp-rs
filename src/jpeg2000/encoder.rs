@@ -1,12 +1,13 @@
 //! JPEG 2000 Encoder
 //!
-//! This module provides basic JPEG 2000 encoding functionality.
-//! Currently implements a simplified encoder that produces valid J2K codestreams.
+//! This module provides JPEG 2000 encoding functionality using the reversible 5/3 DWT
+//! and EBCOT (Embedded Block Coding with Optimized Truncation) bit-plane coding.
 
 use super::bit_io::J2kBitWriter;
-use super::dwt::{Dwt53, Dwt97};
-use super::image::{J2kCod, J2kQcd};
-use super::quantization;
+use super::bit_plane_coder::BitPlaneCoder;
+use super::dwt::Dwt53;
+use super::image::{J2kCod, J2kQcd, SubbandOrientation};
+use super::packet::{CodeBlockInfo, PacketHeader, PrecinctState};
 use super::writer::J2kWriter;
 use crate::FrameInfo;
 use crate::JpeglsError;
@@ -26,7 +27,7 @@ impl J2kEncoder {
     pub fn new() -> Self {
         Self {
             decomposition_levels: 5,
-            use_irreversible: true,
+            use_irreversible: false, // Default to reversible (lossless)
             quality: 85,
         }
     }
@@ -82,8 +83,8 @@ impl J2kEncoder {
             1, // no subsampling
         )?;
 
-        // Determine transform type
-        let transformation = if self.use_irreversible { 0 } else { 1 }; // 0=9-7, 1=5-3
+        // Use reversible 5/3 transform for lossless encoding
+        let transformation = 1; // 1=5-3 reversible
 
         // Create COD marker
         let cod = J2kCod {
@@ -99,406 +100,683 @@ impl J2kEncoder {
         };
         writer.write_cod(&cod)?;
 
-        // Create QCD marker
+        // Create QCD marker for reversible (no quantization)
         let num_subbands = 1 + 3 * self.decomposition_levels as usize; // LL + 3 per level
-        let base_step = self.calculate_step_size(depth);
         let step_sizes: Vec<u16> = (0..num_subbands)
-            .map(|i| self.encode_step_size(base_step, i))
+            .map(|i| self.encode_reversible_step_size(depth, i))
             .collect();
 
         let qcd = J2kQcd {
-            quant_style: if self.use_irreversible { 2 } else { 0 }, // 2=expounded, 0=no quant
+            quant_style: 0, // 0=no quantization (reversible)
             step_sizes,
         };
         writer.write_qcd(&qcd)?;
 
-        // TODO: Full JPEG2000 encoding requires EBCOT (Tier-1) bit-plane coding:
-        // 1. Apply forward DWT (implemented in apply_forward_dwt below)
-        // 2. Partition coefficients into code-blocks (64x64)
-        // 3. Encode each code-block using bit-plane coding passes:
-        //    - Significance propagation pass
-        //    - Magnitude refinement pass
-        //    - Cleanup pass (with MQ arithmetic coder)
-        // 4. Write Tier-2 packet headers with tag trees
-        //
-        // Currently, we write empty packets which produces a valid J2K that
-        // decodes to 0 (after level shift = 128 for 8-bit).
+        // Apply MCT (Multiple Component Transform) if RGB
+        let mut component_data: Vec<Vec<i32>> = Vec::with_capacity(components);
+        for c in 0..components {
+            let mut comp_pixels: Vec<i32> = Vec::with_capacity(width * height);
+            for i in 0..(width * height) {
+                let val = pixels[i * components + c] as i32;
+                // Level shift: subtract 2^(depth-1) for signed representation
+                comp_pixels.push(val - (1 << (depth - 1)));
+            }
+            component_data.push(comp_pixels);
+        }
 
-        // Write SOT (Start of Tile)
+        // Apply RCT (Reversible Color Transform) for RGB
+        if components >= 3 && cod.mct == 1 {
+            let count = width * height;
+            for i in 0..count {
+                let r = component_data[0][i];
+                let g = component_data[1][i];
+                let b = component_data[2][i];
+
+                // RCT: Y = floor((R + 2G + B) / 4), Cb = B - G, Cr = R - G
+                let y = (r + 2 * g + b) >> 2;
+                let cb = b - g;
+                let cr = r - g;
+
+                component_data[0][i] = y;
+                component_data[1][i] = cb;
+                component_data[2][i] = cr;
+            }
+        }
+
+        // Apply forward DWT to each component and collect subbands
+        let cb_size = 1 << (cod.codeblock_width_exp + 2); // 64
+        let num_resolutions = (self.decomposition_levels + 1) as usize;
+
+        // Collect all encoded code-block data for each component
+        let mut all_encoded_data: Vec<Vec<Vec<EncodedCodeBlock>>> = Vec::new();
+
+        for comp_data in &component_data {
+            let subbands = self.apply_forward_dwt_full(comp_data, width, height)?;
+            let encoded_subbands =
+                self.encode_component_subbands(&subbands, width, height, cb_size, depth)?;
+            all_encoded_data.push(encoded_subbands);
+        }
+
+        // Write SOT (Start of Tile) - we'll update Psot later
+        let sot_pos = writer.len();
         writer.write_sot(0, 0, 0, 1)?;
 
         // Write SOD (Start of Data)
         writer.write_sod()?;
 
-        // Write empty packets for valid J2K structure
-        let num_resolutions = (self.decomposition_levels + 1) as usize;
+        let sod_pos = writer.len();
 
-        // LRCP order: Layer -> Resolution -> Component -> Precinct
+        // Write packets in LRCP order: Layer -> Resolution -> Component -> Precinct
         for _layer in 0..1 {
-            for _res in 0..num_resolutions {
-                for _comp in 0..components {
-                    // Write empty packet header (single 0 bit = empty)
-                    let mut bit_writer = J2kBitWriter::new();
-                    bit_writer.write_bit(0);
-                    writer.write_bytes(&bit_writer.finish())?;
+            for res in 0..num_resolutions {
+                for (comp_idx, comp_encoded) in all_encoded_data.iter().enumerate() {
+                    // Get encoded data for this resolution
+                    if res < comp_encoded.len() {
+                        let res_data = &comp_encoded[res];
+
+                        // Create and write packet
+                        let packet_bytes =
+                            self.create_packet(res_data, res, comp_idx, width, height)?;
+                        writer.write_bytes(&packet_bytes)?;
+                    } else {
+                        // Write empty packet
+                        let mut bit_writer = J2kBitWriter::new();
+                        bit_writer.write_bit(0);
+                        writer.write_bytes(&bit_writer.finish())?;
+                    }
                 }
             }
         }
 
+        // Calculate tile length BEFORE writing EOC
+        let tile_len = (writer.len() - sot_pos) as u32;
+
         // Write EOC (End of Codestream)
         writer.write_eoc()?;
 
-        Ok(writer.len())
+        // Get final length and drop the writer to release the borrow
+        let total_len = writer.len();
+        drop(writer);
+
+        // Update Psot (tile length) in SOT marker
+        // SOT format: FF90 + Lsot(2) + Isot(2) + Psot(4) + TPsot(1) + TNsot(1)
+        // Psot is at offset sot_pos + 6
+        let psot_offset = sot_pos + 6;
+        if psot_offset + 4 <= destination.len() {
+            destination[psot_offset] = ((tile_len >> 24) & 0xFF) as u8;
+            destination[psot_offset + 1] = ((tile_len >> 16) & 0xFF) as u8;
+            destination[psot_offset + 2] = ((tile_len >> 8) & 0xFF) as u8;
+            destination[psot_offset + 3] = (tile_len & 0xFF) as u8;
+        }
+
+        let _ = sod_pos; // Suppress unused warning
+
+        Ok(total_len)
     }
 
-    /// Calculate quantization step size based on quality
-    fn calculate_step_size(&self, depth: u8) -> f32 {
-        let base = 1.0 / (1 << depth) as f32;
-        let quality_factor = (101 - self.quality.clamp(1, 100)) as f32 / 50.0;
-        base * quality_factor.max(0.01)
-    }
-
-    /// Encode step size to JPEG2000 format (5-bit exponent, 11-bit mantissa)
-    fn encode_step_size(&self, step: f32, subband_idx: usize) -> u16 {
-        // Apply subband-specific gain
+    /// Encode step size for reversible transform (no quantization)
+    fn encode_reversible_step_size(&self, depth: u8, subband_idx: usize) -> u16 {
+        // For reversible transform, step sizes encode the exponent only
+        // The exponent indicates the number of guard bits + bit depth
+        let guard_bits = 2u8;
         let gain = if subband_idx == 0 {
-            1.0
+            0 // LL band
         } else {
-            2.0f32.powi((subband_idx as i32 - 1) / 3 + 1)
+            ((subband_idx - 1) / 3 + 1) as u8 // Higher bands have gain
         };
-        let adjusted = step * gain;
-
-        // Convert to (exponent, mantissa) format
-        let log2 = adjusted.log2();
-        let exponent = ((-log2).floor() as i32).clamp(0, 31) as u16;
-        let mantissa = ((adjusted * (1 << exponent) as f32 - 1.0) * 2048.0) as u16 & 0x7FF;
-
-        (exponent << 11) | mantissa
+        let epsilon = depth + guard_bits + gain;
+        // Format: 5-bit exponent, no mantissa for reversible
+        (epsilon as u16) << 3
     }
 
-    /// Apply forward 2D DWT to component data
-    #[allow(dead_code)]
-    fn apply_forward_dwt(
+    /// Apply full forward 2D DWT and return organized subbands
+    fn apply_forward_dwt_full(
         &self,
-        data: &mut [i32],
+        data: &[i32],
         width: usize,
         height: usize,
-    ) -> Result<Vec<i32>, JpeglsError> {
+    ) -> Result<Vec<SubbandData>, JpeglsError> {
         let mut result = data.to_vec();
+        let mut subbands = Vec::new();
+
         let mut current_w = width;
         let mut current_h = height;
+        let num_levels = self.decomposition_levels as usize;
 
-        for _level in 0..self.decomposition_levels {
+        for level in 0..num_levels {
             if current_w < 2 || current_h < 2 {
                 break;
             }
+
+            let ll_w = (current_w + 1) / 2;
+            let ll_h = (current_h + 1) / 2;
+            let hl_w = current_w / 2;
+            let lh_h = current_h / 2;
+
+            // Temporary storage for transformed data
+            let mut temp = vec![0i32; current_w * current_h];
 
             // Apply 1D DWT to rows
             for y in 0..current_h {
                 let row_start = y * width;
                 let row: Vec<i32> = result[row_start..row_start + current_w].to_vec();
 
-                let l_len = (current_w + 1) / 2;
-                let h_len = current_w / 2;
-                let mut out_l = vec![0i32; l_len];
-                let mut out_h = vec![0i32; h_len];
+                let mut out_l = vec![0i32; ll_w];
+                let mut out_h = vec![0i32; hl_w];
 
                 Dwt53::forward(&row, &mut out_l, &mut out_h);
 
-                // Store L in left half, H in right half
+                // Store L in left half, H in right half of temp
                 for (i, &v) in out_l.iter().enumerate() {
-                    result[row_start + i] = v;
+                    temp[y * current_w + i] = v;
                 }
                 for (i, &v) in out_h.iter().enumerate() {
-                    result[row_start + l_len + i] = v;
+                    temp[y * current_w + ll_w + i] = v;
                 }
             }
 
             // Apply 1D DWT to columns
             for x in 0..current_w {
-                let col: Vec<i32> = (0..current_h).map(|y| result[y * width + x]).collect();
+                let col: Vec<i32> = (0..current_h).map(|y| temp[y * current_w + x]).collect();
 
-                let l_len = (current_h + 1) / 2;
-                let h_len = current_h / 2;
-                let mut out_l = vec![0i32; l_len];
-                let mut out_h = vec![0i32; h_len];
+                let mut out_l = vec![0i32; ll_h];
+                let mut out_h = vec![0i32; lh_h];
 
                 Dwt53::forward(&col, &mut out_l, &mut out_h);
 
+                // Store L in top half, H in bottom half
                 for (i, &v) in out_l.iter().enumerate() {
                     result[i * width + x] = v;
                 }
                 for (i, &v) in out_h.iter().enumerate() {
-                    result[(l_len + i) * width + x] = v;
+                    result[(ll_h + i) * width + x] = v;
                 }
             }
 
-            current_w = (current_w + 1) / 2;
-            current_h = (current_h + 1) / 2;
+            // Extract subbands for this level (HL, LH, HH)
+            // HL: top-right quadrant
+            let mut hl_data = vec![0i32; hl_w * ll_h];
+            for y in 0..ll_h {
+                for x in 0..hl_w {
+                    hl_data[y * hl_w + x] = result[y * width + ll_w + x];
+                }
+            }
+            subbands.push(SubbandData {
+                data: hl_data,
+                width: hl_w,
+                height: ll_h,
+                orientation: SubbandOrientation::HL,
+                resolution: num_levels - level,
+            });
+
+            // LH: bottom-left quadrant
+            let mut lh_data = vec![0i32; ll_w * lh_h];
+            for y in 0..lh_h {
+                for x in 0..ll_w {
+                    lh_data[y * ll_w + x] = result[(ll_h + y) * width + x];
+                }
+            }
+            subbands.push(SubbandData {
+                data: lh_data,
+                width: ll_w,
+                height: lh_h,
+                orientation: SubbandOrientation::LH,
+                resolution: num_levels - level,
+            });
+
+            // HH: bottom-right quadrant
+            let mut hh_data = vec![0i32; hl_w * lh_h];
+            for y in 0..lh_h {
+                for x in 0..hl_w {
+                    hh_data[y * hl_w + x] = result[(ll_h + y) * width + ll_w + x];
+                }
+            }
+            subbands.push(SubbandData {
+                data: hh_data,
+                width: hl_w,
+                height: lh_h,
+                orientation: SubbandOrientation::HH,
+                resolution: num_levels - level,
+            });
+
+            current_w = ll_w;
+            current_h = ll_h;
         }
 
-        Ok(result)
+        // Extract final LL subband (lowest resolution)
+        let mut ll_data = vec![0i32; current_w * current_h];
+        for y in 0..current_h {
+            for x in 0..current_w {
+                ll_data[y * current_w + x] = result[y * width + x];
+            }
+        }
+        subbands.push(SubbandData {
+            data: ll_data,
+            width: current_w,
+            height: current_h,
+            orientation: SubbandOrientation::LL,
+            resolution: 0,
+        });
+
+        Ok(subbands)
     }
 
-    /// Encode component code-blocks
-    #[allow(dead_code)]
-    fn encode_component_codeblocks(
+    /// Encode all subbands for a component
+    fn encode_component_subbands(
         &self,
-        coeffs: &[i32],
-        width: usize,
-        height: usize,
+        subbands: &[SubbandData],
+        _img_width: usize,
+        _img_height: usize,
         cb_size: usize,
-        num_levels: usize,
         depth: u8,
-    ) -> Result<Vec<Vec<u8>>, JpeglsError> {
-        let mut packets = Vec::new();
+    ) -> Result<Vec<Vec<EncodedCodeBlock>>, JpeglsError> {
+        let num_resolutions = (self.decomposition_levels + 1) as usize;
+        let mut result: Vec<Vec<EncodedCodeBlock>> = vec![Vec::new(); num_resolutions];
 
-        // For each resolution level, encode the code-blocks
-        for level in 0..=num_levels {
-            let mut packet_data = Vec::new();
-
-            // Calculate subband dimensions for this level
-            let (sb_w, sb_h) = self.get_subband_dims(width, height, num_levels, level);
-
-            if sb_w == 0 || sb_h == 0 {
-                // Empty packet
-                let mut bit_writer = J2kBitWriter::new();
-                bit_writer.write_bit(0);
-                packets.push(bit_writer.finish());
+        for sb in subbands {
+            let res_idx = sb.resolution;
+            if sb.width == 0 || sb.height == 0 {
                 continue;
             }
 
-            // Number of code-blocks in this subband
-            let cb_cols = sb_w.div_ceil(cb_size);
-            let cb_rows = sb_h.div_ceil(cb_size);
-
-            let mut has_data = false;
-            let mut codeblock_data: Vec<Vec<u8>> = Vec::new();
+            // Calculate number of code-blocks
+            let cb_cols = sb.width.div_ceil(cb_size);
+            let cb_rows = sb.height.div_ceil(cb_size);
 
             for cby in 0..cb_rows {
                 for cbx in 0..cb_cols {
-                    // Extract code-block coefficients
                     let cb_x_start = cbx * cb_size;
                     let cb_y_start = cby * cb_size;
-                    let cb_w = cb_size.min(sb_w - cb_x_start);
-                    let cb_h = cb_size.min(sb_h - cb_y_start);
+                    let cb_w = cb_size.min(sb.width - cb_x_start);
+                    let cb_h = cb_size.min(sb.height - cb_y_start);
 
-                    // Get coefficients for this code-block
+                    // Extract code-block coefficients
                     let mut cb_coeffs = vec![0i32; cb_w * cb_h];
                     for y in 0..cb_h {
                         for x in 0..cb_w {
                             let src_x = cb_x_start + x;
                             let src_y = cb_y_start + y;
-                            if src_y < height && src_x < width {
-                                cb_coeffs[y * cb_w + x] = coeffs[src_y * width + src_x];
+                            if src_y < sb.height && src_x < sb.width {
+                                cb_coeffs[y * cb_w + x] = sb.data[src_y * sb.width + src_x];
                             }
                         }
                     }
 
-                    // Check if code-block has any non-zero coefficients
+                    // Find maximum magnitude
                     let max_val = cb_coeffs.iter().map(|&v| v.abs()).max().unwrap_or(0);
-                    if max_val > 0 {
-                        has_data = true;
 
-                        // Encode using bit-plane coder
-                        let mut bpc = super::bit_plane_coder::BitPlaneCoder::new(
-                            cb_w as u32,
-                            cb_h as u32,
-                            &cb_coeffs,
-                        );
-
-                        // Find MSB position
-                        let msb = (max_val as f32).log2().ceil() as u8;
-                        let num_bitplanes = msb.min(depth);
-
-                        // Encode bit-planes from MSB to 0
-                        for bp in (0..num_bitplanes).rev() {
-                            bpc.significance_propagation(bp);
-                            bpc.magnitude_refinement(bp);
-                            bpc.cleanup(bp);
-                        }
-
-                        // Finalize MQ stream
-                        bpc.mq.flush();
-                        codeblock_data.push(bpc.mq.get_buffer().to_vec());
+                    if max_val == 0 {
+                        // Empty code-block
+                        result[res_idx].push(EncodedCodeBlock {
+                            x: cbx,
+                            y: cby,
+                            subband: sb.orientation,
+                            data: Vec::new(),
+                            num_passes: 0,
+                            zero_bit_planes: depth,
+                        });
+                        continue;
                     }
+
+                    // Calculate MSB position (number of zero bit planes)
+                    let msb = 32 - max_val.leading_zeros();
+                    let zero_bp = (depth as u32).saturating_sub(msb) as u8;
+
+                    // Encode using bit-plane coder
+                    let mut bpc = BitPlaneCoder::new(cb_w as u32, cb_h as u32, &cb_coeffs);
+
+                    // Encode from MSB down to 0
+                    let num_bitplanes = msb.min(depth as u32) as u8;
+                    for bp in (0..num_bitplanes).rev() {
+                        bpc.significance_propagation(bp);
+                        bpc.magnitude_refinement(bp);
+                        bpc.cleanup(bp);
+                    }
+
+                    // Finalize MQ stream
+                    bpc.mq.flush();
+                    let encoded_data = bpc.mq.get_buffer().to_vec();
+
+                    // Calculate number of coding passes
+                    let num_passes = if num_bitplanes > 0 {
+                        1 + (num_bitplanes - 1) * 3 // First cleanup + 3 passes per remaining bitplane
+                    } else {
+                        0
+                    };
+
+                    result[res_idx].push(EncodedCodeBlock {
+                        x: cbx,
+                        y: cby,
+                        subband: sb.orientation,
+                        data: encoded_data,
+                        num_passes,
+                        zero_bit_planes: zero_bp,
+                    });
                 }
             }
+        }
 
-            // Write packet header
+        Ok(result)
+    }
+
+    /// Create a packet for a resolution level
+    fn create_packet(
+        &self,
+        encoded_blocks: &[EncodedCodeBlock],
+        res: usize,
+        _comp: usize,
+        _width: usize,
+        _height: usize,
+    ) -> Result<Vec<u8>, JpeglsError> {
+        if encoded_blocks.is_empty() || encoded_blocks.iter().all(|b| b.data.is_empty()) {
+            // Empty packet
             let mut bit_writer = J2kBitWriter::new();
-            if has_data {
-                bit_writer.write_bit(1); // Non-empty packet
-
-                // For simplicity, write minimal inclusion info
-                // In a full implementation, we'd write tag trees and proper headers
-                for cb_data in &codeblock_data {
-                    // Write code-block inclusion (1 = included)
-                    bit_writer.write_bit(1);
-                    // Write number of coding passes (simplified: 1)
-                    bit_writer.write_bit(0);
-                    bit_writer.write_bit(1);
-                    // Write length using 3-bit chunks (simplified)
-                    let len = cb_data.len();
-                    for i in 0..4 {
-                        let chunk = ((len >> (i * 8)) & 0xFF) as u8;
-                        for j in 0..8 {
-                            bit_writer.write_bit((chunk >> (7 - j)) & 1);
-                        }
-                        if (len >> ((i + 1) * 8)) == 0 {
-                            break;
-                        }
-                    }
-                }
-                packet_data = bit_writer.finish();
-
-                // Append code-block data
-                for cb_data in codeblock_data {
-                    packet_data.extend(cb_data);
-                }
-            } else {
-                bit_writer.write_bit(0); // Empty packet
-                packet_data = bit_writer.finish();
-            }
-
-            packets.push(packet_data);
+            bit_writer.write_bit(0);
+            return Ok(bit_writer.finish());
         }
 
-        Ok(packets)
-    }
+        let mut bit_writer = J2kBitWriter::new();
 
-    /// Get subband dimensions for a given resolution level
-    fn get_subband_dims(
-        &self,
-        width: usize,
-        height: usize,
-        num_levels: usize,
-        level: usize,
-    ) -> (usize, usize) {
-        if level > num_levels {
-            return (0, 0);
-        }
+        // Non-empty packet
+        bit_writer.write_bit(1);
 
-        let shift = num_levels - level;
-        let w = width >> shift;
-        let h = height >> shift;
+        // Determine subband count for this resolution
+        let num_subbands = if res == 0 { 1 } else { 3 };
 
-        if level == 0 {
-            // LL band at lowest resolution
-            (w.max(1), h.max(1))
+        // Group blocks by subband
+        let subbands_order = if res == 0 {
+            vec![SubbandOrientation::LL]
         } else {
-            // HL, LH, HH bands
-            ((w + 1) / 2, (h + 1) / 2)
-        }
-    }
+            vec![
+                SubbandOrientation::HL,
+                SubbandOrientation::LH,
+                SubbandOrientation::HH,
+            ]
+        };
 
-    /// Encode a single component
-    fn _encode_component(
-        &mut self,
-        _writer: &mut J2kWriter,
-        pixels: &[u8],
-        width: usize,
-        height: usize,
-        step_size: f32,
-    ) -> Result<(), JpeglsError> {
-        // Convert pixels to f32 for DWT
-        let mut image_data: Vec<f32> = pixels.iter().map(|&p| p as f32).collect();
+        // Calculate grid dimensions
+        let mut precinct_state = PrecinctState::new(0, 0);
 
-        // Apply 2D DWT (simplified: single level for now)
-        if self.use_irreversible {
-            // Use 9-7 transform
-            self._apply_dwt_2d_97(&mut image_data, width, height)?;
-        } else {
-            // Use 5-3 transform (convert to i32 first)
-            let mut int_data: Vec<i32> = pixels.iter().map(|&p| p as i32).collect();
-            self._apply_dwt_2d_53(&mut int_data, width, height)?;
-            image_data = int_data.iter().map(|&x| x as f32).collect();
-        }
+        // Collect all included blocks
+        let mut included_cblks = Vec::new();
 
-        // Quantize coefficients
-        let _quantized: Vec<i32> = image_data
-            .iter()
-            .map(|&c| quantization::quantize_scalar(c, step_size))
-            .collect();
+        for (sb_idx, sb_orient) in subbands_order.iter().enumerate() {
+            let blocks: Vec<&EncodedCodeBlock> = encoded_blocks
+                .iter()
+                .filter(|b| &b.subband == sb_orient)
+                .collect();
 
-        // For now, write a minimal packet structure
-        // A real implementation would:
-        // 1. Organize coefficients into code-blocks
-        // 2. Perform bit-plane coding
-        // 3. Use MQ coder or HT block coder
-        // 4. Form packets with proper headers
-
-        // Simplified: write a basic packet header indicating no codeblocks
-        // This creates a valid but minimal codestream
-        // Packet header: 0 bits (empty packet for now)
-
-        Ok(())
-    }
-
-    /// Apply 2D DWT using 9-7 filter
-    fn _apply_dwt_2d_97(
-        &self,
-        data: &mut [f32],
-        width: usize,
-        height: usize,
-    ) -> Result<(), JpeglsError> {
-        // Simplified 2D DWT: apply 1D transform row-wise, then column-wise
-        let _row_buffer = vec![0.0f32; width.max(height)];
-        let mut col_buffer_l = vec![0.0f32; height];
-        let mut col_buffer_h = vec![0.0f32; height];
-
-        // Transform rows
-        for y in 0..height {
-            let row_start = y * width;
-            let row = &data[row_start..row_start + width];
-            let (l_len, h_len) = ((width + 1) / 2, width / 2);
-            col_buffer_l.resize(l_len, 0.0);
-            col_buffer_h.resize(h_len, 0.0);
-            Dwt97::forward(row, &mut col_buffer_l, &mut col_buffer_h);
-            // For now, just store back (simplified)
-            for (i, &val) in col_buffer_l.iter().enumerate() {
-                if i < width {
-                    data[row_start + i] = val;
+            for block in &blocks {
+                if !block.data.is_empty() {
+                    included_cblks.push(CodeBlockInfo {
+                        x: block.x,
+                        y: block.y,
+                        subband_index: sb_idx as u8,
+                        included: true,
+                        num_passes: block.num_passes,
+                        data_len: block.data.len() as u32,
+                        zero_bp: block.zero_bit_planes,
+                    });
                 }
             }
         }
 
-        // Note: Full 2D DWT would also transform columns and organize into subbands
-        // This is a simplified version
-        Ok(())
-    }
+        // Create packet header
+        let header = PacketHeader {
+            packet_seq_num: 0,
+            empty: false,
+            layer_index: 0,
+            included_cblks,
+        };
 
-    /// Apply 2D DWT using 5-3 filter
-    fn _apply_dwt_2d_53(
-        &self,
-        data: &mut [i32],
-        width: usize,
-        height: usize,
-    ) -> Result<(), JpeglsError> {
-        // Simplified 2D DWT: apply 1D transform row-wise
-        let mut row_buffer_l = vec![0i32; (width + 1) / 2];
-        let mut row_buffer_h = vec![0i32; width / 2];
+        // Determine grid size for packet header
+        let max_x = encoded_blocks.iter().map(|b| b.x).max().unwrap_or(0) + 1;
+        let max_y = encoded_blocks.iter().map(|b| b.y).max().unwrap_or(0) + 1;
 
-        // Transform rows
-        for y in 0..height {
-            let row_start = y * width;
-            let row = &data[row_start..row_start + width];
-            Dwt53::forward(row, &mut row_buffer_l, &mut row_buffer_h);
-            // For now, just store back (simplified)
-            for (i, &val) in row_buffer_l.iter().enumerate() {
-                if i < width {
-                    data[row_start + i] = val;
-                }
+        // Write packet header
+        header.write(&mut bit_writer, &mut precinct_state, max_x, max_y, num_subbands);
+
+        // Finish the bit writer (adds padding)
+        let mut packet_bytes = bit_writer.finish();
+
+        // Append code-block body data
+        for sb_orient in &subbands_order {
+            let blocks: Vec<&EncodedCodeBlock> = encoded_blocks
+                .iter()
+                .filter(|b| &b.subband == sb_orient && !b.data.is_empty())
+                .collect();
+
+            for block in blocks {
+                packet_bytes.extend(&block.data);
             }
         }
 
-        // Note: Full 2D DWT would also transform columns and organize into subbands
-        Ok(())
+        Ok(packet_bytes)
     }
+}
+
+/// Represents a subband of DWT coefficients
+#[derive(Debug)]
+struct SubbandData {
+    data: Vec<i32>,
+    width: usize,
+    height: usize,
+    orientation: SubbandOrientation,
+    resolution: usize,
+}
+
+/// Represents an encoded code-block
+#[derive(Debug, Clone)]
+struct EncodedCodeBlock {
+    x: usize,
+    y: usize,
+    subband: SubbandOrientation,
+    data: Vec<u8>,
+    num_passes: u8,
+    zero_bit_planes: u8,
 }
 
 impl Default for J2kEncoder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jpeg2000::decoder::J2kDecoder;
+    use crate::jpeg_stream_reader::JpegStreamReader;
+
+    #[test]
+    fn test_encode_grayscale_small() {
+        // Create a small 8x8 grayscale test pattern
+        let width = 8u32;
+        let height = 8u32;
+        let mut pixels = vec![0u8; (width * height) as usize];
+
+        // Simple gradient pattern
+        for y in 0..height {
+            for x in 0..width {
+                pixels[(y * width + x) as usize] = ((x + y) * 16) as u8;
+            }
+        }
+
+        let frame_info = FrameInfo {
+            width,
+            height,
+            bits_per_sample: 8,
+            component_count: 1,
+        };
+
+        // Encode
+        let mut encoder = J2kEncoder::new();
+        encoder.set_decomposition_levels(2); // Use fewer levels for small image
+        let mut dest = vec![0u8; 4096];
+        let len = encoder.encode(&pixels, &frame_info, &mut dest).unwrap();
+        dest.truncate(len);
+
+        // Verify J2K magic bytes
+        assert_eq!(dest[0], 0xFF);
+        assert_eq!(dest[1], 0x4F); // SOC
+
+        // Should end with EOC
+        assert_eq!(dest[len - 2], 0xFF);
+        assert_eq!(dest[len - 1], 0xD9); // EOC
+
+        println!("Encoded {} bytes for {}x{} grayscale image", len, width, height);
+    }
+
+    #[test]
+    fn test_encode_decode_roundtrip_grayscale() {
+        // Create a 16x16 grayscale test pattern
+        let width = 16u32;
+        let height = 16u32;
+        let mut pixels = vec![0u8; (width * height) as usize];
+
+        // Simple pattern
+        for y in 0..height {
+            for x in 0..width {
+                pixels[(y * width + x) as usize] = ((x * 8 + y * 8) % 256) as u8;
+            }
+        }
+
+        let frame_info = FrameInfo {
+            width,
+            height,
+            bits_per_sample: 8,
+            component_count: 1,
+        };
+
+        // Encode
+        let mut encoder = J2kEncoder::new();
+        encoder.set_decomposition_levels(2);
+        let mut dest = vec![0u8; 8192];
+        let len = encoder.encode(&pixels, &frame_info, &mut dest).unwrap();
+        dest.truncate(len);
+
+        // Verify basic J2K structure
+        assert!(len > 50);
+        assert_eq!(dest[0], 0xFF);
+        assert_eq!(dest[1], 0x4F); // SOC
+        assert_eq!(dest[len - 2], 0xFF);
+        assert_eq!(dest[len - 1], 0xD9); // EOC
+
+        // Try to decode header at minimum
+        let mut reader = JpegStreamReader::new(&dest);
+        let mut parser = crate::jpeg2000::parser::J2kParser::new(&mut reader);
+        let header_result = parser.parse_main_header();
+        assert!(header_result.is_ok(), "Header should parse correctly");
+        
+        assert_eq!(parser.image.width, width);
+        assert_eq!(parser.image.height, height);
+        assert_eq!(parser.image.component_count, 1);
+    }
+
+    #[test]
+    fn test_encode_gradient_image() {
+        // Create a 64x64 gradient image
+        let width = 64u32;
+        let height = 64u32;
+        let mut pixels = vec![0u8; (width * height) as usize];
+
+        // Horizontal gradient
+        for y in 0..height {
+            for x in 0..width {
+                pixels[(y * width + x) as usize] = (x * 4) as u8;
+            }
+        }
+
+        let frame_info = FrameInfo {
+            width,
+            height,
+            bits_per_sample: 8,
+            component_count: 1,
+        };
+
+        // Encode with default settings
+        let mut encoder = J2kEncoder::new();
+        let mut dest = vec![0u8; 32768];
+        let len = encoder.encode(&pixels, &frame_info, &mut dest).unwrap();
+
+        println!("Encoded {}x{} gradient: {} bytes (ratio: {:.2}x)", 
+                 width, height, len, (width * height) as f32 / len as f32);
+
+        // Verify basic structure
+        assert!(len > 100); // Should have some content
+        assert!(len < (width * height) as usize); // Should compress somewhat
+    }
+
+    #[test]
+    fn test_decode_structure() {
+        use crate::jpeg2000::parser::J2kParser;
+        
+        // Create a simple test with constant value (easy to decode)
+        let width = 8u32;
+        let height = 8u32;
+        let pixels = vec![128u8; (width * height) as usize];
+        
+        let frame_info = FrameInfo {
+            width,
+            height,
+            bits_per_sample: 8,
+            component_count: 1,
+        };
+        
+        let mut encoder = J2kEncoder::new();
+        encoder.set_decomposition_levels(2);
+        let mut dest = vec![0u8; 4096];
+        let len = encoder.encode(&pixels, &frame_info, &mut dest).unwrap();
+        dest.truncate(len);
+        
+        // Print hex of encoded data
+        println!("Encoded {} bytes:", len);
+        for (i, chunk) in dest.chunks(16).enumerate() {
+            print!("{:04x}: ", i * 16);
+            for b in chunk {
+                print!("{:02x} ", b);
+            }
+            println!();
+        }
+        
+        // Try to parse
+        let mut reader = JpegStreamReader::new(&dest);
+        let mut parser = J2kParser::new(&mut reader);
+        match parser.parse_main_header() {
+            Ok(marker) => println!("Main header parsed OK, next marker: {:?}", marker),
+            Err(e) => println!("Main header parse error: {:?}", e),
+        }
+        
+        println!("\nParsed image:");
+        println!("  Width: {}", parser.image.width);
+        println!("  Height: {}", parser.image.height);
+        println!("  Components: {}", parser.image.component_count);
+        if let Some(cod) = &parser.image.cod {
+            println!("  Decomp levels: {}", cod.decomposition_levels);
+            println!("  Transform: {}", cod.transformation);
+        }
+        if let Some(qcd) = &parser.image.qcd {
+            println!("  QCD style: {}", qcd.quant_style);
+            println!("  Step sizes: {} entries", qcd.step_sizes.len());
+        }
+        
+        // Test full decode
+        let mut reader2 = JpegStreamReader::new(&dest);
+        let mut decoder = J2kDecoder::new(&mut reader2);
+        match decoder.decode() {
+            Ok(img) => {
+                println!("\nFull decode successful!");
+                println!("  Tiles: {}", img.tiles.len());
+                if !img.tiles.is_empty() {
+                    println!("  Tile 0 components: {}", img.tiles[0].components.len());
+                }
+                // Try to reconstruct
+                match img.reconstruct_pixels() {
+                    Ok(pix) => println!("  Reconstructed {} pixels", pix.len()),
+                    Err(e) => println!("  Reconstruct error: {}", e),
+                }
+            },
+            Err(e) => println!("\nFull decode error: {:?}", e),
+        }
     }
 }

@@ -599,12 +599,12 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         // Experiment: Force based on depth
                         guard_bits
                             + if comp < parser.image.components.len() {
-                                parser.image.components[comp].depth - 1
+                                parser.image.components[comp].depth.saturating_sub(1)
                             } else {
                                 7
                             }
                     } else {
-                        guard_bits + epsilon_b - 1
+                        guard_bits + epsilon_b.saturating_sub(1)
                     };
 
                     let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);

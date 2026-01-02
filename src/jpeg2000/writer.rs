@@ -69,14 +69,9 @@ impl<'a> J2kWriter<'a> {
         self.writer
             .write_marker(JpegMarkerCode::CodingStyleDefault)?;
 
-        // Length: 10 + headers?
-        // Lcod + Scod + SGcod + SPcod
-        // Scod (1) + SGcod (4) + SPcod (5??) = 10?
-        // SGcod: Progression (1), Layers (2), MCT (1) = 4 bytes.
-        // SPcod: Decomp (1), Codeblock W (1), Codeblock H (1), Codeblock Style (1), Transform (1)?
-        // Total 1 byte Scod + 4 bytes SG + 5 bytes SP = 10 bytes payload.
+        // Length: Lcod + Scod + SGcod + SPcod
+        // Scod (1) + SGcod (4) + SPcod (5) = 10 bytes payload.
         // So len = 12.
-
         let length = 12; // Minimal COD length
         self.writer.write_u16(length)?;
 
@@ -85,14 +80,14 @@ impl<'a> J2kWriter<'a> {
         // SGcod
         self.writer.write_byte(cod.progression_order)?;
         self.writer.write_u16(cod.number_of_layers)?;
-        self.writer.write_byte(0)?; // MCT enabled?
+        self.writer.write_byte(cod.mct)?;
 
         // SPcod
-        self.writer.write_byte(5)?; // Number of decomposition levels (default 5 or struct field?)
-        self.writer.write_byte(4)?; // Code-block width (xcb) - 4 -> 16
-        self.writer.write_byte(4)?; // Code-block height (ycb) - 4 -> 16
+        self.writer.write_byte(cod.decomposition_levels)?;
+        self.writer.write_byte(cod.codeblock_width_exp)?;
+        self.writer.write_byte(cod.codeblock_height_exp)?;
         self.writer.write_byte(0)?; // Code-block style
-        self.writer.write_byte(0)?; // Wavelet transform (0=9-7, 1=5-3)
+        self.writer.write_byte(cod.transformation)?;
 
         Ok(())
     }
@@ -101,15 +96,24 @@ impl<'a> J2kWriter<'a> {
         self.writer
             .write_marker(JpegMarkerCode::QuantizationDefault)?;
 
-        // Length: 3 (Sqcd) + 2 * step_sizes.len() + 2 (len field) = 5?
         // Lqcd (2) + Sqcd (1) + SPqcd (n)
-        let payload_len = 1 + qcd.step_sizes.len() * 2;
+        // For reversible (quant_style & 0x1F == 0): 1 byte per step (exponent only)
+        // For scalar expounded (quant_style & 0x1F == 2): 2 bytes per step
+        let quant_type = qcd.quant_style & 0x1F;
+        let step_size_bytes = if quant_type == 0 { 1 } else { 2 };
+        let payload_len = 1 + qcd.step_sizes.len() * step_size_bytes;
         self.writer.write_u16((payload_len + 2) as u16)?;
 
         self.writer.write_byte(qcd.quant_style)?;
 
         for &step in &qcd.step_sizes {
-            self.writer.write_u16(step)?;
+            if quant_type == 0 {
+                // Reversible: write 1 byte (exponent << 3)
+                self.writer.write_byte((step >> 8) as u8)?;
+            } else {
+                // Scalar expounded: write 2 bytes
+                self.writer.write_u16(step)?;
+            }
         }
         Ok(())
     }
