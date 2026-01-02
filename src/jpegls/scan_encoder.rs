@@ -179,7 +179,10 @@ impl<'a> ScanEncoder<'a> {
         let pixel_stride = width * components;
         let buffer_width = (width + 1) * components;
 
-        let mut line_buffer: Vec<T> = vec![T::default(); buffer_width * 2];
+        // Initialize line buffer with median value for better prediction
+        // For 8-bit: 1 << 7 = 128, for 16-bit: 1 << 15 = 32768
+        let init_value = T::from_i32(1 << (self.frame_info.bits_per_sample - 1));
+        let mut line_buffer: Vec<T> = vec![init_value; buffer_width * 2];
         let mut source_idx = 0;
 
         for line in 0..height {
@@ -199,7 +202,7 @@ impl<'a> ScanEncoder<'a> {
                  curr[c] = prev[components + c];
             }
 
-            self.encode_sample_line(prev, curr, width, components)?;
+            self.encode_sample_line(prev, curr, width, components, line == 0)?;
             source_idx += pixel_stride;
         }
         Ok(())
@@ -207,10 +210,11 @@ impl<'a> ScanEncoder<'a> {
 
     fn encode_sample_line<T: JpeglsSample>(
         &mut self,
-        prev_line: &[T],
+        prev_line: &mut [T],
         curr_line: &mut [T],
         width: usize,
         components: usize,
+        is_first_line: bool,
     ) -> Result<(), JpeglsError> {
         let mut pixel_idx = 0;
         let mut current_buf_idx = components;
@@ -224,6 +228,20 @@ impl<'a> ScanEncoder<'a> {
         }
 
         while pixel_idx < width {
+            // Special handling for first line: after encoding first pixel,
+            // update prev_line to match so run mode can trigger for subsequent pixels
+            // This matches the decoder's behavior at scan_decoder.rs lines 247-256
+            if is_first_line && pixel_idx == 1 {
+                let first_pixel_value = curr_line[components];
+                for i in 0..prev_line.len() {
+                    prev_line[i] = first_pixel_value;
+                }
+                // Reload rb and rd after updating prev_line
+                for c in 0..components {
+                    rb[c] = prev_line[c].to_i32();
+                    rd[c] = prev_line[components + c].to_i32();
+                }
+            }
             let mut all_qs_zero = true;
             let mut component_qs = vec![0; components];
             let mut component_pred = vec![0; components];
@@ -462,10 +480,16 @@ impl<'a> ScanEncoder<'a> {
 
         let base_offset = components;
 
-        // Capture Ra for all components
+        // Capture Ra for all components (left neighbor)
         let mut ra = vec![T::default(); components];
         for c in 0..components {
-             ra[c] = curr_line[base_offset + (start_pixel_idx - 1) * components + c];
+            let ra_idx = if start_pixel_idx > 0 {
+                base_offset + (start_pixel_idx - 1) * components + c
+            } else {
+                // First pixel: use boundary pixel at index c
+                c
+            };
+            ra[c] = curr_line[ra_idx];
         }
 
         while run_length < count_type_remain {
@@ -608,8 +632,11 @@ impl<'a> ScanEncoder<'a> {
             let context = &self.run_mode_contexts[comp][context_index];
             let k = context.compute_golomb_coding_parameter();
             let map = context.compute_map(error_value, k);
+            // Mapping formula for run interruption (ITU-T T.87 Section A.7.2.2)
+            // MErrval = 2 * |Errval| - RIType + (if !map { 1 } else { 0 })
+            // This ensures the LSB encodes the map bit and decoder can reconstruct correctly
             let val =
-                2 * error_value.abs() - context.run_interruption_type() - (if map { 1 } else { 0 });
+                2 * error_value.abs() - context.run_interruption_type() + (if map { 0 } else { 1 });
             (k, val)
         };
 
