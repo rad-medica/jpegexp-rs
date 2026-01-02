@@ -86,7 +86,7 @@ impl<'a> ScanDecoder<'a> {
             t3,
             reset_threshold: reset,
             _limit: 0,
-            _quantized_bits_per_sample: frame_info.bits_per_sample,
+            _quantized_bits_per_sample: coding_parameters.quantized_bits_per_sample,
             _quantization_lut: Vec::new(),
             #[cfg(debug_assertions)]
             bits_consumed: 0,
