@@ -277,7 +277,9 @@ fn encode_image(
             dest
         }
         Codec::Jpegls => {
-            let mut dest = vec![0u8; pixels.len() * 2];
+            // Allocate more space: at least 1KB header + 2x input size for worst-case compression
+            let min_size = 1024 + pixels.len() * 2;
+            let mut dest = vec![0u8; min_size];
             let mut encoder = jpegexp_rs::jpegls::JpeglsEncoder::new(&mut dest);
             encoder.set_frame_info(frame_info)?;
             if near_lossless > 0 {
@@ -582,9 +584,11 @@ fn decode_jpegls(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::e
     let width = info.width;
     let height = info.height;
     let components = info.component_count as u32;
+    let bits_per_sample = info.bits_per_sample;
+    let bytes_per_sample = ((bits_per_sample + 7) / 8) as usize;
 
-    let pixel_count = (width * height * components) as usize;
-    let mut pixels = vec![0u8; pixel_count];
+    let byte_count = (width * height * components) as usize * bytes_per_sample;
+    let mut pixels = vec![0u8; byte_count];
     decoder.decode(&mut pixels)?;
 
     Ok((pixels, width, height, components))

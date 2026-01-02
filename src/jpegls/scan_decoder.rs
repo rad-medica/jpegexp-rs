@@ -174,7 +174,11 @@ impl<'a> ScanDecoder<'a> {
             let prev_line = &mut prev[0..pixel_stride];
             let curr_line = &mut curr[0..pixel_stride];
 
+            // Initialize edge pixels per CharLS/ITU-T.87
+            // Left edge: current_line[0] = previous_line[1]
+            // Right edge: previous_line[width+1] = previous_line[width]
             curr_line[0] = prev_line[1];
+            prev_line[width + 1] = prev_line[width];  // Right edge extension
             self.decode_sample_line::<T>(prev_line, curr_line, width, line == 0)?;
             
             #[cfg(debug_assertions)]
@@ -235,7 +239,7 @@ impl<'a> ScanDecoder<'a> {
         prev_line: &mut [T],
         curr_line: &mut [T],
         width: usize,
-        is_first_line: bool,
+        _is_first_line: bool,
     ) -> Result<(), JpeglsError> {
         let mut index = 1;
         let mut rb = prev_line[0].to_i32();
@@ -257,13 +261,9 @@ impl<'a> ScanDecoder<'a> {
 
             let qs = self.compute_context_id(q1, q2, q3);
 
-            // Per JPEG-LS spec and CharLS behavior: use REGULAR mode for the very
-            // first pixel (index=1 on first line) even when qs=0. Run mode requires
-            // a valid Ra (left neighbor) to propagate, which doesn't exist for the
-            // first pixel in the image.
-            let use_run_mode = qs == 0 && !(is_first_line && index == 1);
-
-            if !use_run_mode {
+            // Per CharLS: use run mode when qs == 0, regular mode otherwise.
+            // No special case for first pixel - CharLS always uses run mode when qs=0.
+            if qs != 0 {
                 debug_log!("    Regular mode: index={}, qs={}", index, qs);
                 let predicted = self.compute_predicted_value(ra, rb, rc);
                 let error_value = self.decode_regular::<T>(qs, predicted)?;
@@ -290,12 +290,18 @@ impl<'a> ScanDecoder<'a> {
         let ctx_index = Self::apply_sign_for_index(qs, sign);
 
         let k: i32;
+        let context_c: i32;
         let near_lossless = self.coding_parameters.near_lossless;
 
         {
-            let context = &mut self.regular_mode_contexts[ctx_index];
+            let context = &self.regular_mode_contexts[ctx_index];
             k = context.compute_golomb_coding_parameter(31)?;
+            context_c = context.c();
         }
+
+        // Apply context bias C to prediction (per CharLS/ITU-T.87)
+        // corrected_prediction = correct_prediction(predicted + apply_sign(C, sign))
+        let corrected_prediction = T::correct_prediction(predicted + Self::apply_sign(context_c, sign));
 
         let map_val = self.decode_mapped_error_value(k)?;
         let mut error_value = self.unmap_error_value(map_val);
@@ -310,18 +316,21 @@ impl<'a> ScanDecoder<'a> {
         }
 
         error_value = Self::apply_sign(error_value, sign);
-        let reconstructed = T::compute_reconstructed_sample(predicted, error_value);
-        debug_log!("      Reconstructed: predicted={}, error={}, result={}", 
-                  predicted, error_value, reconstructed);
+        let reconstructed = T::compute_reconstructed_sample(corrected_prediction, error_value);
+        debug_log!("      Reconstructed: predicted={}, corrected={}, error={}, result={}", 
+                  predicted, corrected_prediction, error_value, reconstructed);
         Ok(reconstructed)
     }
 
     fn decode_mapped_error_value(&mut self, k: i32) -> Result<i32, JpeglsError> {
+        self.decode_mapped_error_value_with_limit(k, self._limit)
+    }
+
+    fn decode_mapped_error_value_with_limit(&mut self, k: i32, limit: i32) -> Result<i32, JpeglsError> {
         let mut value = 0;
         let mut bit_count = 0;
         
         // Limited-length Golomb code threshold
-        let limit = self._limit;
         let qbpp = self._quantized_bits_per_sample;
         let limit_threshold = limit - qbpp - 1;
 
@@ -337,11 +346,10 @@ impl<'a> ScanDecoder<'a> {
             // Check if we've reached the limit threshold (escape mode)
             if bit_count >= limit_threshold {
                 // This is an escape sequence - read the terminating 1 and then qbpp bits
-                // Per ITU-T T.87 A.5.3: escape stores (MErrval - 1), so MErrval = escape + 1
-                // However, CharLS uses (MErrval - 2) for escape encoding, so MErrval = escape + 2
+                // Per CharLS: encoder writes (mapped_error - 1), decoder reads value + 1
                 self.skip_bits(1)?;  // Skip the terminating 1
                 let escape_value = self.read_bits(qbpp)?;
-                value = escape_value + 2;  // CharLS encodes as (MErrval - 2)
+                value = escape_value + 1;  // CharLS encodes as (MErrval - 1)
                 debug_log!("    Golomb decode (escape): unary={}, escape_value={}, result={}", 
                           bit_count, escape_value, value);
                 return Ok(value);
@@ -384,6 +392,7 @@ impl<'a> ScanDecoder<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn is_valid_jpeg_marker(code: u8) -> bool {
         // Check if code is a valid JPEG/JPEG-LS marker second byte
         matches!(code,
@@ -396,53 +405,53 @@ impl<'a> ScanDecoder<'a> {
     }
 
     fn fill_read_cache(&mut self) -> Result<(), JpeglsError> {
-        while self.valid_bits <= (std::mem::size_of::<usize>() * 8 - 16) as i32 {
+        // CharLS-compatible fill_read_cache
+        // max_readable_cache_bits = cache_bits - 8 = 56 (for 64-bit cache)
+        let cache_bits = std::mem::size_of::<usize>() * 8;
+        let max_readable_cache_bits = (cache_bits - 8) as i32;
+        
+        loop {
             if self.position >= self.source.len() {
-                // eprintln!("Fill cache: EOF (pos {})", self.position);
+                // End of data
                 break;
             }
-            let byte = self.source[self.position] as usize;
-            // // eprintln!("Read byte: {:02X} at {}", byte, self.position);
 
-            // Add byte to cache first
-            self.read_cache = (self.read_cache << 8) | byte;
+            let byte = self.source[self.position] as usize;
+
+            // Check for marker detection: FF followed by byte with high bit set
+            if byte == JPEG_MARKER_START_BYTE as usize {
+                if self.position + 1 < self.source.len() {
+                    let next_byte = self.source[self.position + 1];
+                    
+                    if (next_byte & 0x80) != 0 {
+                        // FF followed by byte with high bit set = marker
+                        // Stop filling cache, don't consume the FF
+                        debug_log!("    Marker: FF {:02X} detected, stopping cache fill", next_byte);
+                        break;
+                    }
+                } else {
+                    // FF at end of data - stop
+                    break;
+                }
+            }
+
+            // Add byte to cache at the MSB side (CharLS compatible)
+            // The new byte goes at position (max_readable_cache_bits - valid_bits), counting from right
+            self.read_cache |= byte << (max_readable_cache_bits - self.valid_bits) as usize;
             self.valid_bits += 8;
             self.position += 1;
 
-            // Check for 0xFF marker handling
+            // JPEG-LS bit stuffing: after 0xFF, the next byte only provides 7 valid bits
+            // (the high bit is always 0 to distinguish from markers)
             if byte == JPEG_MARKER_START_BYTE as usize {
-                if self.position < self.source.len() {
-                    let next_byte = self.source[self.position];
-
-                    if next_byte == 0x00 {
-                        // Stuffed 0 byte. The 0xFF is valid data.
-                        // Consume the stuffed zero.
-                        self.position += 1;
-                        // Do not add bits from the stuffed byte to the cache.
-                        // The 0xFF is already in the cache.
-                        debug_log!("    Byte stuffing: FF 00 → FF (data)");
-                    } else if next_byte == 0x7F {
-                        // Special case: FF 7F appears in CharLS-encoded files at scan end.
-                        // This might be scan termination padding or bit-stuffing variant.
-                        // Don't consume the 7F, just keep FF in cache and continue.
-                        // The 7F will be read in the next iteration if needed.
-                        debug_log!("    Special pattern: FF 7F detected, keeping FF as data");
-                    } else if Self::is_valid_jpeg_marker(next_byte) {
-                        // Valid JPEG/JPEG-LS marker found (EOI, etc.)
-                        // Back up, remove 0xFF from cache, and stop.
-                        self.position -= 1;
-                        self.valid_bits -= 8;
-                        self.read_cache >>= 8;
-                        debug_log!("    Marker: FF {:02X} detected, stopping cache fill", next_byte);
-                        break;
-                    } else {
-                        // FF followed by other non-marker, non-00, non-7F codes.
-                        // Keep FF as data, will read next_byte in next iteration.
-                        debug_log!("    Non-marker after FF: {:02X}, keeping FF as data", next_byte);
-                    }
-                } else {
-                    // End of data after 0xFF. Keep 0xFF in cache.
-                }
+                // Subtract 1 bit because the next byte's high bit is stuffing
+                self.valid_bits -= 1;
+                debug_log!("    After FF: valid_bits decremented to {}", self.valid_bits);
+            }
+            
+            // Continue until we have enough bits in the cache
+            if self.valid_bits >= max_readable_cache_bits {
+                break;
             }
         }
         Ok(())
@@ -464,13 +473,18 @@ impl<'a> ScanDecoder<'a> {
                       count, self.valid_bits, self.position);
             return Err(JpeglsError::InvalidData);
         }
-        Ok(((self.read_cache >> (self.valid_bits - count)) & ((1 << count) - 1)) as i32)
+        // Read from the MSB side of the cache (CharLS compatible)
+        // The cache has valid bits at the MSB side, so we shift right to get them
+        let cache_bits = std::mem::size_of::<usize>() * 8;
+        Ok(((self.read_cache >> (cache_bits as i32 - count)) & ((1 << count) - 1)) as i32)
     }
 
     fn skip_bits(&mut self, count: i32) -> Result<(), JpeglsError> {
         if self.valid_bits < count {
             self.fill_read_cache()?;
         }
+        // Shift the cache left to consume bits from the MSB (CharLS compatible)
+        self.read_cache <<= count as usize;
         self.valid_bits -= count;
         
         #[cfg(debug_assertions)]
@@ -557,9 +571,13 @@ impl<'a> ScanDecoder<'a> {
         width: usize,
     ) -> Result<usize, JpeglsError> {
         let mut run_length = 0;
-        let count_type_remain = width - start_index + 1;
-        debug_log!("    decode_run_mode: start_index={}, width={}, count_type_remain={}", 
-                  start_index, width, count_type_remain);
+        // pixel_count is the number of remaining pixels to potentially fill with the run
+        // This is from start_index to width (inclusive), so width - start_index + 1
+        let pixel_count = width - start_index + 1;
+        debug_log!("    decode_run_mode: start_index={}, width={}, pixel_count={}", 
+                  start_index, width, pixel_count);
+        
+        // Decode run pixels (CharLS-compatible algorithm)
         loop {
             let run_index_val = crate::constants::J[self.run_index];
             #[cfg(debug_assertions)]
@@ -568,59 +586,45 @@ impl<'a> ScanDecoder<'a> {
             #[cfg(debug_assertions)]
             debug_log!("      [bit {}] run_index={}, J={}, bit={}, run_length={}", 
                       bits_before, self.run_index, run_index_val, bit, run_length);
+            
             if bit == 1 {
-                let length = 1 << run_index_val;
-                debug_log!("      → Full run of {} pixels", length);
-                let mut hit_width = false;
-                for i in 0..length {
-                    let i_usize = i as usize;
-                    if start_index + run_length + i_usize >= width {
-                        hit_width = true;
-                        break;
-                    }
-                    curr_line[start_index + run_length + i_usize] = curr_line[start_index - 1];
+                // Full run segment
+                let max_run = 1usize << run_index_val;
+                let count = std::cmp::min(max_run, pixel_count - run_length);
+                debug_log!("      → Full run segment: max={}, count={}", max_run, count);
+                
+                // Fill pixels
+                for i in 0..count {
+                    curr_line[start_index + run_length + i] = curr_line[start_index - 1];
                 }
-                run_length += length as usize;
-                // If we hit width (or exceeded it in run_length counting), we clamp effectively.
-                // But run_length variable keeps increasing to track the "virtual" run?
-                // Spec says run is terminated at EOL.
-                // If we hit width, we should break out of the loop and return run_length = width - start_index?
-                if hit_width || start_index + run_length >= width {
-                    // Clamp run_length to match width exactly
-                    run_length = width - start_index;
-                    debug_log!("      → Hit width, clamping run_length to {}", run_length);
-                    if self.run_index < 31 {
-                         self.run_index += 1;
-                    }
-                    break;
-                }
-                if self.run_index < 31 {
+                run_length += count;
+                
+                // Only increment run_index if we used the full run length
+                if count == max_run && self.run_index < 31 {
                     self.run_index += 1;
                 }
-            } else {
-                let remainder = self.read_bits(run_index_val)?;
-                debug_log!("      → Partial run of {} pixels", remainder);
-                let mut hit_width = false;
-                for i in 0..remainder {
-                    let i_usize = i as usize;
-                    if start_index + run_length + i_usize >= width {
-                        hit_width = true;
-                        break;
-                    }
-                    curr_line[start_index + run_length + i_usize] = curr_line[start_index - 1];
-                }
-                run_length += remainder as usize;
-                if hit_width || start_index + run_length >= width {
-                    run_length = width - start_index;
-                    debug_log!("      → Hit width, clamping run_length to {}", run_length);
-                    if self.run_index > 0 {
-                        self.run_index -= 1;
-                    }
+                
+                // Break if we've filled all remaining pixels
+                if run_length == pixel_count {
                     break;
                 }
-                if self.run_index > 0 {
-                    self.run_index -= 1;
+            } else {
+                // Incomplete run - read remainder bits
+                let remainder = if run_index_val > 0 { 
+                    self.read_bits(run_index_val)? as usize 
+                } else { 
+                    0 
+                };
+                debug_log!("      → Partial run of {} pixels", remainder);
+                
+                // Fill pixels
+                let count = std::cmp::min(remainder, pixel_count - run_length);
+                for i in 0..count {
+                    curr_line[start_index + run_length + i] = curr_line[start_index - 1];
                 }
+                run_length += count;
+                
+                // Don't decrement run_index here - will be done after interruption
                 break;
             }
         }
@@ -628,7 +632,7 @@ impl<'a> ScanDecoder<'a> {
         debug_log!("    Run length decoded: {}", run_length);
 
         // Only decode interruption if run didn't consume all remaining pixels
-        if run_length < count_type_remain {
+        if run_length < pixel_count {
             let rb = prev_line[start_index + run_length].to_i32();
             let ra = curr_line[start_index + run_length - 1].to_i32();
             debug_log!("    Run interruption pixel at index {}, ra={}, rb={}", 
@@ -636,6 +640,11 @@ impl<'a> ScanDecoder<'a> {
             let x = self.decode_run_interruption_pixel::<T>(ra, rb)?;
             curr_line[start_index + run_length] = T::from_i32(x);
             run_length += 1;
+            
+            // Decrement run_index after run interruption (per CharLS)
+            if self.run_index > 0 {
+                self.run_index -= 1;
+            }
         }
 
         Ok(run_length)
@@ -660,13 +669,20 @@ impl<'a> ScanDecoder<'a> {
                   self.run_mode_contexts[context_index].nn());
 
         let k = self.run_mode_contexts[context_index].compute_golomb_coding_parameter();
-        let mapped_error = self.decode_mapped_error_value(k)?;
+        // For run mode, limit is adjusted by J[run_index]
+        let run_limit = self._limit - crate::constants::J[self.run_index] - 1;
+        let e_mapped_error = self.decode_mapped_error_value_with_limit(k, run_limit)?;
+        
+        // Per CharLS: add run_interruption_type to e_mapped before decoding error_value
+        let ri_type = self.run_mode_contexts[context_index].run_interruption_type();
+        let temp = e_mapped_error + ri_type;
 
-        let error_value = self.run_mode_contexts[context_index].decode_error_value(mapped_error, k);
+        let error_value = self.run_mode_contexts[context_index].decode_error_value(temp, k);
         let reset_threshold = self.reset_threshold;
+        // Update with e_mapped_error (NOT temp) per CharLS
         self.run_mode_contexts[context_index].update_variables(
             error_value,
-            mapped_error,
+            e_mapped_error,
             reset_threshold,
         );
 
