@@ -87,6 +87,20 @@ impl TagTree {
         self.nodes[leaf_idx].low
     }
 
+    /// Check if the value at (x, y) is known and less than threshold.
+    /// This is used for determining if a codeblock was already included in a previous layer.
+    pub fn is_known_below_threshold(&self, x: usize, y: usize, threshold: i32) -> bool {
+        if x >= self.leaf_width || y >= self.leaf_height {
+            return false;
+        }
+        let leaf_idx = y * self.leaf_width + x;
+        let node = &self.nodes[leaf_idx];
+        // A codeblock is "already included" if:
+        // 1. We know its exact inclusion layer (known=true), AND
+        // 2. That layer is less than the current threshold
+        node.known && node.low < threshold
+    }
+
     /// Set the value at a leaf coordinate (x, y).
     pub fn set_value(&mut self, x: usize, y: usize, value: i32) {
         if x >= self.leaf_width || y >= self.leaf_height {
@@ -183,6 +197,10 @@ impl TagTree {
                     break;
                 }
                 let bit = reader.read_bit()?;
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("    TT[{}]: bit={} low={}->{} known={} threshold={}", 
+                        curr_idx, bit, node.low, node.low + bit as i32, node.known, threshold);
+                }
                 if bit == 1 {
                     node.low += 1;
                 } else {
@@ -192,7 +210,12 @@ impl TagTree {
             }
         }
 
-        Ok(self.nodes[leaf_idx].low >= threshold)
+        let result = self.nodes[leaf_idx].low >= threshold;
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("    TT result: low={} >= threshold={} ? {}", 
+                self.nodes[leaf_idx].low, threshold, result);
+        }
+        Ok(result)
     }
 }
 
