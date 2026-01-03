@@ -87,6 +87,20 @@ impl TagTree {
         self.nodes[leaf_idx].low
     }
 
+    /// Check if the value at (x, y) is known and less than threshold.
+    /// This is used for determining if a codeblock was already included in a previous layer.
+    pub fn is_known_below_threshold(&self, x: usize, y: usize, threshold: i32) -> bool {
+        if x >= self.leaf_width || y >= self.leaf_height {
+            return false;
+        }
+        let leaf_idx = y * self.leaf_width + x;
+        let node = &self.nodes[leaf_idx];
+        // A codeblock is "already included" if:
+        // 1. We know its exact inclusion layer (known=true), AND
+        // 2. That layer is less than the current threshold
+        node.known && node.low < threshold
+    }
+
     /// Set the value at a leaf coordinate (x, y).
     pub fn set_value(&mut self, x: usize, y: usize, value: i32) {
         if x >= self.leaf_width || y >= self.leaf_height {
@@ -122,18 +136,27 @@ impl TagTree {
         }
 
         // Encode
+        // JPEG 2000 tag tree semantics (per OpenJPEG):
+        // bit=1 means "value equals current low" (found!)
+        // bit=0 means "value is higher than current low" (continue)
         while let Some(curr_idx) = stack.pop() {
             let node = &mut self.nodes[curr_idx];
             while node.low < threshold {
-                if node.value > node.low {
+                if node.value == node.low {
+                    // Found: value equals current low, write 1
                     writer.write_bit(1);
-                    node.low += 1;
-                } else {
-                    writer.write_bit(0);
+                    node.known = true;
                     break;
+                } else {
+                    // Value is higher, write 0 and increment low
+                    writer.write_bit(0);
+                    node.low += 1;
                 }
             }
-            node.known = node.low < threshold;
+            if !node.known && node.low >= threshold {
+                // We reached threshold without finding the value
+                node.known = false;
+            }
         }
     }
 
@@ -183,16 +206,29 @@ impl TagTree {
                     break;
                 }
                 let bit = reader.read_bit()?;
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("    TT[{}]: bit={} low={} known={} threshold={}", 
+                        curr_idx, bit, node.low, node.known, threshold);
+                }
+                // JPEG 2000 tag tree semantics (per OpenJPEG):
+                // bit=1 means "value equals current low" (found!)
+                // bit=0 means "value is higher than current low" (continue)
                 if bit == 1 {
-                    node.low += 1;
-                } else {
                     node.known = true;
+                    // node.low stays at current value (which is the actual value)
                     break;
+                } else {
+                    node.low += 1;
                 }
             }
         }
 
-        Ok(self.nodes[leaf_idx].low >= threshold)
+        let result = self.nodes[leaf_idx].low >= threshold;
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("    TT result: low={} >= threshold={} ? {}", 
+                self.nodes[leaf_idx].low, threshold, result);
+        }
+        Ok(result)
     }
 }
 

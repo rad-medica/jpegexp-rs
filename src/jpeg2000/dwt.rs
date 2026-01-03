@@ -133,85 +133,126 @@ impl Dwt53 {
 
     /// Inverse 2D 5/3 Transform
     /// Reconstructs image from LL, HL, LH, HH subbands
+    /// 
+    /// The 2D DWT structure:
+    /// ```
+    /// +-------+-------+
+    /// |  LL   |  HL   |  <- low-pass rows (top half)
+    /// +-------+-------+
+    /// |  LH   |  HH   |  <- high-pass rows (bottom half)
+    /// +-------+-------+
+    ///    ^       ^
+    ///  low-col  high-col
+    /// ```
+    /// 
+    /// Inverse order:
+    /// 1. Vertical inverse: combine LL+LH → left cols, HL+HH → right cols
+    /// 2. Horizontal inverse: combine left+right → output rows
     pub fn inverse_2d(
         ll: &[i32],
         hl: &[i32],
         lh: &[i32],
-        _hh: &[i32],
+        hh: &[i32],
         width: u32,
         height: u32,
         output: &mut [i32],
     ) {
         let w = width as usize;
         let h = height as usize;
+        
+        // Subband dimensions
         #[allow(clippy::manual_div_ceil)]
-        let ll_w = (w + 1) / 2;
-        let hl_w = w / 2;
+        let ll_w = (w + 1) / 2;  // LL and LH width (low-pass cols)
+        let hl_w = w / 2;        // HL and HH width (high-pass cols)
         #[allow(clippy::manual_div_ceil)]
-        let ll_h = (h + 1) / 2;
-        let lh_h = h / 2;
+        let ll_h = (h + 1) / 2;  // LL and HL height (low-pass rows)
+        let lh_h = h / 2;        // LH and HH height (high-pass rows)
 
-        // Temporary buffers for intermediate results
+        // Intermediate buffer after vertical inverse
         let mut temp = vec![0i32; w * h];
 
-        // First pass: Inverse transform each row
-        for y in 0..ll_h.max(lh_h) {
-            let row_ll = if y < ll_h {
-                &ll[y * ll_w..(y + 1) * ll_w]
-            } else {
-                &[]
-            };
-            let row_hl = if y < hl_w && y * hl_w < hl.len() {
-                let start = y * hl_w;
-                let end = (start + hl_w).min(hl.len());
-                &hl[start..end]
-            } else {
-                &[]
-            };
-
-            let mut row_output = vec![0i32; w];
-            if !row_ll.is_empty() || !row_hl.is_empty() {
-                let mut row_l = vec![0i32; ll_w];
-                let mut row_h = vec![0i32; hl_w];
-                if y < ll_h {
-                    row_l[..row_ll.len()].copy_from_slice(row_ll);
-                }
-                if y * hl_w < hl.len() {
-                    row_h[..row_hl.len().min(hl_w)].copy_from_slice(row_hl);
-                }
-                Self::inverse(&row_l, &row_h, &mut row_output);
-                for x in 0..w {
-                    temp[y * w + x] = row_output[x];
-                }
-            }
-        }
-
-        // Second pass: Inverse transform each column
-        for x in 0..w {
+        // Step 1: Vertical inverse DWT on each column
+        // For left columns (0..ll_w): combine LL and LH
+        for x in 0..ll_w {
             let mut col_l = vec![0i32; ll_h];
             let mut col_h = vec![0i32; lh_h];
 
-            // Extract LL column
+            // Extract LL column (low-pass vertical)
             for y in 0..ll_h {
-                if y < ll_h && x < ll_w {
-                    col_l[y] = ll[y * ll_w + x];
+                let idx = y * ll_w + x;
+                if idx < ll.len() {
+                    col_l[y] = ll[idx];
                 }
             }
 
-            // Extract LH column
+            // Extract LH column (high-pass vertical)
             for y in 0..lh_h {
-                if y < lh_h && x < ll_w && y * ll_w + x < lh.len() {
-                    col_h[y] = lh[y * ll_w + x];
+                let idx = y * ll_w + x;
+                if idx < lh.len() {
+                    col_h[y] = lh[idx];
                 }
             }
 
             let mut col_output = vec![0i32; h];
             Self::inverse(&col_l, &col_h, &mut col_output);
 
+            // Store in left half of temp
             for y in 0..h {
-                if x < w && y < h {
-                    output[y * w + x] = col_output[y];
+                temp[y * w + x] = col_output[y];
+            }
+        }
+
+        // For right columns (ll_w..w): combine HL and HH
+        for x in 0..hl_w {
+            let mut col_l = vec![0i32; ll_h];
+            let mut col_h = vec![0i32; lh_h];
+
+            // Extract HL column (low-pass vertical)
+            for y in 0..ll_h {
+                let idx = y * hl_w + x;
+                if idx < hl.len() {
+                    col_l[y] = hl[idx];
                 }
+            }
+
+            // Extract HH column (high-pass vertical)
+            for y in 0..lh_h {
+                let idx = y * hl_w + x;
+                if idx < hh.len() {
+                    col_h[y] = hh[idx];
+                }
+            }
+
+            let mut col_output = vec![0i32; h];
+            Self::inverse(&col_l, &col_h, &mut col_output);
+
+            // Store in right half of temp
+            for y in 0..h {
+                temp[y * w + (ll_w + x)] = col_output[y];
+            }
+        }
+
+        // Step 2: Horizontal inverse DWT on each row
+        for y in 0..h {
+            let mut row_l = vec![0i32; ll_w];
+            let mut row_h = vec![0i32; hl_w];
+
+            // Extract left half (low-pass horizontal)
+            for x in 0..ll_w {
+                row_l[x] = temp[y * w + x];
+            }
+
+            // Extract right half (high-pass horizontal)
+            for x in 0..hl_w {
+                row_h[x] = temp[y * w + ll_w + x];
+            }
+
+            let mut row_output = vec![0i32; w];
+            Self::inverse(&row_l, &row_h, &mut row_output);
+
+            // Store in output
+            for x in 0..w {
+                output[y * w + x] = row_output[x];
             }
         }
     }

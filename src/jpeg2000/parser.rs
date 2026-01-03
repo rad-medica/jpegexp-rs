@@ -40,7 +40,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             }
             let b1 = self.reader.read_u8()?;
             if b1 != 0xFF {
-                // eprintln!("DEBUG: Expected 0xFF, got {:02X}", b1);
                 return Err(JpeglsError::InvalidData);
             }
             let b2 = self.reader.read_u8()?;
@@ -52,7 +51,6 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 JpegMarkerCode::QuantizationDefault => self.parse_qcd()?,
                 JpegMarkerCode::StartOfTile => {
                     // SOT indicates end of main header
-                    // eprintln!("DEBUG: parse_main_header FOUND SOT - Breaking Loop");
                     return Ok(JpegMarkerCode::StartOfTile);
                 }
                 JpegMarkerCode::Capability => self.parse_cap()?,

@@ -462,10 +462,28 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 }
                             }
                             if let Some(h) = header {
-                                // If body follows, we must align to byte boundary
-                                // Note: JpegStreamReader alignment logic handles bits_left
-                                if !h.empty {
-                                    parser.reader.align_to_byte();
+                                if std::env::var("J2K_DEBUG").is_ok() {
+                                    let pos = parser.reader.position();
+                                    let remaining = parser.reader.remaining_data().len();
+                                    eprintln!("DECODE_PACKET: L={} R={} C={} P=({},{}) empty={} cblks={} pos={} remaining={}",
+                                        l, r, c, px, py, h.empty, h.included_cblks.len(), pos, remaining);
+                                }
+                                // If body follows AND there's data to read, we must align to byte boundary
+                                // Per ISO 15444-1 B.9: byte alignment happens after packet header
+                                // but only when there's actual codeblock data to follow
+                                if !h.empty && !h.included_cblks.is_empty() {
+                                    // Only align if there's codeblock data to read
+                                    let has_data = h.included_cblks.iter().any(|cb| cb.data_len > 0);
+                                    if has_data {
+                                        if std::env::var("J2K_DEBUG").is_ok() {
+                                            let pos_before = parser.reader.position();
+                                            parser.reader.align_to_byte();
+                                            let pos_after = parser.reader.position();
+                                            eprintln!("  align_to_byte: {} -> {}", pos_before, pos_after);
+                                        } else {
+                                            parser.reader.align_to_byte();
+                                        }
+                                    }
                                 }
 
                                 // EPH Marker Handling
@@ -503,9 +521,20 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         for cb_info in header.included_cblks {
             if cb_info.data_len > 0 {
                 let data_len = cb_info.data_len as usize;
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    let pos_before = parser.reader.position();
+                    eprintln!("  reading {} bytes of codeblock data at pos={}", data_len, pos_before);
+                }
                 let mut data = vec![0u8; data_len];
                 for item in &mut data {
                     *item = parser.reader.read_u8()?;
+                }
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    let pos_after = parser.reader.position();
+                    let remaining = parser.reader.remaining_data().len();
+                    let next_bytes: Vec<_> = parser.reader.remaining_data().iter().take(4).collect();
+                    eprintln!("  after reading: pos={} remaining={} next_bytes={:02X?}", 
+                        pos_after, remaining, next_bytes);
                 }
 
                 let tile = &mut parser.image.tiles[isot as usize];

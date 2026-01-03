@@ -79,6 +79,10 @@ impl PacketHeader {
 
         // 1. Zero-length packet bit
         let bit = reader.read_bit()?;
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("PACKET: layer={}, grid={}x{}, subbands={}, empty_bit={}", 
+                layer, grid_width, grid_height, num_subbands, bit);
+        }
         if bit == 0 {
             header.empty = true;
             return Ok(header);
@@ -97,8 +101,10 @@ impl PacketHeader {
                 for x in 0..grid_width {
                     // Determine inclusion
                     let threshold = (layer + 1) as i32;
+                    // A codeblock is "already included" only if we have decoded its exact
+                    // inclusion layer in a previous layer AND that layer is below current threshold
                     let already_included =
-                        subband_state.inclusion_tree.get_current_value(x, y) < threshold;
+                        subband_state.inclusion_tree.is_known_below_threshold(x, y, threshold);
 
                     let mut process_block = false;
                     if already_included {
@@ -115,23 +121,6 @@ impl PacketHeader {
                     }
 
                     if process_block {
-                        /*
-                        eprintln!(
-                            "DEBUG: LBlock val={}, reading {} bits. New LBlock={}",
-                            lbits - 3, lbits,
-                            state.lblock[s][cb_idx]
-                        );
-                        */
-                        /*
-                        eprintln!("DEBUG: LBlock val={}, reading {} bits", lbits - 3, lbits);
-                        */
-                        /*
-                        eprintln!(
-                            "DEBUG: CB {},{} included in subband {}",
-                            x, y, s
-                        );
-                        */
-
                         // Decode Zero Bit Planes
                         // Only present if this is the first time included
                         if !already_included {
@@ -148,6 +137,11 @@ impl PacketHeader {
                         let lbits = subband_state.lblock_tree.get_current_value(x, y) + 3;
 
                         let data_len = reader.read_bits(lbits as u8)?;
+
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            eprintln!("  CB[{},{}] subband={}: zero_bp={}, passes={}, lbits={}, len={}",
+                                x, y, s, zero_bp, num_passes, lbits, data_len);
+                        }
 
                         header.included_cblks.push(CodeBlockInfo {
                             x,
