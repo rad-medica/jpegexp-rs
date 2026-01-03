@@ -1,4 +1,28 @@
-# Codec Test Results and Analysis
+# Codec Test Results
+
+## Recent JPEG 2000 Decoder Fixes (2026-01-02)
+
+### Fixed Issues:
+1. **Tag Tree Bit Interpretation**: Fixed inverted bit semantics in `tag_tree.rs`. JPEG 2000 spec says bit=1 means "value found at current low", bit=0 means "value is higher". Our implementation had this reversed.
+
+2. **2D DWT Inverse**: Rewrote `Dwt53::inverse_2d` in `dwt.rs`. The previous implementation incorrectly mixed horizontal and vertical passes. The correct order is:
+   - First: Vertical inverse on columns (LL+LH → left cols, HL+HH → right cols)
+   - Second: Horizontal inverse on rows (left+right → output)
+
+3. **MQ Decoder Byte Input**: Aligned `byte_in()` in `mq_coder.rs` with OpenJPEG's implementation. The byte input now uses addition to `c` register rather than OR operations.
+
+4. **MQ Decoder Conditional Exchange**: Fixed the LPS/MPS exchange logic in `decode_bit()` to match ISO/IEC 15444-1 and OpenJPEG's implementation.
+
+### Remaining Issue:
+The MQ decoder still produces incorrect coefficient values when decoding OpenJPEG-encoded files. The decoded coefficients are completely wrong (e.g., expected [0, 2, 4, 6, ...] but getting [-194, 35, -20, ...]). This suggests a fundamental mismatch between our MQ decoder and OpenJPEG's encoder that requires further investigation.
+
+### Test Status:
+- All library tests pass (26/26)
+- Roundtrip encoding/decoding with our own encoder works
+- Decoding OpenJPEG-encoded files does NOT work correctly yet
+
+---
+ and Analysis
 
 **Test Date:** 2026-01-02 (Updated)  
 **Test Script:** `cargo test --release`

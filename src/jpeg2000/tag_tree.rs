@@ -136,18 +136,27 @@ impl TagTree {
         }
 
         // Encode
+        // JPEG 2000 tag tree semantics (per OpenJPEG):
+        // bit=1 means "value equals current low" (found!)
+        // bit=0 means "value is higher than current low" (continue)
         while let Some(curr_idx) = stack.pop() {
             let node = &mut self.nodes[curr_idx];
             while node.low < threshold {
-                if node.value > node.low {
+                if node.value == node.low {
+                    // Found: value equals current low, write 1
                     writer.write_bit(1);
-                    node.low += 1;
-                } else {
-                    writer.write_bit(0);
+                    node.known = true;
                     break;
+                } else {
+                    // Value is higher, write 0 and increment low
+                    writer.write_bit(0);
+                    node.low += 1;
                 }
             }
-            node.known = node.low < threshold;
+            if !node.known && node.low >= threshold {
+                // We reached threshold without finding the value
+                node.known = false;
+            }
         }
     }
 
@@ -198,14 +207,18 @@ impl TagTree {
                 }
                 let bit = reader.read_bit()?;
                 if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!("    TT[{}]: bit={} low={}->{} known={} threshold={}", 
-                        curr_idx, bit, node.low, node.low + bit as i32, node.known, threshold);
+                    eprintln!("    TT[{}]: bit={} low={} known={} threshold={}", 
+                        curr_idx, bit, node.low, node.known, threshold);
                 }
+                // JPEG 2000 tag tree semantics (per OpenJPEG):
+                // bit=1 means "value equals current low" (found!)
+                // bit=0 means "value is higher than current low" (continue)
                 if bit == 1 {
-                    node.low += 1;
-                } else {
                     node.known = true;
+                    // node.low stays at current value (which is the actual value)
                     break;
+                } else {
+                    node.low += 1;
                 }
             }
         }

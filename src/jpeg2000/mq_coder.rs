@@ -348,51 +348,56 @@ impl MqCoder {
 
     // ... (Encoder methods omitted or assumed present) ...
 
-    // Decoder Initialization (C.3.1)
+    // Decoder Initialization (C.3.1) - Following OpenJPEG's approach
     pub fn init_decoder(&mut self, data: &[u8]) {
         self.source = data.to_vec();
         self.src_pos = 0;
+        self.ct = 0;
+
+        if data.is_empty() {
+            self.c = 0xFF << 16;
+        } else {
+            self.c = (data[0] as u32) << 16;
+        }
 
         self.byte_in();
-        self.c = (self.buffer_byte as u32) << 16;
-        self.byte_in();
-        self.c |= (self.buffer_byte as u32) << 8;
         self.c <<= 7;
-        self.ct -= 7;
+        self.ct = self.ct.saturating_sub(7);
         self.a = 0x8000;
     }
 
     fn byte_in(&mut self) {
-        if self.src_pos < self.source.len() {
-            let b = self.source[self.src_pos];
-            self.src_pos += 1;
-            if b == 0xFF {
-                if self.src_pos < self.source.len() {
-                    let b_next = self.source[self.src_pos];
-                    if b_next > 0x8F {
-                        self.c += 0xFF00;
-                        self.ct = 8;
-                        // Don't consume marker
-                    } else {
-                        self.buffer_byte = b;
-                        self.src_pos += 1; // consume b_next (stuffing or data)
-                        self.ct = 7; // ISO 15444-1 C.3.1: "cT is set to 7" if 0xFF
-                                     // Actually, if 0xFF 0x00, we load 0xFF. cT should be 7?
-                                     // "If the byte is 0xFF, the next byte is examined... if 0x00, B = 0xFF, cT = 7, advance."
-                                     // My code had cT=8. This shifts 8 bits?
-                                     // If B=FF, only 7 bits are used.
-                    }
-                } else {
-                    self.buffer_byte = 0xFF;
-                    self.ct = 7;
-                }
-            } else {
-                self.buffer_byte = b;
+        // Following OpenJPEG's bytein logic
+        // Looks at current byte and next byte
+        if self.src_pos >= self.source.len() {
+            // End of stream - add 0xFF00 pattern
+            self.c += 0xFF00;
+            self.ct = 8;
+            return;
+        }
+
+        let current = self.source[self.src_pos];
+        let next = if self.src_pos + 1 < self.source.len() {
+            self.source[self.src_pos + 1]
+        } else {
+            0xFF
+        };
+
+        if current == 0xFF {
+            if next > 0x8F {
+                // Marker detected - don't consume, add 0xFF00
+                self.c += 0xFF00;
                 self.ct = 8;
+            } else {
+                // Bit stuffing or regular data after 0xFF
+                self.src_pos += 1;
+                self.c += (next as u32) << 9; // Shift by 9 for bit stuffing
+                self.ct = 7;
             }
         } else {
-            self.buffer_byte = 0xFF;
-            self.ct = 8; // EOF logic varies, but usually just feed FF
+            self.src_pos += 1;
+            self.c += (next as u32) << 8;
+            self.ct = 8;
         }
     }
 
@@ -438,23 +443,17 @@ impl MqCoder {
 
         let d;
         if chigh < qe {
-            // LPS occurred (because value V is in [0, Qe) range?)
-            // If Encoder placed LPS at [0, Qe).
-            // Then logic: if V < Qe => LPS.
-            // Yes.
-
-            // Result is LPS
-            let val = 1 - mps;
-            // Conditional exchange C.3.4
+            // LPS path - C_high < Qe
+            // Apply LPS exchange (per OpenJPEG's opj_mqc_lpsexchange_macro)
             if self.a < qe {
-                self.a = qe; // MPS interval was smaller?
-                d = val;
-                // NMPS
+                // Conditional exchange: return MPS, use NMPS context
+                self.a = qe;
+                d = mps;
                 self.contexts[cx] = (MQ_TABLE[idx].nmps << 1) | mps;
             } else {
-                self.a = qe; // LPS interval is Qe.
-                d = val;
-                // NLPS
+                // Normal LPS: return LPS, use NLPS context
+                self.a = qe;
+                d = 1 - mps;
                 let switch = MQ_TABLE[idx].switch;
                 let next_idx = MQ_TABLE[idx].nlps;
                 let next_mps = if switch == 1 { 1 - mps } else { mps };
@@ -463,25 +462,22 @@ impl MqCoder {
             self.renormalize_input();
             d
         } else {
-            // MPS occurred (V >= Qe)
-            // C -= Qe (move based down to 0)
+            // MPS path - C_high >= Qe
+            // C -= Qe << 16 (subtract from C register)
             self.c -= (qe as u32) << 16;
 
             if self.a < 0x8000 {
+                // Need renormalization - apply MPS exchange
                 if self.a < qe {
-                    // MPS was smaller (Exchange)
-                    // If A < Qe, then MPS and LPS are swapped (Conditional Exchange)
+                    // Conditional exchange: return LPS, use NLPS context
                     d = 1 - mps;
-
-                    // NLPS logic follows
-                    // NLPS
                     let switch = MQ_TABLE[idx].switch;
                     let next_idx = MQ_TABLE[idx].nlps;
                     let next_mps = if switch == 1 { 1 - mps } else { mps };
                     self.contexts[cx] = (next_idx << 1) | next_mps;
                 } else {
+                    // Normal MPS: return MPS, use NMPS context
                     d = mps;
-                    // NMPS
                     self.contexts[cx] = (MQ_TABLE[idx].nmps << 1) | mps;
                 }
                 self.renormalize_input();
@@ -493,15 +489,14 @@ impl MqCoder {
     }
 
     fn renormalize_input(&mut self) {
+        // Following OpenJPEG's opj_mqc_renormd_macro
         loop {
             if self.ct == 0 {
-                self.byte_in();
-                self.c |= (self.buffer_byte as u32) << 8;
-                self.ct = 8;
+                self.byte_in(); // byte_in already adds to c
             }
             self.a <<= 1;
             self.c <<= 1;
-            self.ct -= 1;
+            self.ct = self.ct.saturating_sub(1);
             if self.a >= 0x8000 {
                 break;
             }
