@@ -26,14 +26,16 @@ impl<'a> BitPlaneCoder<'a> {
         // UNIFORM context (18): always state 46 for 50% probability
         mq.set_context(Self::CTX_UNIFORM, 46, 0);
         
+        // RUN context (17): 
+        // Per JPEG 2000 Table D.7, initial state should be 3
+        // However, testing shows OpenJPEG-encoded files work better with state 0
+        // This may be due to a difference in how OpenJPEG initializes contexts
         if openjpeg_compat {
-            // OpenJPEG-compatible: RUN context at state 0 (default)
-            // State 0 has Qe=0x5601 (~33.6% LPS probability)
-            // Don't set - let it stay at default state 0
+            // For decoding OpenJPEG files, use state 0
+            // State 0 has Qe=0x5601 which triggers conditional exchange
+            mq.set_context(Self::CTX_RUN, 0, 0);
         } else {
-            // Our internal mode: RUN context at state 3
-            // State 3 has Qe=0x0AC1 (~4.2% LPS probability)
-            // This is what our encoder expects
+            // For our internal encoder/decoder, use state 3 per spec
             mq.set_context(Self::CTX_RUN, 3, 0);
         }
 
