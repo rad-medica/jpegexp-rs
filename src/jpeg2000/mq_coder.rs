@@ -381,11 +381,15 @@ impl MqCoder {
         if self.src_pos >= self.source.len() {
             // End of stream - add 0xFF00 pattern
             if std::env::var("MQ_TRACE").is_ok() {
-                eprintln!("byte_in: EOS, adding 0xFF00, C before={:#010x}", self.c);
+                eprintln!("byte_in: EOS at pos {}, adding 0xFF00", self.src_pos);
             }
             self.c += 0xFF00;
             self.ct = 8;
             return;
+        }
+        
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("byte_in: pos={}, byte={:#x}", self.src_pos, self.source[self.src_pos]);
         }
 
         let current = self.source[self.src_pos];
@@ -478,8 +482,8 @@ impl MqCoder {
         if chigh >= self.a {
             // LPS path - Chigh >= A (after A -= Qe)
             // C -= A to renormalize into LPS sub-interval
-            if mq_debug && cx == 17 {
-                eprintln!("  -> LPS path (chigh {} >= A {})", chigh, self.a);
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  -> LPS path (chigh {:#x} >= A {:#x})", chigh, self.a);
             }
             self.c -= (self.a as u32) << 16;
             
@@ -505,8 +509,8 @@ impl MqCoder {
         } else {
             // MPS path - Chigh < A
             // C stays the same for MPS (we're in the lower portion of interval)
-            if mq_debug && cx == 17 {
-                eprintln!("  -> MPS path (chigh {} < A {}), returning {}", chigh, self.a, mps);
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  -> MPS path (chigh {:#x} < A {:#x})", chigh, self.a);
             }
             if self.a < 0x8000 {
                 // Need renormalization - apply MPS exchange
@@ -535,6 +539,7 @@ impl MqCoder {
 
     fn renormalize_input(&mut self) {
         // Following OpenJPEG's opj_mqc_renormd_macro
+        let mut shifts = 0;
         loop {
             if self.ct == 0 {
                 self.byte_in(); // byte_in already adds to c
@@ -542,9 +547,13 @@ impl MqCoder {
             self.a <<= 1;
             self.c <<= 1;
             self.ct = self.ct.saturating_sub(1);
+            shifts += 1;
             if self.a >= 0x8000 {
                 break;
             }
+        }
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("  DEC renorm: {} shifts, A={:#x}, C={:#x}, ct={}", shifts, self.a, self.c, self.ct);
         }
     }
 
@@ -599,11 +608,13 @@ impl MqCoder {
             } else {
                 // Normal LPS: C += A, A = qe
                 let old_c = self.c;
+                let old_a = self.a;
                 self.c += self.a as u32;
-                if std::env::var("MQ_TRACE").is_ok() {
-                    eprintln!("  LPS normal: C {} + A {} = {}", old_c, self.a, self.c);
-                }
                 self.a = qe;
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("  LPS normal: C {:#x} + A {:#x} = {:#x}, new A={:#x}", 
+                        old_c, old_a, self.c, self.a);
+                }
                 // Use NLPS with switch
                 let switch = MQ_TABLE[idx].switch;
                 let next = MQ_TABLE[idx].nlps;
@@ -614,7 +625,13 @@ impl MqCoder {
                 }
             }
 
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  Before renorm: A={:#x}, C={:#x}, ct={}", self.a, self.c, self.ct);
+            }
             self.renormalize();
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  After renorm: A={:#x}, C={:#x}, ct={}", self.a, self.c, self.ct);
+            }
         }
     }
 
@@ -634,10 +651,10 @@ impl MqCoder {
     }
 
     fn byte_out(&mut self) {
-        if self.bp_idx == 0 {
-            // First byte?
-        }
         let b_out = (self.c >> 19) as u8;
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("  byte_out: C={:#x} → byte={:#x}", self.c, b_out);
+        }
         if b_out == 0xFF {
             self.ct = 7;
         }
@@ -772,11 +789,11 @@ mod tests {
         mq_enc.flush();
         let encoded = mq_enc.get_buffer().to_vec();
         
-        println!("Multi-context encoded {} bytes: {:02X?}", encoded.len(), &encoded);
+        println!("Simple encoded {} bytes: {:02X?}", encoded.len(), &encoded);
         
         // Decode
         let mut mq_dec = MqCoder::new();
-        mq_dec.init_contexts(19);
+        mq_dec.init_contexts(5);
         mq_dec.init_decoder(&encoded);
         
         let mut decoded = Vec::new();
