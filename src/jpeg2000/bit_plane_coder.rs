@@ -15,6 +15,13 @@ impl<'a> BitPlaneCoder<'a> {
         let size = (width * height) as usize;
         let mut mq = MqCoder::new();
         mq.init_contexts(19);
+        
+        // Initialize UNIFORM context (18) to state 46 for uniform probability
+        // Context format is (state_index << 1) | mps, so state 46 with MPS=0 is 92
+        mq.set_context(Self::CTX_UNIFORM, 46, 0);
+        
+        // Initialize RUN context (17) to state 3 (per OpenJPEG's t1_init_ctxno_zc_enc)
+        mq.set_context(Self::CTX_RUN, 3, 0);
 
         // Load coefficients if provided usually
         // But for standard new, init to zero if not reusing
@@ -139,14 +146,46 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
+    /// Calculate the maximum bit-plane needed based on the coefficient magnitudes
+    fn calculate_max_bit_plane(&self) -> u8 {
+        let max_val = self.data.iter().map(|v| v.abs()).max().unwrap_or(0);
+        if max_val == 0 {
+            return 0;
+        }
+        // Find the highest bit position (0-indexed)
+        // e.g., 128 = 0b10000000, highest bit is position 7
+        (32 - max_val.leading_zeros()) as u8 - 1
+    }
+
     pub fn encode_codeblock(&mut self) {
-        // Iterate bitplanes from MSB to LSB
-        // Assume 30 down to 0? Or determined by max value.
-        // For testing, let's start at bit 5.
-        for bp in (0..5).rev() {
-            self.significance_propagation(bp);
-            self.magnitude_refinement(bp);
-            self.cleanup(bp);
+        // Calculate max bit-plane from actual coefficient magnitudes
+        let max_bit_plane = self.calculate_max_bit_plane();
+        
+        if max_bit_plane == 0 && self.data.iter().all(|&v| v == 0) {
+            // All zeros - nothing to encode
+            return;
+        }
+        
+        // JPEG 2000 encoding pass order:
+        // 1. First pass: Cleanup at max_bit_plane
+        // 2. Then for each bit-plane from (max_bit_plane - 1) down to 0:
+        //    - Significance Propagation Pass
+        //    - Magnitude Refinement Pass  
+        //    - Cleanup Pass
+        
+        // First pass: Cleanup at max bit-plane
+        self.encode_cleanup(max_bit_plane);
+        
+        // Subsequent passes for remaining bit-planes
+        for bp in (0..max_bit_plane).rev() {
+            // Reset VISITED flags before SigProp
+            for v in &mut self.state {
+                *v &= !Self::VISITED;
+            }
+            
+            self.encode_significance_propagation(bp);
+            self.encode_magnitude_refinement(bp);
+            self.encode_cleanup(bp);
         }
     }
 
@@ -237,6 +276,10 @@ impl<'a> BitPlaneCoder<'a> {
                             // Decode significance bit
                             let cx = self.get_zc_context(orientation, hc, vc, dc);
                             let bit = self.mq.decode_bit(cx);
+                            
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("DEC: SigProp idx={} bp={}: ctx={}, bit={}", idx, bit_plane, cx, bit);
+                            }
 
                             if bit != 0 {
                                 // Became significant
@@ -271,48 +314,8 @@ impl<'a> BitPlaneCoder<'a> {
         &mut self,
         bit_plane: u8,
     ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
-        let width = self.width;
-        let height = self.height;
-        let size = (width * height) as usize;
-
-        // Collect indices and compute contexts before mutable borrow
-        let mut indices_to_process = Vec::new();
-        for i in 0..size {
-            let state = self.state[i];
-            if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
-                let mr_ctx = self.get_magnitude_refinement_context(i, width, height);
-                indices_to_process.push((i, state, mr_ctx));
-            }
-        }
-
-        // Now process with mutable borrow
-        for (i, state, mr_ctx) in indices_to_process {
-            self.state[i] |= Self::VISITED;
-
-            // Decode refinement bit
-            let bit = self.mq.decode_bit(mr_ctx);
-
-            if bit != 0 {
-                // Add bit to coefficient
-                if (state & Self::SIGN) != 0 {
-                    self.coefficients[i] -= 1 << bit_plane;
-                } else {
-                    self.coefficients[i] += 1 << bit_plane;
-                }
-            }
-
-            self.state[i] |= Self::REFINE;
-        }
-        Ok(())
-    }
-
-    fn decode_cleanup(
-        &mut self,
-        bit_plane: u8,
-        orientation: u8,
-    ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
-        // Scan in stripe order
-        let stripe_height = 4;
+        // Use stripe order (4 rows at a time, column-by-column) to match encoder
+        let stripe_height = 4u32;
         let width = self.width;
         let height = self.height;
 
@@ -328,30 +331,246 @@ impl<'a> BitPlaneCoder<'a> {
 
                     let state = self.state[idx];
 
-                    // If not visited, must be insignificant
-                    if (state & Self::VISITED) == 0 {
-                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                    // If significant and not visited in SigProp
+                    if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
+                        self.state[idx] |= Self::VISITED;
 
-                        // Decode significance bit
-                        let cx = self.get_zc_context(orientation, hc, vc, dc);
-                        let bit = self.mq.decode_bit(cx);
+                        // Get MR context
+                        let mr_ctx = self.get_magnitude_refinement_context(idx, width, height);
+
+                        // Decode refinement bit
+                        let bit = self.mq.decode_bit(mr_ctx);
+                        
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("DEC: MagRef idx={} bp={}: ctx={}, bit={}, coeff_before={}", 
+                                idx, bit_plane, mr_ctx, bit, self.coefficients[idx]);
+                        }
 
                         if bit != 0 {
-                            // Became significant
-                            self.state[idx] |= Self::SIG;
-
-                            // Decode sign
-                            let sc_data = self.get_sign_context(x, y, width, height);
-                            let sc_ctx = sc_data & 0xFF;
-                            let xor = (sc_data >> 8) & 1;
-                            let sym = self.mq.decode_bit(sc_ctx);
-                            let sign_bit = sym ^ (xor as u8);
-
-                            if sign_bit != 0 {
-                                self.state[idx] |= Self::SIGN;
-                                self.coefficients[idx] = -(1 << bit_plane);
+                            // Add bit to coefficient
+                            if (state & Self::SIGN) != 0 {
+                                self.coefficients[idx] -= 1 << bit_plane;
                             } else {
-                                self.coefficients[idx] = 1 << bit_plane;
+                                self.coefficients[idx] += 1 << bit_plane;
+                            }
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("DEC: MagRef idx={}: coeff_after={}", idx, self.coefficients[idx]);
+                            }
+                        }
+
+                        self.state[idx] |= Self::REFINE;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // Context 17 is the RUN context (for RLC mode decision)
+    // Context 18 is the UNIFORM context (for position decoding in RLC)
+    const CTX_RUN: usize = 17;
+    const CTX_UNIFORM: usize = 18;
+
+    fn decode_cleanup(
+        &mut self,
+        bit_plane: u8,
+        orientation: u8,
+    ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
+        // Scan in stripe order (4 rows at a time, column-by-column)
+        let stripe_height = 4u32;
+        let width = self.width;
+        let height = self.height;
+
+        for y_stripe in (0..height).step_by(stripe_height as usize) {
+            for x in 0..width {
+                let actual_stripe_height = stripe_height.min(height - y_stripe);
+                
+                // Check if we can use RLC for this stripe column
+                // RLC is used when:
+                // 1. We're at the start of a stripe column (y_offset = 0)
+                // 2. All 4 samples in the column are insignificant and unvisited
+                // 3. None of them have significant neighbors (context 0 for all)
+                
+                // Enable RLC for proper JPEG 2000 cleanup pass decoding
+                let mut can_use_rlc = actual_stripe_height == 4; // Only for full stripes
+                
+                if can_use_rlc {
+                    for y_offset in 0..4 {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * width + x) as usize;
+                        
+                        if idx >= self.state.len() {
+                            can_use_rlc = false;
+                            break;
+                        }
+                        
+                        let state = self.state[idx];
+                        if (state & (Self::SIG | Self::VISITED)) != 0 {
+                            can_use_rlc = false;
+                            break;
+                        }
+                        
+                        // Check if any neighbor is significant (context would be non-zero)
+                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                        if hc > 0 || vc > 0 || dc > 0 {
+                            can_use_rlc = false;
+                            break;
+                        }
+                    }
+                }
+                
+                    if can_use_rlc {
+                    // Use RLC: decode a single bit with RUN context
+                    let run_bit = self.mq.decode_bit(Self::CTX_RUN);
+                    
+                    if run_bit == 0 {
+                        // All 4 samples in this column remain insignificant
+                        // Nothing to do - they stay at 0
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("DEC: RLC col={} bp={}: RUN=0, all insignificant", x, bit_plane);
+                        }
+                        continue; // Move to next column
+                    } else {
+                        // At least one sample becomes significant
+                        // Decode 2 bits with UNIFORM context to get position (0-3)
+                        // Note: Position is encoded MSB first
+                        let pos_bit1 = self.mq.decode_bit(Self::CTX_UNIFORM);
+                        let pos_bit0 = self.mq.decode_bit(Self::CTX_UNIFORM);
+                        let pos = ((pos_bit1 as u32) << 1) | (pos_bit0 as u32);
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("DEC: RLC col={} bp={}: RUN=1, pos bits={},{}, pos={}", x, bit_plane, pos_bit1, pos_bit0, pos);
+                        }
+                        
+                        if std::env::var("BPC_DEBUG").is_ok() && bit_plane >= 6 {
+                            eprintln!("    RLC pos_bits={},{} pos={}", pos_bit1, pos_bit0, pos);
+                        }
+                        
+                        // Process samples from position 0 to pos-1 with regular cleanup
+                        // (these are the samples before the first significant one)
+                        for y_offset in 0..pos {
+                            let y = y_stripe + y_offset;
+                            let idx = (y * width + x) as usize;
+                            
+                            if idx >= self.state.len() {
+                                continue;
+                            }
+                            
+                            // These samples are definitely insignificant (we know from RLC)
+                            // but we might need to decode their state anyway... 
+                            // Actually no - in RLC mode, samples before pos are guaranteed insignificant
+                        }
+                        
+                        // Mark the position that became significant and decode its sign
+                        let y = y_stripe + pos;
+                        let idx = (y * width + x) as usize;
+                        
+                        self.state[idx] |= Self::SIG;
+                        
+                        // Decode sign
+                        let sc_data = self.get_sign_context(x, y, width, height);
+                        let sc_ctx = sc_data & 0xFF;
+                        let xor = (sc_data >> 8) & 1;
+                        let sym = self.mq.decode_bit(sc_ctx);
+                        let sign_bit = sym ^ (xor as u8);
+                        
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("DEC: Sign idx={} bp={}: ctx={}, xor={}, sym={}, sign_bit={}", idx, bit_plane, sc_ctx, xor, sym, sign_bit);
+                        }
+                        
+                        if sign_bit != 0 {
+                            self.state[idx] |= Self::SIGN;
+                            self.coefficients[idx] = -(1 << bit_plane);
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("DEC: set coeff[{}] = {} (negative)", idx, self.coefficients[idx]);
+                            }
+                        } else {
+                            self.coefficients[idx] = 1 << bit_plane;
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("DEC: set coeff[{}] = {} (positive)", idx, self.coefficients[idx]);
+                            }
+                        }
+                        
+                        // Continue with regular cleanup for remaining positions in this column
+                        for y_offset in (pos + 1)..4 {
+                            let y = y_stripe + y_offset;
+                            let idx = (y * width + x) as usize;
+                            
+                            if idx >= self.state.len() {
+                                continue;
+                            }
+                            
+                            let state = self.state[idx];
+                            if (state & Self::VISITED) == 0 {
+                                let (hc, vc, dc) = self.get_neighbors(x, y);
+                                let cx = self.get_zc_context(orientation, hc, vc, dc);
+                                let bit = self.mq.decode_bit(cx);
+                                
+                                if std::env::var("BPC_TRACE").is_ok() {
+                                    eprintln!("DEC: Cleanup-cont idx={} bp={}: ctx={}, bit={}", idx, bit_plane, cx, bit);
+                                }
+                                
+                                if bit != 0 {
+                                    self.state[idx] |= Self::SIG;
+                                    
+                                    let sc_data = self.get_sign_context(x, y, width, height);
+                                    let sc_ctx = sc_data & 0xFF;
+                                    let xor = (sc_data >> 8) & 1;
+                                    let sym = self.mq.decode_bit(sc_ctx);
+                                    let sign_bit = sym ^ (xor as u8);
+                                    
+                                    if sign_bit != 0 {
+                                        self.state[idx] |= Self::SIGN;
+                                        self.coefficients[idx] = -(1 << bit_plane);
+                                    } else {
+                                        self.coefficients[idx] = 1 << bit_plane;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Regular cleanup (no RLC)
+                    for y_offset in 0..actual_stripe_height {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * width + x) as usize;
+
+                        if idx >= self.state.len() {
+                            continue;
+                        }
+
+                        let state = self.state[idx];
+
+                        // If not visited, must be insignificant - decode its significance
+                        if (state & Self::VISITED) == 0 {
+                            let (hc, vc, dc) = self.get_neighbors(x, y);
+                            let cx = self.get_zc_context(orientation, hc, vc, dc);
+                            let bit = self.mq.decode_bit(cx);
+
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("DEC: Cleanup idx={} bp={}: ctx={}, bit={}", idx, bit_plane, cx, bit);
+                            }
+
+                            if bit != 0 {
+                                // Became significant
+                                self.state[idx] |= Self::SIG;
+
+                                // Decode sign
+                                let sc_data = self.get_sign_context(x, y, width, height);
+                                let sc_ctx = sc_data & 0xFF;
+                                let xor = (sc_data >> 8) & 1;
+                                let sym = self.mq.decode_bit(sc_ctx);
+                                let sign_bit = sym ^ (xor as u8);
+
+                                if std::env::var("BPC_DEBUG").is_ok() && bit_plane >= 6 {
+                                    eprintln!("    Sign: ctx={}, sym={}, xor={}, sign_bit={}", sc_ctx, sym, xor, sign_bit);
+                                }
+
+                                if sign_bit != 0 {
+                                    self.state[idx] |= Self::SIGN;
+                                    self.coefficients[idx] = -(1 << bit_plane);
+                                } else {
+                                    self.coefficients[idx] = 1 << bit_plane;
+                                }
                             }
                         }
                     }
@@ -463,48 +682,55 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn significance_propagation(&mut self, bit_plane: u8) {
-        // Iterate scan order (simple raster for simplicity, J2K stripes 4 rows)
-        // Correct J2K is stripe order: 4 rows column-wise.
-        let w = self.width;
-        let h = self.height;
+    /// Encode significance propagation pass using stripe order (matches decoder)
+    fn encode_significance_propagation(&mut self, bit_plane: u8) {
+        let stripe_height = 4u32;
+        let width = self.width;
+        let height = self.height;
 
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) as usize;
-                let state = self.state[idx];
+        for y_stripe in (0..height).step_by(stripe_height as usize) {
+            for x in 0..width {
+                for y_offset in 0..stripe_height.min(height - y_stripe) {
+                    let y = y_stripe + y_offset;
+                    let idx = (y * width + x) as usize;
 
-                // If insignificant and not visited
-                if (state & (Self::SIG | Self::VISITED)) == 0 {
-                    let (hc, vc, dc) = self.get_neighbors(x, y);
-                    if hc > 0 || vc > 0 || dc > 0 {
-                        // Propagate Importance
-                        let val = self.data[idx];
-                        let bit = (val.abs() >> bit_plane) & 1;
+                    if idx >= self.state.len() {
+                        continue;
+                    }
 
-                        // Encode ZC
-                        let cx = self.get_zc_context(0, hc, vc, dc); // band 0 assumed
-                        self.mq.encode(bit as u8, cx);
+                    let state = self.state[idx];
 
-                        if bit == 1 {
-                            // Became Significant: Update State
-                            let sign = if val < 0 { 1 } else { 0 };
-                            self.state[idx] |= Self::SIG | Self::VISITED;
-                            if sign == 1 {
-                                self.state[idx] |= Self::SIGN;
+                    // If insignificant and not visited, and has significant neighbors
+                    if (state & (Self::SIG | Self::VISITED)) == 0 {
+                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                        if hc > 0 || vc > 0 || dc > 0 {
+                            let val = self.data[idx];
+                            let bit = ((val.abs() >> bit_plane) & 1) as u8;
+
+                            // Encode ZC
+                            let cx = self.get_zc_context(0, hc, vc, dc);
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("ENC: SigProp idx={} bp={}: val={}, bit={}, ctx={}", idx, bit_plane, val, bit, cx);
                             }
+                            self.mq.encode(bit, cx);
 
-                            // Encode Sign (SC)
-                            // Context depends on neighbor signs
-                            // Context depends on neighbor signs
-                            let sc_data = self.get_sign_context(x, y, self.width, self.height);
-                            let sc_ctx = sc_data & 0xFF;
-                            let xor = (sc_data >> 8) & 1;
-                            let sym = sign ^ (xor as u8);
-                            self.mq.encode(sym, sc_ctx);
-                        } else {
-                            // Visited but not significant
-                            self.state[idx] |= Self::VISITED;
+                            if bit == 1 {
+                                // Became Significant
+                                let sign = if val < 0 { 1u8 } else { 0u8 };
+                                self.state[idx] |= Self::SIG | Self::VISITED;
+                                if sign == 1 {
+                                    self.state[idx] |= Self::SIGN;
+                                }
+
+                                // Encode Sign
+                                let sc_data = self.get_sign_context(x, y, width, height);
+                                let sc_ctx = sc_data & 0xFF;
+                                let xor = ((sc_data >> 8) & 1) as u8;
+                                let sym = sign ^ xor;
+                                self.mq.encode(sym, sc_ctx);
+                            } else {
+                                self.state[idx] |= Self::VISITED;
+                            }
                         }
                     }
                 }
@@ -512,67 +738,238 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn magnitude_refinement(&mut self, bit_plane: u8) {
-        let w = self.width;
-        let h = self.height;
-        for i in 0..(w * h) as usize {
-            let state = self.state[i];
-            // If already significant and NOT visited in SigProp (i.e., became sig in prev bitplane)
-            if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
-                self.state[i] |= Self::VISITED; // Mark visited for this bitplane
-                let val = self.data[i];
-                let bit = (val.abs() >> bit_plane) & 1;
+    /// Encode magnitude refinement pass using stripe order (matches decoder)
+    fn encode_magnitude_refinement(&mut self, bit_plane: u8) {
+        let stripe_height = 4u32;
+        let width = self.width;
+        let height = self.height;
 
-                // MR Context
-                let mr_ctx = self.get_magnitude_refinement_context(i, w, h);
-                // Refinement logic: uses Neighbors+RefineBit state.
-                self.mq.encode(bit as u8, mr_ctx);
-                self.state[i] |= Self::REFINE; // First refinement done
+        for y_stripe in (0..height).step_by(stripe_height as usize) {
+            for x in 0..width {
+                for y_offset in 0..stripe_height.min(height - y_stripe) {
+                    let y = y_stripe + y_offset;
+                    let idx = (y * width + x) as usize;
+
+                    if idx >= self.state.len() {
+                        continue;
+                    }
+
+                    let state = self.state[idx];
+
+                    // If significant and not visited in SigProp
+                    if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
+                        self.state[idx] |= Self::VISITED;
+
+                        let val = self.data[idx];
+                        let bit = ((val.abs() >> bit_plane) & 1) as u8;
+
+                        // MR Context
+                        let mr_ctx = self.get_magnitude_refinement_context(idx, width, height);
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("ENC: MagRef idx={} bp={}: val={}, bit={}, ctx={}", 
+                                idx, bit_plane, val, bit, mr_ctx);
+                        }
+                        self.mq.encode(bit, mr_ctx);
+                        self.state[idx] |= Self::REFINE;
+                    }
+                }
             }
         }
     }
 
-    pub fn cleanup(&mut self, bit_plane: u8) {
-        // Encode remaining insignificant samples
-        let w = self.width;
-        let h = self.height;
+    /// Encode cleanup pass using stripe order with RLC (matches decoder)
+    fn encode_cleanup(&mut self, bit_plane: u8) {
+        let stripe_height = 4u32;
+        let width = self.width;
+        let height = self.height;
 
-        // RLC logic would go here: check if run of 4 is all insignificant
+        for y_stripe in (0..height).step_by(stripe_height as usize) {
+            for x in 0..width {
+                let actual_stripe_height = stripe_height.min(height - y_stripe);
 
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) as usize;
-                let state = self.state[idx];
-                if (state & Self::VISITED) == 0 {
-                    // Not visited: Must be insignificant so far
-                    let (hc, vc, dc) = self.get_neighbors(x, y);
+                // Check if we can use RLC for this stripe column
+                let mut can_use_rlc = actual_stripe_height == 4;
 
-                    // ZC Context
-                    let cx = self.get_zc_context(0, hc, vc, dc);
-                    let val = self.data[idx];
-                    let bit = (val.abs() >> bit_plane) & 1;
+                if can_use_rlc {
+                    for y_offset in 0..4 {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * width + x) as usize;
 
-                    self.mq.encode(bit as u8, cx);
+                        if idx >= self.state.len() {
+                            can_use_rlc = false;
+                            break;
+                        }
 
-                    if bit == 1 {
-                        // Became Significant
-                        let sign = if val < 0 { 1 } else { 0 };
+                        let state = self.state[idx];
+                        if (state & (Self::SIG | Self::VISITED)) != 0 {
+                            can_use_rlc = false;
+                            break;
+                        }
+
+                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                        if hc > 0 || vc > 0 || dc > 0 {
+                            can_use_rlc = false;
+                            break;
+                        }
+                    }
+                }
+
+                if can_use_rlc {
+                    // Check if any sample in this column becomes significant
+                    let mut first_sig_pos: Option<u32> = None;
+                    for y_offset in 0..4u32 {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * width + x) as usize;
+                        let val = self.data[idx];
+                        let bit = (val.abs() >> bit_plane) & 1;
+                        if bit == 1 {
+                            first_sig_pos = Some(y_offset);
+                            break;
+                        }
+                    }
+
+                    if let Some(pos) = first_sig_pos {
+                        // At least one sample becomes significant
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("ENC: RLC col={} bp={}: encode RUN=1, pos={}", x, bit_plane, pos);
+                        }
+                        self.mq.encode(1, Self::CTX_RUN); // run_bit = 1
+
+                        // Encode position (2 bits, MSB first)
+                        let pos_bit1 = ((pos >> 1) & 1) as u8;
+                        let pos_bit0 = (pos & 1) as u8;
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("ENC: pos bits = {},{}", pos_bit1, pos_bit0);
+                        }
+                        self.mq.encode(pos_bit1, Self::CTX_UNIFORM);
+                        self.mq.encode(pos_bit0, Self::CTX_UNIFORM);
+
+                        // Mark the first significant sample
+                        let y = y_stripe + pos;
+                        let idx = (y * width + x) as usize;
+                        let val = self.data[idx];
+                        let sign = if val < 0 { 1u8 } else { 0u8 };
                         self.state[idx] |= Self::SIG;
                         if sign == 1 {
                             self.state[idx] |= Self::SIGN;
                         }
 
-                        let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                        // Encode sign
+                        let sc_data = self.get_sign_context(x, y, width, height);
                         let sc_ctx = sc_data & 0xFF;
-                        let xor = (sc_data >> 8) & 1;
-                        let sym = sign ^ (xor as u8); // Invert if xor is set
+                        let xor = ((sc_data >> 8) & 1) as u8;
+                        let sym = sign ^ xor;
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("ENC: Sign idx={} bp={}: sign={}, ctx={}, xor={}, sym={}", idx, bit_plane, sign, sc_ctx, xor, sym);
+                        }
                         self.mq.encode(sym, sc_ctx);
+
+                        // Continue with regular cleanup for remaining positions
+                        for y_offset in (pos + 1)..4 {
+                            let y = y_stripe + y_offset;
+                            let idx = (y * width + x) as usize;
+
+                            if idx >= self.state.len() {
+                                continue;
+                            }
+
+                            let state = self.state[idx];
+                            if (state & Self::VISITED) == 0 {
+                                let (hc, vc, dc) = self.get_neighbors(x, y);
+                                let cx = self.get_zc_context(0, hc, vc, dc);
+                                let val = self.data[idx];
+                                let bit = ((val.abs() >> bit_plane) & 1) as u8;
+                                if std::env::var("BPC_TRACE").is_ok() {
+                                    eprintln!("ENC: Cleanup-cont idx={} bp={}: ctx={}, bit={}", idx, bit_plane, cx, bit);
+                                }
+                                self.mq.encode(bit, cx);
+
+                                if bit == 1 {
+                                    let sign = if val < 0 { 1u8 } else { 0u8 };
+                                    self.state[idx] |= Self::SIG;
+                                    if sign == 1 {
+                                        self.state[idx] |= Self::SIGN;
+                                    }
+
+                                    let sc_data = self.get_sign_context(x, y, width, height);
+                                    let sc_ctx = sc_data & 0xFF;
+                                    let xor = ((sc_data >> 8) & 1) as u8;
+                                    let sym = sign ^ xor;
+                                    self.mq.encode(sym, sc_ctx);
+                                }
+                            }
+                        }
+                    } else {
+                        // All 4 samples remain insignificant
+                        if std::env::var("BPC_TRACE").is_ok() {
+                            eprintln!("ENC: RLC col={} bp={}: encode RUN=0", x, bit_plane);
+                        }
+                        self.mq.encode(0, Self::CTX_RUN); // run_bit = 0
+                    }
+                } else {
+                    // Regular cleanup (no RLC)
+                    for y_offset in 0..actual_stripe_height {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * width + x) as usize;
+
+                        if idx >= self.state.len() {
+                            continue;
+                        }
+
+                        let state = self.state[idx];
+                        if (state & Self::VISITED) == 0 {
+                            let (hc, vc, dc) = self.get_neighbors(x, y);
+                            let cx = self.get_zc_context(0, hc, vc, dc);
+                            let val = self.data[idx];
+                            let bit = ((val.abs() >> bit_plane) & 1) as u8;
+                            if std::env::var("BPC_TRACE").is_ok() {
+                                eprintln!("ENC: Cleanup idx={} bp={}: ctx={}, bit={}", idx, bit_plane, cx, bit);
+                            }
+                            self.mq.encode(bit, cx);
+
+                            if bit == 1 {
+                                let sign = if val < 0 { 1u8 } else { 0u8 };
+                                self.state[idx] |= Self::SIG;
+                                if sign == 1 {
+                                    self.state[idx] |= Self::SIGN;
+                                }
+
+                                let sc_data = self.get_sign_context(x, y, width, height);
+                                let sc_ctx = sc_data & 0xFF;
+                                let xor = ((sc_data >> 8) & 1) as u8;
+                                let sym = sign ^ xor;
+                                self.mq.encode(sym, sc_ctx);
+                            }
+                        }
                     }
                 }
-                // Reset VISITED for next bitplane
-                self.state[idx] &= !Self::VISITED;
+
+                // Reset VISITED for next bit-plane
+                for y_offset in 0..actual_stripe_height {
+                    let y = y_stripe + y_offset;
+                    let idx = (y * width + x) as usize;
+                    if idx < self.state.len() {
+                        self.state[idx] &= !Self::VISITED;
+                    }
+                }
             }
         }
+    }
+
+    // Legacy functions kept for backwards compatibility but deprecated
+    #[deprecated(note = "Use encode_significance_propagation instead")]
+    pub fn significance_propagation(&mut self, bit_plane: u8) {
+        self.encode_significance_propagation(bit_plane);
+    }
+
+    #[deprecated(note = "Use encode_magnitude_refinement instead")]
+    pub fn magnitude_refinement(&mut self, bit_plane: u8) {
+        self.encode_magnitude_refinement(bit_plane);
+    }
+
+    #[deprecated(note = "Use encode_cleanup instead")]
+    pub fn cleanup(&mut self, bit_plane: u8) {
+        self.encode_cleanup(bit_plane);
     }
 }
 
@@ -605,5 +1002,34 @@ mod tests {
             sig,
             "Index 10 (-3) should be significant"
         );
+    }
+    
+    #[test]
+    fn test_bit_plane_roundtrip() {
+        // Simple 4x4 block with known values
+        let original = [-128i32, -64, 32, 16, -32, 64, -16, 8, 0, -8, 4, -4, 2, -2, 1, -1];
+        
+        // Encode
+        let mut bpc_enc = BitPlaneCoder::new(4, 4, &original);
+        bpc_enc.encode_codeblock();
+        bpc_enc.mq.flush();
+        let encoded = bpc_enc.mq.get_buffer().to_vec();
+        
+        println!("Encoded {} bytes: {:02X?}", encoded.len(), &encoded);
+        
+        // Decode
+        // max_bit_plane: highest bit is 7 (for -128)
+        // num_passes: 22 (cleanup at bp7, then 3 passes for bp6-0 = 21, total 22)
+        let mut bpc_dec = BitPlaneCoder::new(4, 4, &[]);
+        let decoded = bpc_dec.decode_codeblock(&encoded, 7, 22, 0).expect("decode failed");
+        
+        println!("Original:  {:?}", original);
+        println!("Decoded:   {:?}", decoded);
+        
+        // Compare
+        for i in 0..16 {
+            assert_eq!(original[i], decoded[i], "Mismatch at index {}: original={}, decoded={}", 
+                i, original[i], decoded[i]);
+        }
     }
 }

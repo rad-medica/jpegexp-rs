@@ -132,15 +132,30 @@ impl PacketHeader {
                         let num_passes = Self::read_coding_passes(reader)?;
 
                         // Data Length
-                        // Decode LBlock parameter with arbitrary threshold (32)
-                        let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
-                        let lbits = subband_state.lblock_tree.get_current_value(x, y) + 3;
+                        // Decode LBlock increment: count consecutive 1s until 0
+                        // (NOT a tag tree - just a simple run length)
+                        let mut lblock_increment = 0i32;
+                        while reader.read_bit()? == 1 {
+                            lblock_increment += 1;
+                        }
+                        // Store the increment for potential future use
+                        let _ = subband_state.lblock_tree.set_value(x, y, lblock_increment);
+                        let lblock = 3 + lblock_increment;
+                        
+                        // Per JPEG 2000 spec (ISO 15444-1), the number of bits for length is:
+                        // Lblock + floor(log2(num_passes))
+                        let pass_extra = if num_passes <= 1 {
+                            0
+                        } else {
+                            (num_passes as f32).log2().floor() as i32
+                        };
+                        let lbits = lblock + pass_extra;
 
                         let data_len = reader.read_bits(lbits as u8)?;
 
                         if std::env::var("J2K_DEBUG").is_ok() {
-                            eprintln!("  CB[{},{}] subband={}: zero_bp={}, passes={}, lbits={}, len={}",
-                                x, y, s, zero_bp, num_passes, lbits, data_len);
+                            eprintln!("  CB[{},{}] subband={}: zero_bp={}, passes={}, lblock={}, pass_extra={}, lbits={}, len={}",
+                                x, y, s, zero_bp, num_passes, lblock, pass_extra, lbits, data_len);
                         }
 
                         header.included_cblks.push(CodeBlockInfo {
@@ -162,28 +177,35 @@ impl PacketHeader {
 
     /// Reads the number of coding passes using J2K codeword table (Table B.4).
     fn read_coding_passes(reader: &mut J2kBitReader<'_, '_>) -> Result<u8, BitIoError> {
+        // JPEG 2000 standard (ISO 15444-1) number of coding passes encoding:
+        // 0          -> 1 pass
+        // 10         -> 2 passes
+        // 110 + 1b   -> 3-4 passes
+        // 1110 + 2b  -> 5-8 passes
+        // 11110 + 5b -> 9-40 passes
+        // 11111 + 7b -> 37-164 passes
+        
         if reader.read_bit()? == 0 {
-            // eprintln!("DEBUG: passes codework 0 -> 1");
             return Ok(1);
         }
         if reader.read_bit()? == 0 {
-            // eprintln!("DEBUG: passes codework 10 -> 2");
             return Ok(2);
         }
-        let bits = reader.read_bits(2)?;
-        if bits < 3 {
-            // eprintln!("DEBUG: passes codeword 11{} -> {}", bits, 3 + bits);
-            return Ok((3 + bits) as u8);
+        if reader.read_bit()? == 0 {
+            let extra = reader.read_bit()? as u8;
+            return Ok(3 + extra);
         }
-        let bits = reader.read_bits(5)?;
-        if bits < 31 {
-            // eprintln!("DEBUG: passes codeword 1111{} -> {}", bits, 6 + bits);
-            return Ok((6 + bits) as u8);
+        if reader.read_bit()? == 0 {
+            let extra = reader.read_bits(2)? as u8;
+            return Ok(5 + extra);
         }
-        // Extension: 32 + 5 bits... (Very rare for typical images)
-        let bits2 = reader.read_bits(5)?;
-        // eprintln!("DEBUG: passes codeword extension -> {}", 37 + bits2);
-        Ok((37 + bits2) as u8)
+        if reader.read_bit()? == 0 {
+            let extra = reader.read_bits(5)? as u8;
+            return Ok(9 + extra);
+        }
+        // 11111 + 7 bits
+        let extra = reader.read_bits(7)? as u8;
+        Ok(37 + extra)
     }
 
     /// Write a packet header to the bit stream.

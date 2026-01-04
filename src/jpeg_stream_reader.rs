@@ -44,6 +44,8 @@ pub struct JpegStreamReader<'a> {
     position: usize,
     bit_buffer: u8,
     bits_left: u8,
+    /// For J2K: true if the previous byte read was 0xFF (next byte has 7 bits)
+    prev_byte_was_ff: bool,
     state: JpegStreamReaderState,
     frame_info: FrameInfo,
     parameters: CodingParameters,
@@ -72,6 +74,7 @@ impl<'a> JpegStreamReader<'a> {
             position: 0,
             bit_buffer: 0,
             bits_left: 0,
+            prev_byte_was_ff: false,
             state: JpegStreamReaderState::BeforeStartOfImage,
             frame_info: FrameInfo::default(),
             parameters: CodingParameters::default(),
@@ -390,6 +393,7 @@ impl<'a> JpegStreamReader<'a> {
     pub fn align_to_byte(&mut self) {
         self.bits_left = 0;
         self.bit_buffer = 0;
+        self.prev_byte_was_ff = false;
     }
 
     pub fn read_bit(&mut self) -> Result<u8, JpeglsError> {
@@ -400,16 +404,20 @@ impl<'a> JpegStreamReader<'a> {
             let b = self.source[self.position];
             self.position += 1;
 
-            // Byte stuffing handling for J2K Packet Headers
-            if b == 0xFF && self.position < self.source.len() {
-                let next = self.source[self.position];
-                if next == 0x00 {
-                    self.position += 1; // Skip stuffing
-                }
-            }
-
             self.bit_buffer = b;
-            self.bits_left = 8;
+            
+            // JPEG 2000 byte stuffing (per ISO/IEC 15444-1 Annex B.10.1):
+            // After reading a 0xFF byte, the next byte has only 7 valid bits
+            // (bit 7 is stuffed as 0 to prevent accidental marker codes)
+            if self.prev_byte_was_ff {
+                // Previous byte was 0xFF, so this byte only has 7 valid bits
+                self.bits_left = 7;
+            } else {
+                self.bits_left = 8;
+            }
+            
+            // Remember if this byte is 0xFF for next time
+            self.prev_byte_was_ff = b == 0xFF;
         }
 
         let shift = self.bits_left - 1;

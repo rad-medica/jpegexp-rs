@@ -599,4 +599,63 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_dwt_53_2d_roundtrip() {
+        // Create a simple 8x8 gradient-like image
+        let mut input = vec![0i32; 64];
+        for y in 0..8 {
+            for x in 0..8 {
+                input[y * 8 + x] = (x as i32 + y as i32 * 2) - 8;
+            }
+        }
+        
+        // Forward 2D DWT (rows first, then columns)
+        // Step 1: Transform rows
+        let mut temp = vec![0i32; 64];
+        for y in 0..8 {
+            let row = &input[y*8..(y+1)*8];
+            let mut l = vec![0i32; 4];
+            let mut h = vec![0i32; 4];
+            Dwt53::forward(row, &mut l, &mut h);
+            // Store L in left half, H in right half
+            for x in 0..4 { temp[y * 8 + x] = l[x]; }
+            for x in 0..4 { temp[y * 8 + 4 + x] = h[x]; }
+        }
+        
+        // Step 2: Transform columns
+        let mut ll = vec![0i32; 16];  // 4x4
+        let mut hl = vec![0i32; 16];  // 4x4
+        let mut lh = vec![0i32; 16];  // 4x4
+        let mut hh = vec![0i32; 16];  // 4x4
+        
+        // Left columns (0..4) -> LL and LH
+        for x in 0..4 {
+            let mut col = vec![0i32; 8];
+            for y in 0..8 { col[y] = temp[y * 8 + x]; }
+            let mut l = vec![0i32; 4];
+            let mut h = vec![0i32; 4];
+            Dwt53::forward(&col, &mut l, &mut h);
+            for y in 0..4 { ll[y * 4 + x] = l[y]; }
+            for y in 0..4 { lh[y * 4 + x] = h[y]; }
+        }
+        
+        // Right columns (4..8) -> HL and HH
+        for x in 0..4 {
+            let mut col = vec![0i32; 8];
+            for y in 0..8 { col[y] = temp[y * 8 + 4 + x]; }
+            let mut l = vec![0i32; 4];
+            let mut h = vec![0i32; 4];
+            Dwt53::forward(&col, &mut l, &mut h);
+            for y in 0..4 { hl[y * 4 + x] = l[y]; }
+            for y in 0..4 { hh[y * 4 + x] = h[y]; }
+        }
+        
+        // Now apply inverse 2D DWT
+        let mut output = vec![0i32; 64];
+        Dwt53::inverse_2d(&ll, &hl, &lh, &hh, 8, 8, &mut output);
+        
+        // Verify roundtrip
+        assert_eq!(input, output, "2D DWT 5-3 roundtrip failed");
+    }
 }

@@ -124,13 +124,25 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         is_htj2k: bool,
         tile_states: &mut Vec<TileState>,
     ) -> Result<(), JpeglsError> {
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("__decode_tiles_loop: start pos={} remaining={}", 
+                parser.reader.position(), parser.reader.remaining_data().len());
+        }
         loop {
             if marker == crate::jpeg_marker_code::JpegMarkerCode::EndOfImage {
                 break;
             }
 
             if marker == crate::jpeg_marker_code::JpegMarkerCode::StartOfTile {
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("Before parse_tile_part_header: pos={} remaining={}", 
+                        parser.reader.position(), parser.reader.remaining_data().len());
+                }
                 let (psot, isot) = parser.parse_tile_part_header()?;
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("After parse_tile_part_header: pos={} remaining={} psot={}", 
+                        parser.reader.position(), parser.reader.remaining_data().len(), psot);
+                }
                 Self::decode_tile_data(parser, psot, isot, is_htj2k, tile_states)?;
 
                 if parser.reader.remaining_data().is_empty() {
@@ -173,6 +185,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         _is_htj2k: bool,
         tile_states: &mut Vec<TileState>,
     ) -> Result<(), JpeglsError> {
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("decode_tile_data: reader pos={} remaining={}", 
+                parser.reader.position(), parser.reader.remaining_data().len());
+        }
         let tile_idx = isot as usize;
         if parser.image.tiles.len() <= tile_idx {
             parser
@@ -268,50 +284,53 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     comp.resolutions[r].width = res_w;
                     comp.resolutions[r].height = res_h;
 
-                    if comp.resolutions[r].subbands.len() < 4 {
+                    // JPEG 2000 subband structure:
+                    // - Resolution 0: only LL subband (1 subband)
+                    // - Resolution > 0: HL, LH, HH subbands (3 subbands)
+                    // The packet ordering for res > 0 is: HL (0), LH (1), HH (2)
+                    let num_subbands = if r == 0 { 1 } else { 3 };
+                    
+                    if comp.resolutions[r].subbands.len() < num_subbands {
                         comp.resolutions[r]
                             .subbands
-                            .resize_with(4, Default::default);
-                    };
+                            .resize_with(num_subbands, Default::default);
+                    }
 
-                    // Init subbands
-                    let orientations = [
-                        crate::jpeg2000::image::SubbandOrientation::LL,
-                        crate::jpeg2000::image::SubbandOrientation::HL,
-                        crate::jpeg2000::image::SubbandOrientation::LH,
-                        crate::jpeg2000::image::SubbandOrientation::HH,
-                    ];
-
+                    // Init subbands with correct orientations
                     for (i, sb) in comp.resolutions[r].subbands.iter_mut().enumerate() {
-                        if i < 4 {
-                            sb.orientation = orientations[i];
-
+                        if i < num_subbands {
                             // Calculate subband dimensions
                             if r == 0 {
-                                // Res 0: only LL (0) matters and matches Res 0 dims
-                                if i == 0 {
-                                    sb.width = res_w;
-                                    sb.height = res_h;
-                                } else {
-                                    sb.width = 0;
-                                    sb.height = 0;
-                                }
+                                // Res 0: only LL subband
+                                sb.orientation = crate::jpeg2000::image::SubbandOrientation::LL;
+                                sb.width = res_w;
+                                sb.height = res_h;
                             } else {
-                                // Res > 0: Subbands split the resolution
-                                // LL(0), HL(1): width approx (W+1)/2
-                                // LH(2), HH(3): width approx W/2
-                                let w_sb = if i == 0 || i == 1 {
-                                    res_w.div_ceil(2)
-                                } else {
-                                    res_w / 2
-                                };
-                                let h_sb = if i == 0 || i == 2 {
-                                    res_h.div_ceil(2)
-                                } else {
-                                    res_h / 2
-                                };
-                                sb.width = w_sb;
-                                sb.height = h_sb;
+                                // Res > 0: subbands are HL (0), LH (1), HH (2)
+                                // Dimensions for each subband based on wavelet decomposition
+                                let ll_w = res_w.div_ceil(2);
+                                let ll_h = res_h.div_ceil(2);
+                                let hl_w = res_w - ll_w;
+                                let lh_h = res_h - ll_h;
+                                
+                                match i {
+                                    0 => {
+                                        sb.orientation = crate::jpeg2000::image::SubbandOrientation::HL;
+                                        sb.width = hl_w;
+                                        sb.height = ll_h;
+                                    }
+                                    1 => {
+                                        sb.orientation = crate::jpeg2000::image::SubbandOrientation::LH;
+                                        sb.width = ll_w;
+                                        sb.height = lh_h;
+                                    }
+                                    2 => {
+                                        sb.orientation = crate::jpeg2000::image::SubbandOrientation::HH;
+                                        sb.width = hl_w;
+                                        sb.height = lh_h;
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
                     }
@@ -519,13 +538,19 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         is_htj2k: bool,
     ) -> Result<(), JpeglsError> {
         for cb_info in header.included_cblks {
-            if cb_info.data_len > 0 {
+            // Read codeblock data if present
+            let data = if cb_info.data_len > 0 {
                 let data_len = cb_info.data_len as usize;
+                let available = parser.reader.remaining_data().len();
+                // Read only as much data as available, capped by data_len
+                // The MQ decoder handles end-of-stream by adding 0xFF00 padding
+                let actual_len = data_len.min(available);
                 if std::env::var("J2K_DEBUG").is_ok() {
                     let pos_before = parser.reader.position();
-                    eprintln!("  reading {} bytes of codeblock data at pos={}", data_len, pos_before);
+                    eprintln!("  reading {} bytes of codeblock data at pos={} (requested {}, available {})", 
+                        actual_len, pos_before, data_len, available);
                 }
-                let mut data = vec![0u8; data_len];
+                let mut data = vec![0u8; actual_len];
                 for item in &mut data {
                     *item = parser.reader.read_u8()?;
                 }
@@ -536,71 +561,86 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     eprintln!("  after reading: pos={} remaining={} next_bytes={:02X?}", 
                         pos_after, remaining, next_bytes);
                 }
+                data
+            } else {
+                // Empty data - codeblock is included but has no compressed data
+                // This means all coefficients are zero
+                Vec::new()
+            };
 
-                let tile = &mut parser.image.tiles[isot as usize];
-                if tile.components.len() <= comp {
-                    tile.components.resize_with(comp + 1, Default::default);
-                    tile.components[comp].component_index = comp as u32;
-                }
-                let component = &mut tile.components[comp];
+            let tile = &mut parser.image.tiles[isot as usize];
+            if tile.components.len() <= comp {
+                tile.components.resize_with(comp + 1, Default::default);
+                tile.components[comp].component_index = comp as u32;
+            }
+            let component = &mut tile.components[comp];
 
-                if component.resolutions.len() <= res {
-                    component.resolutions.resize_with(res + 1, Default::default);
-                    component.resolutions[res].level = res as u8;
-                }
-                let resolution = &mut component.resolutions[res];
+            if component.resolutions.len() <= res {
+                component.resolutions.resize_with(res + 1, Default::default);
+                component.resolutions[res].level = res as u8;
+            }
+            let resolution = &mut component.resolutions[res];
 
-                let subband_idx = cb_info.subband_index as usize;
-                if resolution.subbands.len() <= subband_idx {
-                    resolution
-                        .subbands
-                        .resize_with(subband_idx + 1, Default::default);
-                }
-                let subband = &mut resolution.subbands[subband_idx];
+            let subband_idx = cb_info.subband_index as usize;
+            if resolution.subbands.len() <= subband_idx {
+                resolution
+                    .subbands
+                    .resize_with(subband_idx + 1, Default::default);
+            }
+            let subband = &mut resolution.subbands[subband_idx];
 
-                if res == 0 {
-                    subband.orientation = crate::jpeg2000::image::SubbandOrientation::LL;
+            // Set orientation (already set in decode_tile_data, but ensure consistency)
+            if res == 0 {
+                subband.orientation = crate::jpeg2000::image::SubbandOrientation::LL;
+            } else {
+                match subband_idx {
+                    0 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HL,
+                    1 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::LH,
+                    2 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HH,
+                    _ => {}
+                };
+            }
+            
+            if is_htj2k {
+                let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
+                    &data, &data, 64, 64,
+                );
+                let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
+                block.layer_data.push(data.clone());
+                block.layers_decoded = (layer + 1) as u8;
+                let _ = coder.decode_block(&mut block);
+                subband.codeblocks.push(block);
+            } else {
+                let cod = parser.image.cod.as_ref().unwrap();
+                let nom_w = 1 << (cod.codeblock_width_exp + 2);
+                let nom_h = 1 << (cod.codeblock_height_exp + 2);
+
+                let (res_w, res_h) = (resolution.width as usize, resolution.height as usize);
+                let (sb_w, sb_h) = if res == 0 {
+                    (res_w, res_h)
                 } else {
+                    let ll_w = res_w.div_ceil(2);
+                    let ll_h = res_h.div_ceil(2);
                     match subband_idx {
-                        0 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HL,
-                        1 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::LH,
-                        2 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HH,
-                        _ => {}
-                    };
-                }
-                if is_htj2k {
-                    let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
-                        &data, &data, 64, 64,
-                    );
-                    let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
-                    block.layer_data.push(data.clone());
-                    block.layers_decoded = (layer + 1) as u8;
-                    let _ = coder.decode_block(&mut block);
-                    subband.codeblocks.push(block);
-                } else {
-                    let cod = parser.image.cod.as_ref().unwrap();
-                    let nom_w = 1 << (cod.codeblock_width_exp + 2);
-                    let nom_h = 1 << (cod.codeblock_height_exp + 2);
+                        0 => (res_w - ll_w, ll_h),         // HL
+                        1 => (ll_w, res_h - ll_h),         // LH
+                        2 => (res_w - ll_w, res_h - ll_h), // HH
+                        _ => (0, 0),
+                    }
+                };
 
-                    let (res_w, res_h) = (resolution.width as usize, resolution.height as usize);
-                    let (sb_w, sb_h) = if res == 0 {
-                        (res_w, res_h)
-                    } else {
-                        let ll_w = res_w.div_ceil(2);
-                        let ll_h = res_h.div_ceil(2);
-                        match subband_idx {
-                            0 => (res_w - ll_w, ll_h),         // HL
-                            1 => (ll_w, res_h - ll_h),         // LH
-                            2 => (res_w - ll_w, res_h - ll_h), // HH
-                            _ => (0, 0),
-                        }
-                    };
+                let cb_x = cb_info.x * nom_w;
+                let cb_y = cb_info.y * nom_h;
+                let cb_width = nom_w.min(sb_w.saturating_sub(cb_x));
+                let cb_height = nom_h.min(sb_h.saturating_sub(cb_y));
 
-                    let cb_x = cb_info.x * nom_w;
-                    let cb_y = cb_info.y * nom_h;
-                    let cb_width = nom_w.min(sb_w.saturating_sub(cb_x));
-                    let cb_height = nom_h.min(sb_h.saturating_sub(cb_y));
+                let cb_idx = subband
+                    .codeblocks
+                    .iter()
+                    .position(|cb| cb.x == cb_info.x as u32 && cb.y == cb_info.y as u32);
 
+                // Only decode if there's actual data
+                if !data.is_empty() {
                     let qcd = parser
                         .image
                         .qcd
@@ -622,26 +662,17 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         8
                     };
 
-                    let m_b = if cod.transformation == 1 {
-                        // Reversible: Use Depth instead of Epsilon?
-                        // Epsilon from file is 10. Depth is 8.
-                        // Experiment: Force based on depth
-                        guard_bits
-                            + if comp < parser.image.components.len() {
-                                parser.image.components[comp].depth - 1
-                            } else {
-                                7
-                            }
-                    } else {
-                        guard_bits + epsilon_b - 1
-                    };
+                    // Per JPEG 2000 spec (ISO/IEC 15444-1):
+                    // Mb = guard_bits + epsilon_b - 1
+                    // where epsilon_b comes from the QCD marker
+                    // This applies to both reversible and irreversible transforms
+                    let m_b = guard_bits + epsilon_b.saturating_sub(1);
 
-                    let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);
-
-                    let cb_idx = subband
-                        .codeblocks
-                        .iter()
-                        .position(|cb| cb.x == cb_info.x as u32 && cb.y == cb_info.y as u32);
+                    // The first coded bit-plane is M_b - 1 - zero_bp in 0-indexed terms
+                    // But for the cleanup pass bit-plane parameter, we use M_b - zero_bp
+                    // because the decoder expects bit-plane indices where the first cleanup
+                    // is at max_bit_plane, and subsequent passes go to lower bit-planes
+                    let max_bit_plane = m_b.saturating_sub(cb_info.zero_bp);
 
                     if let Some(idx) = cb_idx {
                         let block = &mut subband.codeblocks[idx];
@@ -684,6 +715,21 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             block.state = bpc.state;
                             block.coding_passes = bpc.num_passes_decoded as u8;
                         }
+                        subband.codeblocks.push(block);
+                    }
+                } else {
+                    // No data - create a codeblock with zero coefficients
+                    if cb_idx.is_none() {
+                        let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
+                        block.x = cb_info.x as u32;
+                        block.y = cb_info.y as u32;
+                        block.width = cb_width as u32;
+                        block.height = cb_height as u32;
+                        block.layers_decoded = (layer + 1) as u8;
+                        block.coding_passes = 0;
+                        // Initialize coefficients to zero
+                        block.coefficients = vec![0i32; (cb_width * cb_height) as usize];
+                        block.state = vec![0u8; (cb_width * cb_height) as usize];
                         subband.codeblocks.push(block);
                     }
                 }
