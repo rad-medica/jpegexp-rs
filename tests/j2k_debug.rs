@@ -96,3 +96,45 @@ fn test_j2k_lossless_decode() {
         }
     }
 }
+
+#[test]
+fn test_j2k_constant_decode() {
+    // Read the test file (raw J2K codestream, not JP2)
+    let data = std::fs::read("tests/jpegls_test_images/constant.j2c")
+        .expect("Failed to read test file");
+    
+    println!("File size: {} bytes", data.len());
+    
+    // Decode
+    let mut reader = JpegStreamReader::new(&data);
+    let mut decoder = J2kDecoder::new(&mut reader);
+    let image = decoder.decode().expect("Failed to decode");
+    
+    println!("Image: {}x{}, {} components", image.width, image.height, image.component_count);
+    
+    // Reconstruct
+    match image.reconstruct_pixels() {
+        Ok(pixels) => {
+            println!("Reconstructed {} pixels", pixels.len());
+            println!("First 16 pixels: {:?}", &pixels[..16.min(pixels.len())]);
+            
+            // Expected: all 128s
+            let expected = vec![128u8; 4096];
+            
+            let mae: f64 = pixels.iter().zip(expected.iter())
+                .map(|(&p, &e)| (p as i32 - e as i32).abs() as f64)
+                .sum::<f64>() / pixels.len() as f64;
+            
+            println!("MAE: {:.4}", mae);
+            
+            if mae == 0.0 {
+                println!("✓ Constant image: PASS");
+            } else {
+                println!("✗ Constant image: FAIL (MAE={})", mae);
+            }
+        }
+        Err(e) => {
+            println!("Reconstruction error: {}", e);
+        }
+    }
+}

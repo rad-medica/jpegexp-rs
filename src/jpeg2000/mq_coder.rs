@@ -345,6 +345,15 @@ impl MqCoder {
     pub fn init_contexts(&mut self, size: usize) {
         self.contexts = vec![0; size];
     }
+    
+    /// Set a specific context to a given state and MPS value
+    /// state_idx: Index into MQ_TABLE (0-46)
+    /// mps: Most Probable Symbol (0 or 1)
+    pub fn set_context(&mut self, cx: usize, state_idx: u8, mps: u8) {
+        if cx < self.contexts.len() {
+            self.contexts[cx] = (state_idx << 1) | (mps & 1);
+        }
+    }
 
     // ... (Encoder methods omitted or assumed present) ...
 
@@ -371,33 +380,57 @@ impl MqCoder {
         // Looks at current byte and next byte
         if self.src_pos >= self.source.len() {
             // End of stream - add 0xFF00 pattern
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("byte_in: EOS at pos {}, adding 0xFF00", self.src_pos);
+            }
             self.c += 0xFF00;
             self.ct = 8;
             return;
         }
-
+        
         let current = self.source[self.src_pos];
-        let next = if self.src_pos + 1 < self.source.len() {
-            self.source[self.src_pos + 1]
-        } else {
-            0xFF
-        };
-
+        
         if current == 0xFF {
+            let next = if self.src_pos + 1 < self.source.len() {
+                self.source[self.src_pos + 1]
+            } else {
+                0xFF
+            };
+            
             if next > 0x8F {
                 // Marker detected - don't consume, add 0xFF00
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, current=0xFF, marker detected, adding 0xFF00", self.src_pos);
+                }
                 self.c += 0xFF00;
                 self.ct = 8;
             } else {
-                // Bit stuffing or regular data after 0xFF
+                // Bit stuffing - the byte after 0xFF has only 7 valid bits
                 self.src_pos += 1;
-                self.c += (next as u32) << 9; // Shift by 9 for bit stuffing
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, byte={:#x} (after 0xFF, 7 bits)", self.src_pos, self.source[self.src_pos]);
+                }
+                self.c += (self.source[self.src_pos] as u32) << 9;
                 self.ct = 7;
             }
         } else {
+            // Normal case - read next byte
             self.src_pos += 1;
-            self.c += (next as u32) << 8;
-            self.ct = 8;
+            if self.src_pos < self.source.len() {
+                let byte = self.source[self.src_pos];
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, byte={:#x}", self.src_pos, byte);
+                }
+                self.c += (byte as u32) << 8;
+                self.ct = 8;
+            } else {
+                // End of stream
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, EOS, adding 0xFF00", self.src_pos);
+                }
+                self.c += 0xFF00;
+                self.ct = 8;
+            }
         }
     }
 
@@ -407,6 +440,14 @@ impl MqCoder {
         let idx = (ctx >> 1) as usize;
         let mps = ctx & 1;
         let qe = MQ_TABLE[idx].qe;
+        
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("MQ_DEC: cx={} mps={} idx={} qe={:#06x} A={:#06x} C={:#010x}", 
+                cx, mps, idx, qe, self.a, self.c);
+        }
+        
+        // Debug tracing (only for first few calls if env var set)
+        let _debug = std::env::var("MQ_DEBUG").is_ok();
 
         // This corresponds to "DECODE" procedure
         // My Encoder put LPS at [0, Qe), MPS at [Qe, A).
@@ -440,37 +481,61 @@ impl MqCoder {
 
         self.a -= qe;
         let chigh = (self.c >> 16) as u16;
+        
+        let mq_debug = std::env::var("MQ_DEBUG").is_ok();
+        if mq_debug && cx == 17 {
+            eprintln!("MQ decode_bit cx={}: A_before_sub={:#06x}, qe={:#06x}, A={:#06x}, chigh={:#06x}, C={:#010x}, mps={}, idx={}",
+                cx, self.a + qe, qe, self.a, chigh, self.c, mps, idx);
+        }
 
         let d;
-        if chigh < qe {
-            // LPS path - C_high < Qe
-            // Apply LPS exchange (per OpenJPEG's opj_mqc_lpsexchange_macro)
+        // OpenJPEG-compatible MQ Decoding:
+        // The interval [0, A_old) is split into:
+        //   MPS: [0, A_new) where A_new = A_old - Qe
+        //   LPS: [A_new, A_old) (size Qe)
+        // 
+        // If Chigh < A_new: We're in MPS sub-interval
+        // If Chigh >= A_new: We're in LPS sub-interval, C -= A_new
+        if chigh >= self.a {
+            // LPS path - Chigh >= A (after A -= Qe)
+            // C -= A to renormalize into LPS sub-interval
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  -> LPS path (chigh {:#x} >= A {:#x})", chigh, self.a);
+            }
+            self.c -= (self.a as u32) << 16;
+            
+            // Standard LPS exchange logic
             if self.a < qe {
                 // Conditional exchange: return MPS, use NMPS context
-                self.a = qe;
                 d = mps;
                 self.contexts[cx] = (MQ_TABLE[idx].nmps << 1) | mps;
             } else {
                 // Normal LPS: return LPS, use NLPS context
-                self.a = qe;
                 d = 1 - mps;
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("  DEC LPS normal: returning LPS={}", d);
+                }
                 let switch = MQ_TABLE[idx].switch;
                 let next_idx = MQ_TABLE[idx].nlps;
                 let next_mps = if switch == 1 { 1 - mps } else { mps };
                 self.contexts[cx] = (next_idx << 1) | next_mps;
             }
+            self.a = qe;
             self.renormalize_input();
             d
         } else {
-            // MPS path - C_high >= Qe
-            // C -= Qe << 16 (subtract from C register)
-            self.c -= (qe as u32) << 16;
-
+            // MPS path - Chigh < A
+            // C stays the same for MPS (we're in the lower portion of interval)
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  -> MPS path (chigh {:#x} < A {:#x})", chigh, self.a);
+            }
             if self.a < 0x8000 {
                 // Need renormalization - apply MPS exchange
                 if self.a < qe {
-                    // Conditional exchange: return LPS, use NLPS context
+                    // Conditional exchange: LPS sub-interval is larger than MPS
+                    // Return LPS, use NLPS context
                     d = 1 - mps;
+                    self.a = qe;
                     let switch = MQ_TABLE[idx].switch;
                     let next_idx = MQ_TABLE[idx].nlps;
                     let next_mps = if switch == 1 { 1 - mps } else { mps };
@@ -490,6 +555,7 @@ impl MqCoder {
 
     fn renormalize_input(&mut self) {
         // Following OpenJPEG's opj_mqc_renormd_macro
+        let mut shifts = 0;
         loop {
             if self.ct == 0 {
                 self.byte_in(); // byte_in already adds to c
@@ -497,55 +563,91 @@ impl MqCoder {
             self.a <<= 1;
             self.c <<= 1;
             self.ct = self.ct.saturating_sub(1);
+            shifts += 1;
             if self.a >= 0x8000 {
                 break;
             }
         }
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("  DEC renorm: {} shifts, A={:#x}, C={:#x}, ct={}", shifts, self.a, self.c, self.ct);
+        }
     }
 
     // Encoder methods...
+    // Using OpenJPEG-compatible convention where:
+    // - MPS occupies [0, A-Qe) in the interval
+    // - LPS occupies [A-Qe, A) in the interval
+    // So C stays low for MPS, C += A for LPS
     pub fn encode(&mut self, d: u8, cx: usize) {
-        // Renormalization driven encoding
         let ctx = self.contexts[cx];
         let idx = (ctx >> 1) as usize;
         let mps = ctx & 1;
-
         let qe = MQ_TABLE[idx].qe;
+        
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("MQ_ENC: cx={} d={} mps={} idx={} qe={:#06x} A={:#06x} C={:#010x}", 
+                cx, d, mps, idx, qe, self.a, self.c);
+        }
+
+        self.a -= qe;
 
         if d == mps {
-            self.a -= qe;
+            // MPS path: stay in lower part of interval, C unchanged
             if self.a < 0x8000 {
                 if self.a < qe {
+                    // Conditional exchange: MPS gets Qe sub-interval
+                    self.c += self.a as u32;
                     self.a = qe;
-                } else {
-                    self.c += qe as u32;
                 }
-                // NMPS
+                // NMPS context update
                 let next = MQ_TABLE[idx].nmps;
                 self.contexts[cx] = (next << 1) | mps;
                 self.renormalize();
-            } else {
-                self.c += qe as u32;
             }
+            // If A >= 0x8000, no renormalization needed, C stays the same
         } else {
-            // LPS
-            self.a -= qe;
-            if self.a < qe {
-                self.c += qe as u32;
-            } else {
+            // LPS path
+            if qe > self.a {
+                // Conditional exchange: LPS is now in the LOWER sub-interval
+                // Don't add to C (stay in lower), set A = qe for renorm
+                // This makes decoder take MPS-path (chigh < A)
+                // MPS-path-with-exchange returns LPS with NLPS transition
                 self.a = qe;
-            }
-
-            // Update Context
-            let switch = MQ_TABLE[idx].switch;
-            let next = MQ_TABLE[idx].nlps;
-            if switch == 1 {
-                self.contexts[cx] = (next << 1) | (1 - mps);
+                // Use NLPS with switch (matching decoder's MPS-path-with-exchange)
+                let switch = MQ_TABLE[idx].switch;
+                let next = MQ_TABLE[idx].nlps;
+                if switch == 1 {
+                    self.contexts[cx] = (next << 1) | (1 - mps);
+                } else {
+                    self.contexts[cx] = (next << 1) | mps;
+                }
             } else {
-                self.contexts[cx] = (next << 1) | mps;
+                // Normal LPS: C += A, A = qe
+                let old_c = self.c;
+                let old_a = self.a;
+                self.c += self.a as u32;
+                self.a = qe;
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("  LPS normal: C {:#x} + A {:#x} = {:#x}, new A={:#x}", 
+                        old_c, old_a, self.c, self.a);
+                }
+                // Use NLPS with switch
+                let switch = MQ_TABLE[idx].switch;
+                let next = MQ_TABLE[idx].nlps;
+                if switch == 1 {
+                    self.contexts[cx] = (next << 1) | (1 - mps);
+                } else {
+                    self.contexts[cx] = (next << 1) | mps;
+                }
             }
 
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  Before renorm: A={:#x}, C={:#x}, ct={}", self.a, self.c, self.ct);
+            }
             self.renormalize();
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  After renorm: A={:#x}, C={:#x}, ct={}", self.a, self.c, self.ct);
+            }
         }
     }
 
@@ -565,10 +667,10 @@ impl MqCoder {
     }
 
     fn byte_out(&mut self) {
-        if self.bp_idx == 0 {
-            // First byte?
-        }
         let b_out = (self.c >> 19) as u8;
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("  byte_out: C={:#x} → byte={:#x}", self.c, b_out);
+        }
         if b_out == 0xFF {
             self.ct = 7;
         }
@@ -580,18 +682,34 @@ impl MqCoder {
     /// Flush the encoder - must be called after encoding to finalize the bitstream
     /// Per JPEG2000 spec C.2.9
     pub fn flush(&mut self) {
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("MQ flush: before C={:#010x} A={:#06x} ct={}", self.c, self.a, self.ct);
+        }
+        
         // Set bits in c to 1 (SETBITS procedure)
         let temp = self.c + self.a as u32;
         self.c |= 0xFFFF;
         if self.c >= temp {
             self.c -= 0x8000;
         }
+        
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("MQ flush: after SETBITS C={:#010x}", self.c);
+        }
 
-        // Shift out the final bytes
-        self.c <<= self.ct;
-        self.byte_out();
-        self.c <<= self.ct;
-        self.byte_out();
+        // Shift out the final bytes - must output enough to capture all bits
+        // Following OpenJPEG: output at least 2 bytes, then check if more needed
+        for _ in 0..4 {  // Output up to 4 bytes to be safe
+            self.c <<= self.ct;
+            self.byte_out();
+            if self.c == 0 {
+                break;
+            }
+        }
+        
+        if std::env::var("MQ_TRACE").is_ok() {
+            eprintln!("MQ flush: output {} bytes", self.bp.len());
+        }
 
         // Remove trailing 0xFF if present (marker avoidance)
         while self.bp.len() > 1 && *self.bp.last().unwrap_or(&0) == 0xFF {
@@ -631,18 +749,75 @@ mod tests {
     #[test]
     fn test_mq_encode_decode_roundtrip() {
         let mut mq_enc = MqCoder::new();
-        mq_enc.init_contexts(1);
+        mq_enc.init_contexts(3);
 
-        // Encode sequence: 0, 0, 1, 0, 1 (Context 0)
-        let bits = vec![0, 0, 1, 0, 1];
+        // Encode sequence: 0, 0, 1, 0, 1, 1, 0, 1, 0, 0 (Context 0)
+        let bits: Vec<u8> = vec![0, 0, 1, 0, 1, 1, 0, 1, 0, 0];
         for &b in &bits {
             mq_enc.encode(b, 0);
         }
-        // Flush? We need flush logic for encoder to ensure bits are out.
-        // Simplified flush:
+        mq_enc.flush();
+        let encoded = mq_enc.get_buffer().to_vec();
+        
+        // Decode
+        let mut mq_dec = MqCoder::new();
+        mq_dec.init_contexts(3);
+        mq_dec.init_decoder(&encoded);
+        
+        let mut decoded = Vec::new();
+        for _ in 0..bits.len() {
+            decoded.push(mq_dec.decode_bit(0));
+        }
+        
+        assert_eq!(bits, decoded, "MQ roundtrip failed: encoded {:?}, decoded {:?}", bits, decoded);
+    }
 
-        // NOTE: MqCoder flush is missing.
-        // Let's assume for partial test we check what we have.
-        // With simplified encoder, we might leave bits in C.
+    #[test]
+    fn test_mq_multi_context_roundtrip() {
+        // Test with context 17 (RUN context) initialized like BitPlaneCoder does
+        let mut mq_enc = MqCoder::new();
+        mq_enc.init_contexts(19);
+        
+        // Initialize context 17 (RUN) to state 3, like BitPlaneCoder does
+        mq_enc.set_context(17, 3, 0);
+        // Initialize context 18 (UNIFORM) to state 46
+        mq_enc.set_context(18, 46, 0);
+        
+        // Simple sequence using RUN context: MPS, MPS, LPS, MPS
+        let operations: Vec<(u8, usize)> = vec![
+            (0, 17), // MPS for RUN context
+            (0, 17), // MPS
+            (1, 17), // LPS - this is the tricky one
+            (0, 17), // MPS
+        ];
+        
+        for &(bit, ctx) in &operations {
+            mq_enc.encode(bit, ctx);
+        }
+        mq_enc.flush();
+        let encoded = mq_enc.get_buffer().to_vec();
+        
+        println!("Simple encoded {} bytes: {:02X?}", encoded.len(), &encoded);
+        
+        // Decode - must have matching context initialization
+        let mut mq_dec = MqCoder::new();
+        mq_dec.init_contexts(19);
+        mq_dec.set_context(17, 3, 0);
+        mq_dec.set_context(18, 46, 0);
+        mq_dec.init_decoder(&encoded);
+        
+        let mut decoded = Vec::new();
+        for &(_, ctx) in &operations {
+            decoded.push((mq_dec.decode_bit(ctx), ctx));
+        }
+        
+        println!("Expected: {:?}", operations);
+        println!("Decoded:  {:?}", decoded);
+        
+        for (i, (&(expected_bit, ctx), (decoded_bit, _))) in operations.iter().zip(decoded.iter()).enumerate() {
+            assert_eq!(expected_bit, *decoded_bit, 
+                "Mismatch at op {}: ctx={}, expected={}, decoded={}", 
+                i, ctx, expected_bit, decoded_bit);
+        }
     }
 }
