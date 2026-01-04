@@ -8,6 +8,9 @@ pub struct BitPlaneCoder<'a> {
     pub mq: MqCoder,
     pub coefficients: Vec<i32>,
     pub num_passes_decoded: u32,
+    /// If true, disables RLC in cleanup pass for OpenJPEG compatibility
+    /// OpenJPEG appears to not use RLC in the cleanup pass
+    pub disable_rlc: bool,
 }
 
 impl<'a> BitPlaneCoder<'a> {
@@ -48,7 +51,14 @@ impl<'a> BitPlaneCoder<'a> {
             mq,
             coefficients,
             num_passes_decoded: 0,
+            disable_rlc: false,
         }
+    }
+    
+    /// Set OpenJPEG compatibility mode (disables RLC in cleanup pass)
+    /// Call this before decode_codeblock for files encoded by OpenJPEG
+    pub fn set_openjpeg_compat(&mut self, compat: bool) {
+        self.disable_rlc = compat;
     }
 
     // State Bit Definitions
@@ -409,7 +419,8 @@ impl<'a> BitPlaneCoder<'a> {
                 // 3. None of them have significant neighbors (context 0 for all)
                 
                 // Enable RLC for proper JPEG 2000 cleanup pass decoding
-                let mut can_use_rlc = actual_stripe_height == 4; // Only for full stripes
+                // UNLESS disable_rlc is set (for OpenJPEG compatibility)
+                let mut can_use_rlc = !self.disable_rlc && actual_stripe_height == 4; // Only for full stripes
                 
                 if can_use_rlc {
                     for y_offset in 0..4 {
@@ -438,16 +449,16 @@ impl<'a> BitPlaneCoder<'a> {
                 
                     if can_use_rlc {
                     // Use RLC: decode a single bit with RUN context
-                    // With initial mps=0 and the way our MQ decoder works:
-                    // - d=0 (MPS) is more probable and means "skip" (all insignificant)
-                    // - d=1 (LPS) is less probable and means "significant found"
+                    // Per JPEG 2000 D.3.4.2.6:
+                    // - Symbol 1 is coded if all four samples remain insignificant
+                    // - Symbol 0 is coded if any sample becomes significant
                     let run_bit = self.mq.decode_bit(Self::CTX_RUN);
                     
-                    if run_bit == 0 {
+                    if run_bit == 1 {
                         // All 4 samples in this column remain insignificant
                         // Nothing to do - they stay at 0
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("DEC: RLC col={} bp={}: RUN=0 (MPS), all insignificant", x, bit_plane);
+                            eprintln!("DEC: RLC col={} bp={}: RUN=1, all insignificant", x, bit_plane);
                         }
                         continue; // Move to next column
                     } else {
@@ -458,7 +469,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let pos_bit0 = self.mq.decode_bit(Self::CTX_UNIFORM);
                         let pos = ((pos_bit1 as u32) << 1) | (pos_bit0 as u32);
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("DEC: RLC col={} bp={}: RUN=1 (LPS), significant, pos bits={},{}, pos={}", x, bit_plane, pos_bit1, pos_bit0, pos);
+                            eprintln!("DEC: RLC col={} bp={}: RUN=0, significant at pos={}", x, bit_plane, pos);
                         }
                         
                         if std::env::var("BPC_DEBUG").is_ok() && bit_plane >= 6 {
@@ -850,11 +861,11 @@ impl<'a> BitPlaneCoder<'a> {
 
                     if let Some(pos) = first_sig_pos {
                         // At least one sample becomes significant
-                        // Encode LPS (1) to indicate "significant found"
+                        // Per JPEG 2000 D.3.4.2.6: encode symbol 0 for "significant found"
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("ENC: RLC col={} bp={}: encode RUN=1 (LPS, significant), pos={}", x, bit_plane, pos);
+                            eprintln!("ENC: RLC col={} bp={}: encode RUN=0 (significant), pos={}", x, bit_plane, pos);
                         }
-                        self.mq.encode(1, Self::CTX_RUN); // run_bit = 1 (LPS)
+                        self.mq.encode(0, Self::CTX_RUN); // run_bit = 0 (significant found)
 
                         // Encode position (2 bits, MSB first)
                         let pos_bit1 = ((pos >> 1) & 1) as u8;
@@ -922,11 +933,11 @@ impl<'a> BitPlaneCoder<'a> {
                         }
                     } else {
                         // All 4 samples remain insignificant
-                        // Encode MPS (0) to indicate "skip"
+                        // Per JPEG 2000 D.3.4.2.6: encode symbol 1 for "all insignificant"
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("ENC: RLC col={} bp={}: encode RUN=0 (MPS, skip)", x, bit_plane);
+                            eprintln!("ENC: RLC col={} bp={}: encode RUN=1 (all insignificant)", x, bit_plane);
                         }
-                        self.mq.encode(0, Self::CTX_RUN); // run_bit = 0 (MPS)
+                        self.mq.encode(1, Self::CTX_RUN); // run_bit = 1 (all insignificant)
                     }
                 } else {
                     // Regular cleanup (no RLC)

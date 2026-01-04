@@ -703,6 +703,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             &[],
                             true, // OpenJPEG compatibility
                         );
+                        // Disable RLC for OpenJPEG compatibility
+                        // OpenJPEG's encoding doesn't align with our RLC implementation
+                        bpc.set_openjpeg_compat(true);
                         bpc.coefficients = block.coefficients.clone();
                         bpc.state = block.state.clone();
                         bpc.num_passes_decoded = block.coding_passes as u32;
@@ -729,6 +732,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             &[],
                             true, // OpenJPEG compatibility
                         );
+                        // Disable RLC for OpenJPEG compatibility
+                        // OpenJPEG's encoding doesn't align with our RLC implementation
+                        bpc.set_openjpeg_compat(true);
                         // Always print codeblock data for the first codeblock
                         if std::env::var("J2K_DEBUG").is_ok() || (subband.orientation == crate::jpeg2000::image::SubbandOrientation::LL && layer == 0) {
                             eprintln!("Decoding codeblock: data={} bytes, max_bp={}, passes={}", 

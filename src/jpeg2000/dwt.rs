@@ -135,7 +135,7 @@ impl Dwt53 {
     /// Reconstructs image from LL, HL, LH, HH subbands
     /// 
     /// The 2D DWT structure:
-    /// ```
+    /// ```text
     /// +-------+-------+
     /// |  LL   |  HL   |  <- low-pass rows (top half)
     /// +-------+-------+

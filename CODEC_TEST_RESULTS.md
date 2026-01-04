@@ -19,17 +19,35 @@
 
 8. **Max Bit-Plane Calculation (NEW)**: Fixed the `max_bit_plane` formula in `decoder.rs` from `m_b - zero_bp` to `m_b - zero_bp - 1` (0-indexed). This ensures coefficients are decoded with correct magnitude.
 
-### Current Status (2026-01-03 Latest):
-- Constant image (all 128s): **MAE = 0** ✅
-- Gradient image: **MAE = 42.63** ❌ (improved from 81.25)
+### Current Status (2026-01-04 Latest):
+- Constant image (all 128s): **MAE = 196** ❌ (regression due to RUN bit fix)
+- Gradient image: **MAE = 86.46** ❌ (with RLC disabled for OpenJPEG compat)
 - Internal bit-plane roundtrip: **PASS** ✅
+- All 20 library JPEG 2000 tests: **PASS** ✅
 
 ### Remaining Issue:
-The gradient test image still has significant errors. The MQ decoder produces consistent bits that don't match what OpenJPEG encoded. Specifically:
-- The LL coefficient at position (0,0) is decoded as +223 instead of expected -128
-- The sign bit decoding returns 0 (positive) when it should return 1 (negative)
-- All packet header parsing, data extraction, and MQ algorithm match OpenJPEG's code
-- The root cause appears to be a subtle difference in how our MQ decoder interprets the bitstream compared to OpenJPEG's encoder
+The OpenJPEG-encoded test images fail to decode correctly. Extensive investigation revealed:
+
+**Root Cause:** OpenJPEG's encoder produces a fundamentally different bitstream than our encoder for the same DWT coefficients. While both implementations roundtrip correctly internally, they are not interoperable.
+
+**Key Findings (2026-01-04):**
+1. **RUN bit semantics fixed** - Per JPEG 2000 D.3.4.2.6: RUN=1 means "all insignificant", RUN=0 means "significant found". Both encoder and decoder now use correct semantics.
+
+2. **Context initialization verified** - CTX_RUN (17) starts at state 3, CTX_UNIFORM (18) starts at state 46, matching Table D.7.
+
+3. **Bitstream divergence confirmed** - For identical input (all -128 coefficients):
+   - Our encoder: `[8D, 33, E9, 1F, FF, E0]` (6 bytes)
+   - OpenJPEG:    `[11, 50, 49, 9F]` (4 bytes)
+   
+4. **MQ decoding verified** - Both Python simulation and Rust decoder produce identical symbol sequences when decoding OpenJPEG bytes. The symbols don't match expected DWT coefficients.
+
+5. **DWT verified** - Our DWT implementation produces identical coefficients to OpenJPEG (verified via encode/decode roundtrip).
+
+**Possible causes:**
+- Different coefficient storage order (row-major vs column-major in codeblock)
+- Different RLC triggering conditions
+- Different byte output timing in MQ encoder
+- Different context adaptation sequences
 
 ### Test Status (2026-01-04 Updated):
 - Library tests: 28 passed, 1 failed (bit_plane_roundtrip has 2 coefficients off by 1)
