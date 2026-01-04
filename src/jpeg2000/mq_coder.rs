@@ -665,16 +665,43 @@ impl MqCoder {
     }
 
     fn byte_out(&mut self) {
-        let b_out = (self.c >> 19) as u8;
-        if std::env::var("MQ_TRACE").is_ok() {
-            eprintln!("  byte_out: C={:#x} → byte={:#x}", self.c, b_out);
-        }
-        if b_out == 0xFF {
+        // Following OpenJPEG's byteout logic with carry propagation
+        if ((self.c >> 19) & 0xFF) == 0xFF {
+            // Bit stuffing case: output 0xFF followed by 7-bit byte
+            let b_out = ((self.c >> 11) & 0xFF) as u8;
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  byte_out (stuffed): C={:#x} → byte={:#x}", self.c, b_out);
+            }
+            self.bp.push(0xFF);
+            self.bp.push(b_out);
+            self.bp_idx += 2;
+            self.c &= 0x7FF; // Keep only 11 low bits
             self.ct = 7;
+        } else {
+            // Check for carry propagation (bit 27 set)
+            if (self.c >> 27) != 0 {
+                // Carry needs to propagate to previous byte(s)
+                if !self.bp.is_empty() {
+                    let last_idx = self.bp.len() - 1;
+                    self.bp[last_idx] = self.bp[last_idx].wrapping_add(1);
+                    // If incrementing caused 0xFF, need to handle marker avoidance
+                    if self.bp[last_idx] == 0xFF {
+                        // Mark for bit stuffing on next byte
+                        self.c |= 0x8000000;
+                    }
+                }
+                self.c &= 0x07FFFFFF; // Clear carry bit
+            }
+            
+            let b_out = ((self.c >> 19) & 0xFF) as u8;
+            if std::env::var("MQ_TRACE").is_ok() {
+                eprintln!("  byte_out: C={:#x} → byte={:#x}", self.c, b_out);
+            }
+            self.bp.push(b_out);
+            self.bp_idx += 1;
+            self.c &= 0x7FFFF;
+            self.ct = 8;
         }
-        self.c &= 0x7FFFF;
-        self.bp.push(b_out);
-        self.bp_idx += 1;
     }
 
     /// Flush the encoder - must be called after encoding to finalize the bitstream

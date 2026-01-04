@@ -729,10 +729,11 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             &[],
                             true, // OpenJPEG compatibility
                         );
-                        if std::env::var("J2K_DEBUG").is_ok() {
+                        // Always print codeblock data for the first codeblock
+                        if std::env::var("J2K_DEBUG").is_ok() || (subband.orientation == crate::jpeg2000::image::SubbandOrientation::LL && layer == 0) {
                             eprintln!("Decoding codeblock: data={} bytes, max_bp={}, passes={}", 
                                 data.len(), max_bit_plane, cb_info.num_passes);
-                            eprintln!("  First 16 data bytes: {:02X?}", &data[..16.min(data.len())]);
+                            eprintln!("  First 20 data bytes: {:02X?}", &data[..20.min(data.len())]);
                             eprintln!("  guard_bits={}, epsilon_b={}, m_b={}, zero_bp={}", 
                                 guard_bits, epsilon_b, m_b, cb_info.zero_bp);
                         }

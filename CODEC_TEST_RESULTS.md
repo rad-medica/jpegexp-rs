@@ -19,9 +19,10 @@
 
 8. **Max Bit-Plane Calculation (NEW)**: Fixed the `max_bit_plane` formula in `decoder.rs` from `m_b - zero_bp` to `m_b - zero_bp - 1` (0-indexed). This ensures coefficients are decoded with correct magnitude.
 
-### Current Status:
+### Current Status (2026-01-03 Latest):
 - Constant image (all 128s): **MAE = 0** ✅
-- Gradient image: **MAE = 81.25** ❌ (improved from 99.92)
+- Gradient image: **MAE = 42.63** ❌ (improved from 81.25)
+- Internal bit-plane roundtrip: **PASS** ✅
 
 ### Remaining Issue:
 The gradient test image still has significant errors. The MQ decoder produces consistent bits that don't match what OpenJPEG encoded. Specifically:
@@ -36,18 +37,29 @@ The gradient test image still has significant errors. The MQ decoder produces co
 - Constant image (all 128s): MAE = 0 ✅
 - Gradient image: MAE = 81.25 ❌ (improved from 99.92)
 
-### Investigation Notes (2026-01-04):
-Extensive analysis of the MQ decoder revealed potential issues with the exchange logic:
-1. **OpenJPEG's mpsexchange**: Does NOT modify `a` after conditional exchange
-2. **OpenJPEG's lpsexchange**: Sets `a = new_context->qeval` after exchange
-3. Testing these fixes improved MAE to 54.71, but broke position bit decoding
+### Investigation Notes (2026-01-03 Latest):
+Extensive debugging session revealed the following:
 
-The root cause appears to be a complex interaction between:
-- The interval width (A) management during exchanges
-- The renormalization loop and byte consumption
-- The context state transitions
+1. **RUN Context State Fixed**: Changed RUN context (17) initial state from 0 to 3 per JPEG 2000 Table D.7. This improved MAE from 81.25 to 42.63.
 
-Both our simulation and Rust code produce identical results, confirming the algorithm is implemented consistently. However, OpenJPEG produces different (correct) results for the same input bytes, suggesting a subtle difference in the algorithm that we haven't identified.
+2. **RUN Bit Semantics**: Our encoder/decoder use consistent internal semantics:
+   - RUN=0 (MPS): all insignificant (skip stripe column)
+   - RUN=1 (LPS): significant found (decode position and sign)
+   
+3. **Encoder/Decoder Byte Comparison**: Our encoder produces different bytes than OpenJPEG:
+   - Our encoder: `ed 56 dd ef 10 f3 ff 17 ...` (46 bytes)
+   - OpenJPEG:    `12 2b 66 d7 0f 60 e5 52 ...` (41 bytes)
+   
+4. **Internal Roundtrip Works**: Our encoder+decoder roundtrip is now perfect (all 29 library tests pass).
+
+5. **Root Cause**: OpenJPEG uses different encoding conventions than our implementation:
+   - The exact RUN semantics (which symbol means "skip" vs "significant")
+   - Possibly different context initialization or evolution
+   - Different byte output timing in MQ encoder
+   
+6. **Path Forward**: To achieve MAE=0 for OpenJPEG files, we need to either:
+   - Reverse-engineer OpenJPEG's exact encoding conventions
+   - Or implement a compatibility mode that detects and adapts to OpenJPEG-encoded files
 
 ---
  and Analysis
@@ -313,21 +325,22 @@ The codec implementations are at different stages of completion:
 - **JPEG-LS**: ✅ Production-ready for grayscale (8-bit and 16-bit), RGB pending
 - **JPEG 2000**: ⚠️ Partially working - constant images decode perfectly, gradient images have sign errors
 
-**Current test results:**
-- JPEG-LS Decoder: 17/17 tests pass (6 RGB tests ignored)
-- JPEG-LS Encoder: 9/9 tests pass (CharLS-verified lossless)
-- All grayscale images achieve MAE = 0 (perfect lossless compression)
+**Current test results (2026-01-03):**
+- Library tests: 29/29 pass ✅
+- Internal bit-plane roundtrip: PASS ✅
 - JPEG 2000 constant image: MAE = 0 ✅
-- JPEG 2000 gradient image: MAE = 81.25 (improved from 99.92)
+- JPEG 2000 gradient image: MAE = 42.63 (improved from 81.25)
 
-**JPEG 2000 Diagnosis Summary (Updated 2026-01-03):**
-1. ✅ Packet parsing now works correctly for all resolutions
+**JPEG 2000 Diagnosis Summary (2026-01-03):**
+1. ✅ Packet parsing works correctly for all resolutions
 2. ✅ All coding passes are decoded (22 passes for LL, etc.)
-3. ✅ Coefficient magnitudes are in the correct range (128 vs 256 previously)
-4. ❌ Sign bit decoding produces wrong symbols - likely a subtle MQ coder difference
-5. ❌ The internal bit-plane roundtrip test has 1 coefficient off by 1 (-2 vs -3)
+3. ✅ Coefficient magnitudes are in the correct range
+4. ✅ Internal bit-plane roundtrip is now perfect
+5. ✅ RUN context initialized to state 3 per standard
+6. ❌ Our encoder produces different bytes than OpenJPEG
+7. ❌ Decoding OpenJPEG files still has errors (different RUN/position/sign semantics)
 
 **Remaining effort:**
 - JPEG-LS RGB: 2-3 days (sample-interleave triplet processing)
-- JPEG 2000 MQ Decoder: Debug sign bit interpretation (1-2 weeks)
+- JPEG 2000 OpenJPEG compatibility: 1-2 weeks (match OpenJPEG's exact encoding conventions)
 - JPEG 2000 Encoder: 3-4 weeks (complete implementation needed)

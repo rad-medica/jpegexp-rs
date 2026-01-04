@@ -18,26 +18,19 @@ impl<'a> BitPlaneCoder<'a> {
     
     /// Create a BitPlaneCoder with configurable context initialization
     /// If openjpeg_compat is true, uses OpenJPEG-compatible context states
-    pub fn with_context_mode(width: u32, height: u32, data: &'a [i32], openjpeg_compat: bool) -> Self {
+    pub fn with_context_mode(width: u32, height: u32, data: &'a [i32], _openjpeg_compat: bool) -> Self {
         let size = (width * height) as usize;
         let mut mq = MqCoder::new();
         mq.init_contexts(19);
         
-        // UNIFORM context (18): always state 46 for 50% probability
-        mq.set_context(Self::CTX_UNIFORM, 46, 0);
+        // All contexts start at state 0, mps 0 by default from init_contexts
+        // Per JPEG 2000 Table D.7, only contexts 17 and 18 have different initial states:
         
-        // RUN context (17): 
-        // Per JPEG 2000 Table D.7, initial state should be 3
-        // However, testing shows OpenJPEG-encoded files work better with state 0
-        // This may be due to a difference in how OpenJPEG initializes contexts
-        if openjpeg_compat {
-            // For decoding OpenJPEG files, use state 0
-            // State 0 has Qe=0x5601 which triggers conditional exchange
-            mq.set_context(Self::CTX_RUN, 0, 0);
-        } else {
-            // For our internal encoder/decoder, use state 3 per spec
-            mq.set_context(Self::CTX_RUN, 3, 0);
-        }
+        // RUN context (17): Initial state is 3
+        mq.set_context(Self::CTX_RUN, 3, 0);
+        
+        // UNIFORM context (18): State 46 for 50% probability
+        mq.set_context(Self::CTX_UNIFORM, 46, 0);
 
         // Load coefficients if provided usually
         // But for standard new, init to zero if not reusing
@@ -445,13 +438,16 @@ impl<'a> BitPlaneCoder<'a> {
                 
                     if can_use_rlc {
                     // Use RLC: decode a single bit with RUN context
+                    // With initial mps=0 and the way our MQ decoder works:
+                    // - d=0 (MPS) is more probable and means "skip" (all insignificant)
+                    // - d=1 (LPS) is less probable and means "significant found"
                     let run_bit = self.mq.decode_bit(Self::CTX_RUN);
                     
                     if run_bit == 0 {
                         // All 4 samples in this column remain insignificant
                         // Nothing to do - they stay at 0
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("DEC: RLC col={} bp={}: RUN=0, all insignificant", x, bit_plane);
+                            eprintln!("DEC: RLC col={} bp={}: RUN=0 (MPS), all insignificant", x, bit_plane);
                         }
                         continue; // Move to next column
                     } else {
@@ -462,7 +458,7 @@ impl<'a> BitPlaneCoder<'a> {
                         let pos_bit0 = self.mq.decode_bit(Self::CTX_UNIFORM);
                         let pos = ((pos_bit1 as u32) << 1) | (pos_bit0 as u32);
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("DEC: RLC col={} bp={}: RUN=1, pos bits={},{}, pos={}", x, bit_plane, pos_bit1, pos_bit0, pos);
+                            eprintln!("DEC: RLC col={} bp={}: RUN=1 (LPS), significant, pos bits={},{}, pos={}", x, bit_plane, pos_bit1, pos_bit0, pos);
                         }
                         
                         if std::env::var("BPC_DEBUG").is_ok() && bit_plane >= 6 {
@@ -854,10 +850,11 @@ impl<'a> BitPlaneCoder<'a> {
 
                     if let Some(pos) = first_sig_pos {
                         // At least one sample becomes significant
+                        // Encode LPS (1) to indicate "significant found"
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("ENC: RLC col={} bp={}: encode RUN=1, pos={}", x, bit_plane, pos);
+                            eprintln!("ENC: RLC col={} bp={}: encode RUN=1 (LPS, significant), pos={}", x, bit_plane, pos);
                         }
-                        self.mq.encode(1, Self::CTX_RUN); // run_bit = 1
+                        self.mq.encode(1, Self::CTX_RUN); // run_bit = 1 (LPS)
 
                         // Encode position (2 bits, MSB first)
                         let pos_bit1 = ((pos >> 1) & 1) as u8;
@@ -925,10 +922,11 @@ impl<'a> BitPlaneCoder<'a> {
                         }
                     } else {
                         // All 4 samples remain insignificant
+                        // Encode MPS (0) to indicate "skip"
                         if std::env::var("BPC_TRACE").is_ok() {
-                            eprintln!("ENC: RLC col={} bp={}: encode RUN=0", x, bit_plane);
+                            eprintln!("ENC: RLC col={} bp={}: encode RUN=0 (MPS, skip)", x, bit_plane);
                         }
-                        self.mq.encode(0, Self::CTX_RUN); // run_bit = 0
+                        self.mq.encode(0, Self::CTX_RUN); // run_bit = 0 (MPS)
                     }
                 } else {
                     // Regular cleanup (no RLC)
