@@ -422,7 +422,7 @@ impl<'a> JpegStreamReader<'a> {
 
         let shift = self.bits_left - 1;
         let bit = (self.bit_buffer >> shift) & 1;
-
+        
         self.bits_left -= 1;
         Ok(bit)
     }

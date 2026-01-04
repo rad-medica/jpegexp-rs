@@ -371,9 +371,15 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let is_htj2k = false; // Placeholder
 
         // LRCP Loop
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("LRCP: layers={}, resolutions={}, components={}", safe_num_layers, num_resolutions, num_components);
+        }
         for l in 0..safe_num_layers {
             for r in 0..num_resolutions {
                 let num_subbands = if r == 0 { 1 } else { 3 };
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("  L={} R={} subbands={}", l, r, num_subbands);
+                }
 
                 for c in 0..num_components {
                     // Ensure state exists
@@ -456,6 +462,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             let mut _pos_to_advance = 0;
                             {
                                 let remaining = parser.reader.remaining_data();
+                                if std::env::var("J2K_DEBUG").is_ok() {
+                                    eprintln!("  Before packet L={} R={}: remaining={}", l, r, remaining.len());
+                                }
                                 if !remaining.is_empty() {
                                     // J2kBitReader now uses parser.reader internal bit state, so creating/destroying it is safe
                                     // We create a new scope to limit lifetime of bit_reader
@@ -484,8 +493,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 if std::env::var("J2K_DEBUG").is_ok() {
                                     let pos = parser.reader.position();
                                     let remaining = parser.reader.remaining_data().len();
-                                    eprintln!("DECODE_PACKET: L={} R={} C={} P=({},{}) empty={} cblks={} pos={} remaining={}",
-                                        l, r, c, px, py, h.empty, h.included_cblks.len(), pos, remaining);
+                                    let data_sum: u32 = h.included_cblks.iter().map(|cb| cb.data_len).sum();
+                                    eprintln!("DECODE_PACKET: L={} R={} C={} P=({},{}) empty={} cblks={} data_sum={} pos={} remaining={}",
+                                        l, r, c, px, py, h.empty, h.included_cblks.len(), data_sum, pos, remaining);
                                 }
                                 // If body follows AND there's data to read, we must align to byte boundary
                                 // Per ISO 15444-1 B.9: byte alignment happens after packet header
@@ -668,21 +678,25 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     // This applies to both reversible and irreversible transforms
                     let m_b = guard_bits + epsilon_b.saturating_sub(1);
 
-                    // The first coded bit-plane is M_b - 1 - zero_bp in 0-indexed terms
-                    // But for the cleanup pass bit-plane parameter, we use M_b - zero_bp
-                    // because the decoder expects bit-plane indices where the first cleanup
-                    // is at max_bit_plane, and subsequent passes go to lower bit-planes
-                    let max_bit_plane = m_b.saturating_sub(cb_info.zero_bp);
+                    // The first coded bit-plane is M_b - 1 - zero_bp
+                    // This follows OpenJPEG's calculation where:
+                    // - M_b is the total number of magnitude bit-planes
+                    // - zero_bp is the number of leading zero bit-planes
+                    // - The first significant bit-plane is M_b - 1 - zero_bp (0-indexed)
+                    // For example: M_b=9, zero_bp=1 -> first bp = 9 - 1 - 1 = 7
+                    let max_bit_plane = m_b.saturating_sub(cb_info.zero_bp).saturating_sub(1);
 
                     if let Some(idx) = cb_idx {
                         let block = &mut subband.codeblocks[idx];
                         block.layer_data.push(data.clone());
                         block.layers_decoded = (layer + 1) as u8;
 
-                        let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
+                        // Use OpenJPEG-compatible context initialization for decoding
+                        let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::with_context_mode(
                             block.width,
                             block.height,
                             &[],
+                            true, // OpenJPEG compatibility
                         );
                         bpc.coefficients = block.coefficients.clone();
                         bpc.state = block.state.clone();
@@ -703,17 +717,39 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         block.layers_decoded = (layer + 1) as u8;
                         block.coding_passes = 0;
 
-                        let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
+                        // Use OpenJPEG-compatible context initialization for decoding
+                        let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::with_context_mode(
                             cb_width as u32,
                             cb_height as u32,
                             &[],
+                            true, // OpenJPEG compatibility
                         );
-                        if let Ok(coefficients) =
-                            bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8)
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            eprintln!("Decoding codeblock: data={} bytes, max_bp={}, passes={}", 
+                                data.len(), max_bit_plane, cb_info.num_passes);
+                            eprintln!("  First 16 data bytes: {:02X?}", &data[..16.min(data.len())]);
+                            eprintln!("  guard_bits={}, epsilon_b={}, m_b={}, zero_bp={}", 
+                                guard_bits, epsilon_b, m_b, cb_info.zero_bp);
+                        }
+                        match bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8)
                         {
-                            block.coefficients = coefficients;
-                            block.state = bpc.state;
-                            block.coding_passes = bpc.num_passes_decoded as u8;
+                            Ok(coefficients) => {
+                                if std::env::var("J2K_DEBUG").is_ok() {
+                                    let nonzero: usize = coefficients.iter().filter(|&&c| c != 0).count();
+                                    eprintln!("  Decoded {} coeffs, {} nonzero", coefficients.len(), nonzero);
+                                    if !coefficients.is_empty() {
+                                        eprintln!("  First 8: {:?}", &coefficients[..8.min(coefficients.len())]);
+                                    }
+                                }
+                                block.coefficients = coefficients;
+                                block.state = bpc.state;
+                                block.coding_passes = bpc.num_passes_decoded as u8;
+                            }
+                            Err(e) => {
+                                if std::env::var("J2K_DEBUG").is_ok() {
+                                    eprintln!("  Decode error: {:?}", e);
+                                }
+                            }
                         }
                         subband.codeblocks.push(block);
                     }

@@ -11,17 +11,31 @@ pub struct BitPlaneCoder<'a> {
 }
 
 impl<'a> BitPlaneCoder<'a> {
+    /// Create a new BitPlaneCoder for encoding (uses our internal context states)
     pub fn new(width: u32, height: u32, data: &'a [i32]) -> Self {
+        Self::with_context_mode(width, height, data, false)
+    }
+    
+    /// Create a BitPlaneCoder with configurable context initialization
+    /// If openjpeg_compat is true, uses OpenJPEG-compatible context states
+    pub fn with_context_mode(width: u32, height: u32, data: &'a [i32], openjpeg_compat: bool) -> Self {
         let size = (width * height) as usize;
         let mut mq = MqCoder::new();
         mq.init_contexts(19);
         
-        // Initialize UNIFORM context (18) to state 46 for uniform probability
-        // Context format is (state_index << 1) | mps, so state 46 with MPS=0 is 92
+        // UNIFORM context (18): always state 46 for 50% probability
         mq.set_context(Self::CTX_UNIFORM, 46, 0);
         
-        // Initialize RUN context (17) to state 3 (per OpenJPEG's t1_init_ctxno_zc_enc)
-        mq.set_context(Self::CTX_RUN, 3, 0);
+        if openjpeg_compat {
+            // OpenJPEG-compatible: RUN context at state 0 (default)
+            // State 0 has Qe=0x5601 (~33.6% LPS probability)
+            // Don't set - let it stay at default state 0
+        } else {
+            // Our internal mode: RUN context at state 3
+            // State 3 has Qe=0x0AC1 (~4.2% LPS probability)
+            // This is what our encoder expects
+            mq.set_context(Self::CTX_RUN, 3, 0);
+        }
 
         // Load coefficients if provided usually
         // But for standard new, init to zero if not reusing
@@ -236,6 +250,9 @@ impl<'a> BitPlaneCoder<'a> {
                 }
             }
 
+            if std::env::var("BPC_TRACE").is_ok() {
+                eprintln!("  Pass {}: {:?} at bit-plane {}", pass_idx, pass_type, bp);
+            }
             match pass_type {
                 PassType::SigProp => self.decode_significance_propagation(bp, orientation)?,
                 PassType::MagRef => self.decode_magnitude_refinement(bp)?,

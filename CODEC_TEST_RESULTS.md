@@ -1,25 +1,39 @@
 # Codec Test Results
 
-## Recent JPEG 2000 Decoder Fixes (2026-01-02)
+## Recent JPEG 2000 Decoder Fixes (2026-01-03)
 
 ### Fixed Issues:
 1. **Tag Tree Bit Interpretation**: Fixed inverted bit semantics in `tag_tree.rs`. JPEG 2000 spec says bit=1 means "value found at current low", bit=0 means "value is higher". Our implementation had this reversed.
 
-2. **2D DWT Inverse**: Rewrote `Dwt53::inverse_2d` in `dwt.rs`. The previous implementation incorrectly mixed horizontal and vertical passes. The correct order is:
-   - First: Vertical inverse on columns (LL+LH → left cols, HL+HH → right cols)
-   - Second: Horizontal inverse on rows (left+right → output)
+2. **2D DWT Inverse**: Rewrote `Dwt53::inverse_2d` in `dwt.rs`. The previous implementation incorrectly mixed horizontal and vertical passes.
 
-3. **MQ Decoder Byte Input**: Aligned `byte_in()` in `mq_coder.rs` with OpenJPEG's implementation. The byte input now uses addition to `c` register rather than OR operations.
+3. **MQ Decoder Byte Input**: Aligned `byte_in()` in `mq_coder.rs` with OpenJPEG's implementation.
 
 4. **MQ Decoder Conditional Exchange**: Fixed the LPS/MPS exchange logic in `decode_bit()` to match ISO/IEC 15444-1 and OpenJPEG's implementation.
 
-### Remaining Issue:
-The MQ decoder still produces incorrect coefficient values when decoding OpenJPEG-encoded files. The decoded coefficients are completely wrong (e.g., expected [0, 2, 4, 6, ...] but getting [-194, 35, -20, ...]). This suggests a fundamental mismatch between our MQ decoder and OpenJPEG's encoder that requires further investigation.
+5. **MQ Multi-Context Roundtrip**: Fixed context initialization for RUN (17) and UNIFORM (18) contexts in tests.
 
-### Test Status:
-- All library tests pass (26/26)
-- Roundtrip encoding/decoding with our own encoder works
-- Decoding OpenJPEG-encoded files does NOT work correctly yet
+6. **Constant Image Decoding**: Successfully decoding constant-value J2K images with MAE = 0.
+
+7. **Coding Passes Parsing (NEW)**: Rewrote `read_coding_passes()` in `packet.rs` to match OpenJPEG's implementation. The previous implementation incorrectly interpreted the variable-length pass count encoding, causing wrong `data_len` values (e.g., 128 bytes instead of 40).
+
+8. **Max Bit-Plane Calculation (NEW)**: Fixed the `max_bit_plane` formula in `decoder.rs` from `m_b - zero_bp` to `m_b - zero_bp - 1` (0-indexed). This ensures coefficients are decoded with correct magnitude.
+
+### Current Status:
+- Constant image (all 128s): **MAE = 0** ✅
+- Gradient image: **MAE = 81.25** ❌ (improved from 99.92)
+
+### Remaining Issue:
+The gradient test image still has significant errors. The MQ decoder produces consistent bits that don't match what OpenJPEG encoded. Specifically:
+- The LL coefficient at position (0,0) is decoded as +223 instead of expected -128
+- The sign bit decoding returns 0 (positive) when it should return 1 (negative)
+- All packet header parsing, data extraction, and MQ algorithm match OpenJPEG's code
+- The root cause appears to be a subtle difference in how our MQ decoder interprets the bitstream compared to OpenJPEG's encoder
+
+### Test Status (2026-01-03):
+- Library tests: 28 passed, 1 failed (bit_plane_roundtrip has 1 value off by 1)
+- Constant image (all 128s): MAE = 0 ✅
+- Gradient image: MAE = 81.25 ❌ (improved from 99.92)
 
 ---
  and Analysis
@@ -107,23 +121,25 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 
 ### JPEG 2000 (ISO/IEC 15444-1)
 
-#### Decoder Tests ❌ (Detailed Analysis 2026-01-02)
+#### Decoder Tests ⚠️ (Detailed Analysis 2026-01-03)
 | Test | Status | Notes |
 |------|--------|-------|
 | Header Parsing | ✅ Pass | SIZ, COD, QCD, CAP markers correctly parsed |
 | JP2 Container | ✅ Pass | JP2 box structure correctly extracted |
-| kakadu61.jp2 | ❌ Fail | MAE = 103.5 vs OpenJPEG reference |
-| Lossless decode | ❌ Fail | MAE = 48-78 (should be 0) |
+| Constant image | ✅ Pass | MAE = 0 (perfect for all-128 images) |
+| Gradient lossless | ❌ Fail | MAE = 81.25 (improved from 99.92) |
 
-**Decoder Root Causes (Identified):**
-1. **Packet parsing issue**: Only Resolution 0 packets are read correctly; Resolutions 1-3 are incorrectly marked as empty
-2. **Bit-plane decoding**: Only 1 coding pass decoded instead of ~25 needed for lossless
-3. **Coefficient values**: Only MSB bit-plane values reconstructed (e.g., -256, 0 instead of actual gradient values)
+**Decoder Progress (2026-01-03):**
+1. ✅ **Packet parsing fixed**: All resolutions now parse correctly with proper pass counts and data lengths
+2. ✅ **Max bit-plane formula fixed**: Coefficients now decode at correct magnitude (128 range instead of 256)
+3. ✅ **Constant images decode perfectly**: MAE = 0 for images where all DWT coefficients are zero
+4. ❌ **Sign bit decoding issue**: MQ decoder returns wrong symbols for coefficient signs
 
 **Technical Details:**
-- After reading packet 0 (res 0) with 10 bytes of codeblock data, the next byte's MSB is 0
-- This causes packets for resolutions 1, 2, 3 to be incorrectly marked as empty
-- The issue is in the packet header parsing not correctly tracking bit positions across packets
+- The MQ arithmetic decoder produces consistent bits that differ from OpenJPEG-encoded bitstreams
+- For the first LL coefficient, the sign is decoded as positive (+223) when it should be negative (-128)
+- All algorithm code matches OpenJPEG line-by-line, suggesting a subtle initialization or byte interpretation difference
+- The internal roundtrip test (our encoder + our decoder) also has 1 coefficient mismatch (-2 vs -3), indicating a fundamental MQ coder issue
 
 #### Encoder Tests ❌
 | Direction | MAE | Status |
@@ -156,7 +172,8 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 | JPEG 1 RGB | < 5.0 | 1.51 | ✅ Working |
 | JPEG-LS (8-bit) | 0 | 0 | ✅ Perfect lossless |
 | JPEG-LS (16-bit) | 0 | 0 | ✅ Perfect lossless |
-| JPEG 2000 Decode | 0 | 48-103 | ❌ Packet parsing bugs |
+| JPEG 2000 Constant | 0 | 0 | ✅ Perfect for constant images |
+| JPEG 2000 Gradient | 0 | 81.25 | ❌ MQ decoder sign issue |
 | JPEG 2000 Encode | 0 | 64 | ❌ Stub (empty packets) |
 
 ---
@@ -280,21 +297,23 @@ The codec implementations are at different stages of completion:
 
 - **JPEG 1**: ✅ Production-ready for grayscale and RGB
 - **JPEG-LS**: ✅ Production-ready for grayscale (8-bit and 16-bit), RGB pending
-- **JPEG 2000**: ❌ Non-functional - decoder has packet parsing bugs, encoder is stub
+- **JPEG 2000**: ⚠️ Partially working - constant images decode perfectly, gradient images have sign errors
 
 **Current test results:**
 - JPEG-LS Decoder: 17/17 tests pass (6 RGB tests ignored)
 - JPEG-LS Encoder: 9/9 tests pass (CharLS-verified lossless)
 - All grayscale images achieve MAE = 0 (perfect lossless compression)
-- JPEG 2000 decoder produces MAE = 48-103 (should be 0 for lossless)
+- JPEG 2000 constant image: MAE = 0 ✅
+- JPEG 2000 gradient image: MAE = 81.25 (improved from 99.92)
 
-**JPEG 2000 Diagnosis Summary:**
-1. Only Resolution 0 packets are parsed correctly
-2. Only 1 coding pass is decoded (instead of ~25 for lossless)
-3. Coefficient reconstruction gets only MSB values (e.g., -256, 0)
-4. The root cause is in `src/jpeg2000/packet.rs` - bit-position tracking between packets
+**JPEG 2000 Diagnosis Summary (Updated 2026-01-03):**
+1. ✅ Packet parsing now works correctly for all resolutions
+2. ✅ All coding passes are decoded (22 passes for LL, etc.)
+3. ✅ Coefficient magnitudes are in the correct range (128 vs 256 previously)
+4. ❌ Sign bit decoding produces wrong symbols - likely a subtle MQ coder difference
+5. ❌ The internal bit-plane roundtrip test has 1 coefficient off by 1 (-2 vs -3)
 
 **Remaining effort:**
 - JPEG-LS RGB: 2-3 days (sample-interleave triplet processing)
-- JPEG 2000 Decoder fixes: 1-2 weeks (packet parsing, bit-plane coder)
+- JPEG 2000 MQ Decoder: Debug sign bit interpretation (1-2 weeks)
 - JPEG 2000 Encoder: 3-4 weeks (complete implementation needed)

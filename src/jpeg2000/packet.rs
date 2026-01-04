@@ -135,7 +135,14 @@ impl PacketHeader {
                         // Decode LBlock increment: count consecutive 1s until 0
                         // (NOT a tag tree - just a simple run length)
                         let mut lblock_increment = 0i32;
-                        while reader.read_bit()? == 1 {
+                        loop {
+                            let bit = reader.read_bit()?;
+                            if std::env::var("J2K_DEBUG").is_ok() {
+                                eprintln!("    lblock_inc bit: {}", bit);
+                            }
+                            if bit == 0 {
+                                break;
+                            }
                             lblock_increment += 1;
                         }
                         // Store the increment for potential future use
@@ -151,11 +158,15 @@ impl PacketHeader {
                         };
                         let lbits = lblock + pass_extra;
 
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            eprintln!("  CB[{},{}] subband={}: zero_bp={}, passes={}, lblock={}, pass_extra={}, lbits={}",
+                                x, y, s, zero_bp, num_passes, lblock, pass_extra, lbits);
+                            eprintln!("    Reading {} bits for length...", lbits);
+                        }
                         let data_len = reader.read_bits(lbits as u8)?;
 
                         if std::env::var("J2K_DEBUG").is_ok() {
-                            eprintln!("  CB[{},{}] subband={}: zero_bp={}, passes={}, lblock={}, pass_extra={}, lbits={}, len={}",
-                                x, y, s, zero_bp, num_passes, lblock, pass_extra, lbits, data_len);
+                            eprintln!("    len={} (binary: {:0width$b})", data_len, data_len, width=lbits as usize);
                         }
 
                         header.included_cblks.push(CodeBlockInfo {
@@ -175,37 +186,58 @@ impl PacketHeader {
         Ok(header)
     }
 
-    /// Reads the number of coding passes using J2K codeword table (Table B.4).
+    /// Reads the number of coding passes (OpenJPEG-compatible implementation).
+    /// This follows OpenJPEG's t2_getnumpasses() which differs from the literal
+    /// interpretation of Table B.4 in the JPEG 2000 spec.
     fn read_coding_passes(reader: &mut J2kBitReader<'_, '_>) -> Result<u8, BitIoError> {
-        // JPEG 2000 standard (ISO 15444-1) number of coding passes encoding:
-        // 0          -> 1 pass
-        // 10         -> 2 passes
-        // 110 + 1b   -> 3-4 passes
-        // 1110 + 2b  -> 5-8 passes
-        // 11110 + 5b -> 9-40 passes
-        // 11111 + 7b -> 37-164 passes
+        // OpenJPEG's t2_getnumpasses() implementation:
+        // - Read 1 bit: if 0 -> 1 pass
+        // - Read 1 bit: if 0 -> 2 passes
+        // - Read 2 bits (n): if n != 3 -> 3 + n passes (3-5)
+        // - Read 5 bits (n): if n != 31 -> 6 + n passes (6-36)
+        // - Read 7 bits (n): -> 37 + n passes (37-164)
         
-        if reader.read_bit()? == 0 {
+        let debug = std::env::var("J2K_DEBUG").is_ok();
+        
+        // Step 1: Read first bit
+        let b1 = reader.read_bit()?;
+        if debug { eprintln!("    passes bit 1: {}", b1); }
+        if b1 == 0 {
+            if debug { eprintln!("    passes = 1"); }
             return Ok(1);
         }
-        if reader.read_bit()? == 0 {
+        
+        // Step 2: Read second bit
+        let b2 = reader.read_bit()?;
+        if debug { eprintln!("    passes bit 2: {}", b2); }
+        if b2 == 0 {
+            if debug { eprintln!("    passes = 2"); }
             return Ok(2);
         }
-        if reader.read_bit()? == 0 {
-            let extra = reader.read_bit()? as u8;
-            return Ok(3 + extra);
+        
+        // Step 3: Read 2 bits
+        let n = reader.read_bits(2)? as u8;
+        if debug { eprintln!("    passes 2-bit field: {}", n); }
+        if n != 3 {
+            let passes = 3 + n;
+            if debug { eprintln!("    passes = {}", passes); }
+            return Ok(passes);
         }
-        if reader.read_bit()? == 0 {
-            let extra = reader.read_bits(2)? as u8;
-            return Ok(5 + extra);
+        
+        // Step 4: Read 5 bits (we had n=3, so pattern is 1111)
+        let n = reader.read_bits(5)? as u8;
+        if debug { eprintln!("    passes 5-bit field: {}", n); }
+        if n != 31 {
+            let passes = 6 + n;
+            if debug { eprintln!("    passes = {}", passes); }
+            return Ok(passes);
         }
-        if reader.read_bit()? == 0 {
-            let extra = reader.read_bits(5)? as u8;
-            return Ok(9 + extra);
-        }
-        // 11111 + 7 bits
-        let extra = reader.read_bits(7)? as u8;
-        Ok(37 + extra)
+        
+        // Step 5: Read 7 bits (we had n=31, so pattern is 1111 11111)
+        let n = reader.read_bits(7)? as u8;
+        let passes = 37 + n;
+        if debug { eprintln!("    passes 7-bit field: {}, total = {}", n, passes); }
+        Ok(passes)
     }
 
     /// Write a packet header to the bit stream.

@@ -388,32 +388,49 @@ impl MqCoder {
             return;
         }
         
-        if std::env::var("MQ_TRACE").is_ok() {
-            eprintln!("byte_in: pos={}, byte={:#x}", self.src_pos, self.source[self.src_pos]);
-        }
-
         let current = self.source[self.src_pos];
-        let next = if self.src_pos + 1 < self.source.len() {
-            self.source[self.src_pos + 1]
-        } else {
-            0xFF
-        };
-
+        
         if current == 0xFF {
+            let next = if self.src_pos + 1 < self.source.len() {
+                self.source[self.src_pos + 1]
+            } else {
+                0xFF
+            };
+            
             if next > 0x8F {
                 // Marker detected - don't consume, add 0xFF00
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, current=0xFF, marker detected, adding 0xFF00", self.src_pos);
+                }
                 self.c += 0xFF00;
                 self.ct = 8;
             } else {
-                // Bit stuffing or regular data after 0xFF
+                // Bit stuffing - the byte after 0xFF has only 7 valid bits
                 self.src_pos += 1;
-                self.c += (next as u32) << 9; // Shift by 9 for bit stuffing
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, byte={:#x} (after 0xFF, 7 bits)", self.src_pos, self.source[self.src_pos]);
+                }
+                self.c += (self.source[self.src_pos] as u32) << 9;
                 self.ct = 7;
             }
         } else {
+            // Normal case - read next byte
             self.src_pos += 1;
-            self.c += (next as u32) << 8;
-            self.ct = 8;
+            if self.src_pos < self.source.len() {
+                let byte = self.source[self.src_pos];
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, byte={:#x}", self.src_pos, byte);
+                }
+                self.c += (byte as u32) << 8;
+                self.ct = 8;
+            } else {
+                // End of stream
+                if std::env::var("MQ_TRACE").is_ok() {
+                    eprintln!("byte_in: pos={}, EOS, adding 0xFF00", self.src_pos);
+                }
+                self.c += 0xFF00;
+                self.ct = 8;
+            }
         }
     }
 
@@ -758,29 +775,21 @@ mod tests {
 
     #[test]
     fn test_mq_multi_context_roundtrip() {
-        // Test with multiple contexts like the bit-plane coder uses
+        // Test with context 17 (RUN context) initialized like BitPlaneCoder does
         let mut mq_enc = MqCoder::new();
-        mq_enc.init_contexts(19); // 19 contexts like BitPlaneCoder
+        mq_enc.init_contexts(19);
         
-        // Encode a sequence with different contexts
-        // This mimics the bit-plane coder: cleanup pass encodes with various contexts
+        // Initialize context 17 (RUN) to state 3, like BitPlaneCoder does
+        mq_enc.set_context(17, 3, 0);
+        // Initialize context 18 (UNIFORM) to state 46
+        mq_enc.set_context(18, 46, 0);
+        
+        // Simple sequence using RUN context: MPS, MPS, LPS, MPS
         let operations: Vec<(u8, usize)> = vec![
-            (1, 17), // RUN context
-            (0, 18), (0, 18), // UNIFORM context for position
-            (1, 9),  // Sign context
-            (0, 3),  // Cleanup continuation
-            (0, 0),  // 
-            (0, 0),  // 
-            (0, 5),  // 
-            (0, 1),  // 
-            (0, 0),  // 
-            (0, 0),  // 
-            (0, 17), // RUN
-            (0, 17), // RUN
-            // Now significance propagation pass
-            (0, 3),  // SigProp
-            (1, 5),  // SigProp - this should be LPS for ctx 5 with mps=0
-            (1, 3),  // SigProp
+            (0, 17), // MPS for RUN context
+            (0, 17), // MPS
+            (1, 17), // LPS - this is the tricky one
+            (0, 17), // MPS
         ];
         
         for &(bit, ctx) in &operations {
@@ -791,9 +800,11 @@ mod tests {
         
         println!("Simple encoded {} bytes: {:02X?}", encoded.len(), &encoded);
         
-        // Decode
+        // Decode - must have matching context initialization
         let mut mq_dec = MqCoder::new();
-        mq_dec.init_contexts(5);
+        mq_dec.init_contexts(19);
+        mq_dec.set_context(17, 3, 0);
+        mq_dec.set_context(18, 46, 0);
         mq_dec.init_decoder(&encoded);
         
         let mut decoded = Vec::new();
