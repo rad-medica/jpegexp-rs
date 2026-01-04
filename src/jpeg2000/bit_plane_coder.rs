@@ -457,7 +457,7 @@ impl<'a> BitPlaneCoder<'a> {
                     } else {
                         // At least one sample becomes significant
                         // Decode 2 bits with UNIFORM context to get position (0-3)
-                        // Position is encoded MSB first per JPEG 2000 spec
+                        // Per the JPEG 2000 spec, the position is encoded as 2 bits
                         let pos_bit1 = self.mq.decode_bit(Self::CTX_UNIFORM);
                         let pos_bit0 = self.mq.decode_bit(Self::CTX_UNIFORM);
                         let pos = ((pos_bit1 as u32) << 1) | (pos_bit0 as u32);

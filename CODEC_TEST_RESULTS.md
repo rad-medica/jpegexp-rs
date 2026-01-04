@@ -30,11 +30,24 @@ The gradient test image still has significant errors. The MQ decoder produces co
 - All packet header parsing, data extraction, and MQ algorithm match OpenJPEG's code
 - The root cause appears to be a subtle difference in how our MQ decoder interprets the bitstream compared to OpenJPEG's encoder
 
-### Test Status (2026-01-03 Updated):
+### Test Status (2026-01-04 Updated):
 - Library tests: 28 passed, 1 failed (bit_plane_roundtrip has 2 coefficients off by 1)
 - MQ Coder tests: 4 passed (encode/decode roundtrip, multi-context)
 - Constant image (all 128s): MAE = 0 ✅
 - Gradient image: MAE = 81.25 ❌ (improved from 99.92)
+
+### Investigation Notes (2026-01-04):
+Extensive analysis of the MQ decoder revealed potential issues with the exchange logic:
+1. **OpenJPEG's mpsexchange**: Does NOT modify `a` after conditional exchange
+2. **OpenJPEG's lpsexchange**: Sets `a = new_context->qeval` after exchange
+3. Testing these fixes improved MAE to 54.71, but broke position bit decoding
+
+The root cause appears to be a complex interaction between:
+- The interval width (A) management during exchanges
+- The renormalization loop and byte consumption
+- The context state transitions
+
+Both our simulation and Rust code produce identical results, confirming the algorithm is implemented consistently. However, OpenJPEG produces different (correct) results for the same input bytes, suggesting a subtle difference in the algorithm that we haven't identified.
 
 ---
  and Analysis

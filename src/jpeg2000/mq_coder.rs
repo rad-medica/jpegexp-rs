@@ -555,8 +555,9 @@ impl MqCoder {
 
     fn renormalize_input(&mut self) {
         // Following OpenJPEG's opj_mqc_renormd_macro
+        // IMPORTANT: Check condition BEFORE shifting, not after!
         let mut shifts = 0;
-        loop {
+        while self.a < 0x8000 {
             if self.ct == 0 {
                 self.byte_in(); // byte_in already adds to c
             }
@@ -564,9 +565,6 @@ impl MqCoder {
             self.c <<= 1;
             self.ct = self.ct.saturating_sub(1);
             shifts += 1;
-            if self.a >= 0x8000 {
-                break;
-            }
         }
         if std::env::var("MQ_TRACE").is_ok() {
             eprintln!("  DEC renorm: {} shifts, A={:#x}, C={:#x}, ct={}", shifts, self.a, self.c, self.ct);
