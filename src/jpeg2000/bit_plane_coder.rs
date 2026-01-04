@@ -309,6 +309,11 @@ impl<'a> BitPlaneCoder<'a> {
                                 let sym = self.mq.decode_bit(sc_ctx);
                                 let sign_bit = sym ^ (xor as u8);
 
+                                if std::env::var("BPC_TRACE").is_ok() {
+                                    eprintln!("DEC: SigProp Sign idx={} bp={}: ctx={}, xor={}, sym={}, sign_bit={}", 
+                                        idx, bit_plane, sc_ctx, xor, sym, sign_bit);
+                                }
+
                                 if sign_bit != 0 {
                                     self.state[idx] |= Self::SIGN;
                                     self.coefficients[idx] = -(1 << bit_plane);
@@ -450,7 +455,7 @@ impl<'a> BitPlaneCoder<'a> {
                     } else {
                         // At least one sample becomes significant
                         // Decode 2 bits with UNIFORM context to get position (0-3)
-                        // Note: Position is encoded MSB first
+                        // Position is encoded MSB first per JPEG 2000 spec
                         let pos_bit1 = self.mq.decode_bit(Self::CTX_UNIFORM);
                         let pos_bit0 = self.mq.decode_bit(Self::CTX_UNIFORM);
                         let pos = ((pos_bit1 as u32) << 1) | (pos_bit0 as u32);

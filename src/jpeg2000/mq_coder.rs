@@ -447,7 +447,7 @@ impl MqCoder {
         }
         
         // Debug tracing (only for first few calls if env var set)
-        let debug = std::env::var("MQ_DEBUG").is_ok();
+        let _debug = std::env::var("MQ_DEBUG").is_ok();
 
         // This corresponds to "DECODE" procedure
         // My Encoder put LPS at [0, Qe), MPS at [Qe, A).
@@ -533,8 +533,7 @@ impl MqCoder {
                 // Need renormalization - apply MPS exchange
                 if self.a < qe {
                     // Conditional exchange: LPS sub-interval is larger than MPS
-                    // So we're actually in what was meant to be LPS
-                    // Return LPS, use NLPS context, but DON'T modify C
+                    // Return LPS, use NLPS context
                     d = 1 - mps;
                     self.a = qe;
                     let switch = MQ_TABLE[idx].switch;

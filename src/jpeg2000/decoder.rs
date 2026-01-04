@@ -685,6 +685,11 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     // - The first significant bit-plane is M_b - 1 - zero_bp (0-indexed)
                     // For example: M_b=9, zero_bp=1 -> first bp = 9 - 1 - 1 = 7
                     let max_bit_plane = m_b.saturating_sub(cb_info.zero_bp).saturating_sub(1);
+                    
+                    if std::env::var("BP_DEBUG").is_ok() {
+                        eprintln!("CB res={} sub={}: guard={} epsilon={} m_b={} zero_bp={} max_bp={}",
+                            res, subband_idx, guard_bits, epsilon_b, m_b, cb_info.zero_bp, max_bit_plane);
+                    }
 
                     if let Some(idx) = cb_idx {
                         let block = &mut subband.codeblocks[idx];

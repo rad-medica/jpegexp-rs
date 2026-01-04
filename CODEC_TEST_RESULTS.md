@@ -30,8 +30,9 @@ The gradient test image still has significant errors. The MQ decoder produces co
 - All packet header parsing, data extraction, and MQ algorithm match OpenJPEG's code
 - The root cause appears to be a subtle difference in how our MQ decoder interprets the bitstream compared to OpenJPEG's encoder
 
-### Test Status (2026-01-03):
-- Library tests: 28 passed, 1 failed (bit_plane_roundtrip has 1 value off by 1)
+### Test Status (2026-01-03 Updated):
+- Library tests: 28 passed, 1 failed (bit_plane_roundtrip has 2 coefficients off by 1)
+- MQ Coder tests: 4 passed (encode/decode roundtrip, multi-context)
 - Constant image (all 128s): MAE = 0 ✅
 - Gradient image: MAE = 81.25 ❌ (improved from 99.92)
 
