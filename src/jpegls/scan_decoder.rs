@@ -1,9 +1,9 @@
-use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_marker_code::JPEG_MARKER_START_BYTE;
 use crate::jpegls::regular_mode_context::RegularModeContext;
 use crate::jpegls::run_mode_context::RunModeContext;
 use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
+use crate::FrameInfo;
 
 // Debug logging support
 #[cfg(debug_assertions)]
@@ -44,7 +44,7 @@ pub struct ScanDecoder<'a> {
     _limit: i32,
     _quantized_bits_per_sample: i32,
     _quantization_lut: Vec<i32>,
-    
+
     // Debug tracking
     #[cfg(debug_assertions)]
     bits_consumed: usize,
@@ -95,14 +95,21 @@ impl<'a> ScanDecoder<'a> {
         };
 
         decoder.fill_read_cache()?;
-        
+
         debug_log!("=== ScanDecoder Initialized ===");
         debug_log!("  Source length: {} bytes", source.len());
-        debug_log!("  Frame: {}x{}, {} components, {} bpp", 
-                  frame_info.width, frame_info.height, 
-                  frame_info.component_count, frame_info.bits_per_sample);
-        debug_log!("  Initial cache: {} valid bits, position: {}", 
-                  decoder.valid_bits, decoder.position);
+        debug_log!(
+            "  Frame: {}x{}, {} components, {} bpp",
+            frame_info.width,
+            frame_info.height,
+            frame_info.component_count,
+            frame_info.bits_per_sample
+        );
+        debug_log!(
+            "  Initial cache: {} valid bits, position: {}",
+            decoder.valid_bits,
+            decoder.position
+        );
 
         Ok(decoder)
     }
@@ -147,8 +154,13 @@ impl<'a> ScanDecoder<'a> {
         };
 
         debug_log!("=== Starting decode_lines ===");
-        debug_log!("  Image: {}x{}, components: {}, pixel_stride: {}", 
-                  width, height, components, pixel_stride);
+        debug_log!(
+            "  Image: {}x{}, components: {}, pixel_stride: {}",
+            width,
+            height,
+            components,
+            pixel_stride
+        );
 
         // Initialize line buffer with 2 lines
         // Per ITU-T T.87 specification, boundary pixels (outside the image) are
@@ -162,7 +174,7 @@ impl<'a> ScanDecoder<'a> {
             let line_start_pos = self.position;
             #[cfg(debug_assertions)]
             let line_start_bits = self.bits_consumed;
-            
+
             let (prev_line_slice, curr_line_slice) =
                 line_buffer.split_at_mut(components * pixel_stride);
             let (prev, curr) = if (line & 1) == 1 {
@@ -178,9 +190,9 @@ impl<'a> ScanDecoder<'a> {
             // Left edge: current_line[0] = previous_line[1]
             // Right edge: previous_line[width+1] = previous_line[width]
             curr_line[0] = prev_line[1];
-            prev_line[width + 1] = prev_line[width];  // Right edge extension
+            prev_line[width + 1] = prev_line[width]; // Right edge extension
             self.decode_sample_line::<T>(prev_line, curr_line, width, line == 0)?;
-            
+
             #[cfg(debug_assertions)]
             {
                 self.pixels_decoded += width;
@@ -203,11 +215,11 @@ impl<'a> ScanDecoder<'a> {
                 // Multi-component images should use InterleaveMode::Line or be split into planar scans
                 return Err(JpeglsError::InvalidOperation);
             }
-            
+
             let dest_start = line * stride;
             let dest_end = dest_start + width * components * std::mem::size_of::<T>();
             let destination_row = &mut destination[dest_start..dest_end];
-            
+
             // Convert T samples to bytes and write to destination
             // For grayscale: pixel_stride = width + 2, so curr_line[1..=width] accesses indices 1 through width
             // The slice has exactly 'width' elements starting at index 1
@@ -224,11 +236,7 @@ impl<'a> ScanDecoder<'a> {
             // The destination buffer is pre-allocated with sufficient size.
             // For grayscale (components=1), we copy exactly width*sizeof(T) bytes.
             unsafe {
-                std::ptr::copy_nonoverlapping(
-                    bytes_ptr,
-                    destination_row.as_mut_ptr(),
-                    bytes_len,
-                );
+                std::ptr::copy_nonoverlapping(bytes_ptr, destination_row.as_mut_ptr(), bytes_len);
             }
         }
         Ok(())
@@ -301,7 +309,8 @@ impl<'a> ScanDecoder<'a> {
 
         // Apply context bias C to prediction (per CharLS/ITU-T.87)
         // corrected_prediction = correct_prediction(predicted + apply_sign(C, sign))
-        let corrected_prediction = T::correct_prediction(predicted + Self::apply_sign(context_c, sign));
+        let corrected_prediction =
+            T::correct_prediction(predicted + Self::apply_sign(context_c, sign));
 
         let map_val = self.decode_mapped_error_value(k)?;
         let mut error_value = self.unmap_error_value(map_val);
@@ -317,8 +326,13 @@ impl<'a> ScanDecoder<'a> {
 
         error_value = Self::apply_sign(error_value, sign);
         let reconstructed = T::compute_reconstructed_sample(corrected_prediction, error_value);
-        debug_log!("      Reconstructed: predicted={}, corrected={}, error={}, result={}", 
-                  predicted, corrected_prediction, error_value, reconstructed);
+        debug_log!(
+            "      Reconstructed: predicted={}, corrected={}, error={}, result={}",
+            predicted,
+            corrected_prediction,
+            error_value,
+            reconstructed
+        );
         Ok(reconstructed)
     }
 
@@ -326,10 +340,14 @@ impl<'a> ScanDecoder<'a> {
         self.decode_mapped_error_value_with_limit(k, self._limit)
     }
 
-    fn decode_mapped_error_value_with_limit(&mut self, k: i32, limit: i32) -> Result<i32, JpeglsError> {
+    fn decode_mapped_error_value_with_limit(
+        &mut self,
+        k: i32,
+        limit: i32,
+    ) -> Result<i32, JpeglsError> {
         let mut value = 0;
         let mut bit_count = 0;
-        
+
         // Limited-length Golomb code threshold
         let qbpp = self._quantized_bits_per_sample;
         let limit_threshold = limit - qbpp - 1;
@@ -342,36 +360,49 @@ impl<'a> ScanDecoder<'a> {
             value += 1;
             bit_count += 1;
             self.skip_bits(1)?;
-            
+
             // Check if we've reached the limit threshold (escape mode)
             if bit_count >= limit_threshold {
                 // This is an escape sequence - read the terminating 1 and then qbpp bits
                 // Per CharLS: encoder writes (mapped_error - 1), decoder reads value + 1
-                self.skip_bits(1)?;  // Skip the terminating 1
+                self.skip_bits(1)?; // Skip the terminating 1
                 let escape_value = self.read_bits(qbpp)?;
-                value = escape_value + 1;  // CharLS encodes as (MErrval - 1)
-                debug_log!("    Golomb decode (escape): unary={}, escape_value={}, result={}", 
-                          bit_count, escape_value, value);
+                value = escape_value + 1; // CharLS encodes as (MErrval - 1)
+                debug_log!(
+                    "    Golomb decode (escape): unary={}, escape_value={}, result={}",
+                    bit_count,
+                    escape_value,
+                    value
+                );
                 return Ok(value);
             }
-            
+
             if bit_count > 32 {
                 debug_log!("    Golomb: unary code too long (>32 zeros)");
                 return Err(JpeglsError::InvalidData);
             }
         }
-        self.skip_bits(1)?;  // Skip the terminating 1
+        self.skip_bits(1)?; // Skip the terminating 1
 
         // Read fixed-length remainder
         if k > 0 {
             let remainder = self.read_bits(k)?;
             value = (value << k) | remainder;
-            debug_log!("    Golomb decode: k={}, unary={}, remainder={}, result={}", 
-                      k, bit_count, remainder, value);
+            debug_log!(
+                "    Golomb decode: k={}, unary={}, remainder={}, result={}",
+                k,
+                bit_count,
+                remainder,
+                value
+            );
         } else {
-            debug_log!("    Golomb decode: k=0, unary={}, result={}", bit_count, value);
+            debug_log!(
+                "    Golomb decode: k=0, unary={}, result={}",
+                bit_count,
+                value
+            );
         }
-        
+
         Ok(value)
     }
 
@@ -398,7 +429,7 @@ impl<'a> ScanDecoder<'a> {
         matches!(code,
             0xC0..=0xCF | // SOF markers (includes 0xC8 JPG marker)
             0xD0..=0xD9 | // RST markers, SOI, EOI
-            0xDA..=0xDF | // SOS, DHP, EXP markers  
+            0xDA..=0xDF | // SOS, DHP, EXP markers
             0xE0..=0xEF | // APPn markers
             0xF0..=0xFE   // JPGn, COM, and other markers
         )
@@ -409,7 +440,7 @@ impl<'a> ScanDecoder<'a> {
         // max_readable_cache_bits = cache_bits - 8 = 56 (for 64-bit cache)
         let cache_bits = std::mem::size_of::<usize>() * 8;
         let max_readable_cache_bits = (cache_bits - 8) as i32;
-        
+
         loop {
             if self.position >= self.source.len() {
                 // End of data
@@ -422,11 +453,14 @@ impl<'a> ScanDecoder<'a> {
             if byte == JPEG_MARKER_START_BYTE as usize {
                 if self.position + 1 < self.source.len() {
                     let next_byte = self.source[self.position + 1];
-                    
+
                     if (next_byte & 0x80) != 0 {
                         // FF followed by byte with high bit set = marker
                         // Stop filling cache, don't consume the FF
-                        debug_log!("    Marker: FF {:02X} detected, stopping cache fill", next_byte);
+                        debug_log!(
+                            "    Marker: FF {:02X} detected, stopping cache fill",
+                            next_byte
+                        );
                         break;
                     }
                 } else {
@@ -446,9 +480,12 @@ impl<'a> ScanDecoder<'a> {
             if byte == JPEG_MARKER_START_BYTE as usize {
                 // Subtract 1 bit because the next byte's high bit is stuffing
                 self.valid_bits -= 1;
-                debug_log!("    After FF: valid_bits decremented to {}", self.valid_bits);
+                debug_log!(
+                    "    After FF: valid_bits decremented to {}",
+                    self.valid_bits
+                );
             }
-            
+
             // Continue until we have enough bits in the cache
             if self.valid_bits >= max_readable_cache_bits {
                 break;
@@ -469,8 +506,12 @@ impl<'a> ScanDecoder<'a> {
             self.fill_read_cache()?;
         }
         if self.valid_bits < count {
-            debug_log!("  ✗ peek_bits({}) FAILED: only {} bits available at pos {}", 
-                      count, self.valid_bits, self.position);
+            debug_log!(
+                "  ✗ peek_bits({}) FAILED: only {} bits available at pos {}",
+                count,
+                self.valid_bits,
+                self.position
+            );
             return Err(JpeglsError::InvalidData);
         }
         // Read from the MSB side of the cache (CharLS compatible)
@@ -486,12 +527,12 @@ impl<'a> ScanDecoder<'a> {
         // Shift the cache left to consume bits from the MSB (CharLS compatible)
         self.read_cache <<= count as usize;
         self.valid_bits -= count;
-        
+
         #[cfg(debug_assertions)]
         {
             self.bits_consumed += count as usize;
         }
-        
+
         Ok(())
     }
 
@@ -574,9 +615,13 @@ impl<'a> ScanDecoder<'a> {
         // pixel_count is the number of remaining pixels to potentially fill with the run
         // This is from start_index to width (inclusive), so width - start_index + 1
         let pixel_count = width - start_index + 1;
-        debug_log!("    decode_run_mode: start_index={}, width={}, pixel_count={}", 
-                  start_index, width, pixel_count);
-        
+        debug_log!(
+            "    decode_run_mode: start_index={}, width={}, pixel_count={}",
+            start_index,
+            width,
+            pixel_count
+        );
+
         // Decode run pixels (CharLS-compatible algorithm)
         loop {
             let run_index_val = crate::constants::J[self.run_index];
@@ -584,46 +629,52 @@ impl<'a> ScanDecoder<'a> {
             let bits_before = self.bits_consumed;
             let bit = self.read_bits(1)?;
             #[cfg(debug_assertions)]
-            debug_log!("      [bit {}] run_index={}, J={}, bit={}, run_length={}", 
-                      bits_before, self.run_index, run_index_val, bit, run_length);
-            
+            debug_log!(
+                "      [bit {}] run_index={}, J={}, bit={}, run_length={}",
+                bits_before,
+                self.run_index,
+                run_index_val,
+                bit,
+                run_length
+            );
+
             if bit == 1 {
                 // Full run segment
                 let max_run = 1usize << run_index_val;
                 let count = std::cmp::min(max_run, pixel_count - run_length);
                 debug_log!("      → Full run segment: max={}, count={}", max_run, count);
-                
+
                 // Fill pixels
                 for i in 0..count {
                     curr_line[start_index + run_length + i] = curr_line[start_index - 1];
                 }
                 run_length += count;
-                
+
                 // Only increment run_index if we used the full run length
                 if count == max_run && self.run_index < 31 {
                     self.run_index += 1;
                 }
-                
+
                 // Break if we've filled all remaining pixels
                 if run_length == pixel_count {
                     break;
                 }
             } else {
                 // Incomplete run - read remainder bits
-                let remainder = if run_index_val > 0 { 
-                    self.read_bits(run_index_val)? as usize 
-                } else { 
-                    0 
+                let remainder = if run_index_val > 0 {
+                    self.read_bits(run_index_val)? as usize
+                } else {
+                    0
                 };
                 debug_log!("      → Partial run of {} pixels", remainder);
-                
+
                 // Fill pixels
                 let count = std::cmp::min(remainder, pixel_count - run_length);
                 for i in 0..count {
                     curr_line[start_index + run_length + i] = curr_line[start_index - 1];
                 }
                 run_length += count;
-                
+
                 // Don't decrement run_index here - will be done after interruption
                 break;
             }
@@ -635,12 +686,16 @@ impl<'a> ScanDecoder<'a> {
         if run_length < pixel_count {
             let rb = prev_line[start_index + run_length].to_i32();
             let ra = curr_line[start_index + run_length - 1].to_i32();
-            debug_log!("    Run interruption pixel at index {}, ra={}, rb={}", 
-                      start_index + run_length, ra, rb);
+            debug_log!(
+                "    Run interruption pixel at index {}, ra={}, rb={}",
+                start_index + run_length,
+                ra,
+                rb
+            );
             let x = self.decode_run_interruption_pixel::<T>(ra, rb)?;
             curr_line[start_index + run_length] = T::from_i32(x);
             run_length += 1;
-            
+
             // Decrement run_index after run interruption (per CharLS)
             if self.run_index > 0 {
                 self.run_index -= 1;
@@ -662,17 +717,19 @@ impl<'a> ScanDecoder<'a> {
             (0, Self::bit_wise_sign(rb - ra))
         };
 
-        debug_log!("    Run interruption context[{}]: a={}, n={}, nn={}", 
-                  context_index,
-                  self.run_mode_contexts[context_index].a(),
-                  self.run_mode_contexts[context_index].n(),
-                  self.run_mode_contexts[context_index].nn());
+        debug_log!(
+            "    Run interruption context[{}]: a={}, n={}, nn={}",
+            context_index,
+            self.run_mode_contexts[context_index].a(),
+            self.run_mode_contexts[context_index].n(),
+            self.run_mode_contexts[context_index].nn()
+        );
 
         let k = self.run_mode_contexts[context_index].compute_golomb_coding_parameter();
         // For run mode, limit is adjusted by J[run_index]
         let run_limit = self._limit - crate::constants::J[self.run_index] - 1;
         let e_mapped_error = self.decode_mapped_error_value_with_limit(k, run_limit)?;
-        
+
         // Per CharLS: add run_interruption_type to e_mapped before decoding error_value
         let ri_type = self.run_mode_contexts[context_index].run_interruption_type();
         let temp = e_mapped_error + ri_type;
@@ -692,8 +749,15 @@ impl<'a> ScanDecoder<'a> {
             T::compute_reconstructed_sample(rb, error_value * sign)
         };
 
-        debug_log!("    Run interruption: ra={}, rb={}, ctx={}, sign={}, error={}, reconstructed={}", 
-                  ra, rb, context_index, sign, error_value, reconstructed);
+        debug_log!(
+            "    Run interruption: ra={}, rb={}, ctx={}, sign={}, error={}, reconstructed={}",
+            ra,
+            rb,
+            context_index,
+            sign,
+            error_value,
+            reconstructed
+        );
 
         Ok(reconstructed)
     }

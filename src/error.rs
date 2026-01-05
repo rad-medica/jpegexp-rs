@@ -107,3 +107,9 @@ pub enum JpeglsError {
     #[error("Invalid argument encoding options")]
     InvalidArgumentEncodingOptions = 112,
 }
+
+impl From<crate::jpeg2000::bit_io::BitIoError> for JpeglsError {
+    fn from(_: crate::jpeg2000::bit_io::BitIoError) -> Self {
+        JpeglsError::InvalidData
+    }
+}

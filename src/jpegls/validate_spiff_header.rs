@@ -1,13 +1,12 @@
 use crate::error::JpeglsError;
-use crate::jpegls::{
-    SpiffCompressionType, SpiffHeader,
-};
+use crate::jpegls::{SpiffCompressionType, SpiffHeader};
 
 #[allow(dead_code)]
 fn is_valid_color_space(color_space: crate::jpegls::SpiffColorSpace, component_count: i32) -> bool {
     match color_space {
         crate::jpegls::SpiffColorSpace::None => true,
-        crate::jpegls::SpiffColorSpace::BiLevelBlack | crate::jpegls::SpiffColorSpace::BiLevelWhite => false, // Not supported for JPEG-LS
+        crate::jpegls::SpiffColorSpace::BiLevelBlack
+        | crate::jpegls::SpiffColorSpace::BiLevelWhite => false, // Not supported for JPEG-LS
         crate::jpegls::SpiffColorSpace::Grayscale => component_count == 1,
         crate::jpegls::SpiffColorSpace::YCbCrItuBt709Video
         | crate::jpegls::SpiffColorSpace::YCbCrItuBt6011Rgb
@@ -16,7 +15,9 @@ fn is_valid_color_space(color_space: crate::jpegls::SpiffColorSpace, component_c
         | crate::jpegls::SpiffColorSpace::Cmy
         | crate::jpegls::SpiffColorSpace::PhotoYcc
         | crate::jpegls::SpiffColorSpace::CieLab => component_count == 3,
-        crate::jpegls::SpiffColorSpace::Cmyk | crate::jpegls::SpiffColorSpace::Ycck => component_count == 4,
+        crate::jpegls::SpiffColorSpace::Cmyk | crate::jpegls::SpiffColorSpace::Ycck => {
+            component_count == 4
+        }
     }
 }
 

@@ -3,10 +3,10 @@
 //! This module provides the `JpegStreamWriter` which handles the generation
 //! of JPEG markers and segments (SOI, EOI, SOF, SOD, etc.) for various standards.
 
-use crate::FrameInfo;
 use crate::error::JpeglsError;
-use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
+use crate::jpeg_marker_code::{JpegMarkerCode, JPEG_MARKER_START_BYTE};
 use crate::jpegls::{InterleaveMode, JpeglsPcParameters};
+use crate::FrameInfo;
 
 /// A writer for JPEG/JLS codestreams that manages marker emission and byte stuffing.
 pub struct JpegStreamWriter<'a> {
@@ -36,8 +36,22 @@ impl<'a> JpegStreamWriter<'a> {
             {
                 use std::fs::OpenOptions;
                 use std::io::Write;
-                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log") {
-                    let _ = writeln!(f, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"jpeg_stream_writer.rs:34","message":"buffer overflow in write_byte","data":{{"position":{},"destination_len":{},"value":{}}},"timestamp":{}}}"#, self.position, self.destination.len(), value, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+                if let Ok(mut f) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(r"c:\Users\aroja\CODE\jpegexp-rs\.cursor\debug.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"jpeg_stream_writer.rs:34","message":"buffer overflow in write_byte","data":{{"position":{},"destination_len":{},"value":{}}},"timestamp":{}}}"#,
+                        self.position,
+                        self.destination.len(),
+                        value,
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                    );
                 }
             }
             // #endregion
@@ -141,7 +155,7 @@ impl<'a> JpegStreamWriter<'a> {
         for i in 0..frame_info.component_count {
             self.write_byte((i + 1) as u8)?;
             self.write_byte(0x11)?; // Sampling factors 1x1
-            // Use Quantization Table 0 for Y (component 0), Table 1 for Cb/Cr (components 1, 2)
+                                    // Use Quantization Table 0 for Y (component 0), Table 1 for Cb/Cr (components 1, 2)
             let q_table_id = if i == 0 { 0 } else { 1 };
             self.write_byte(q_table_id)?;
         }
@@ -155,7 +169,7 @@ impl<'a> JpegStreamWriter<'a> {
         self.write_byte(component_count)?;
         for i in 0..component_count {
             self.write_byte(i + 1)?; // Component selector
-            // Use DC/AC Table 0 for Y, Table 1 for Cb/Cr
+                                     // Use DC/AC Table 0 for Y, Table 1 for Cb/Cr
             let table_sel = if i == 0 { 0x00 } else { 0x11 };
             self.write_byte(table_sel)?;
         }

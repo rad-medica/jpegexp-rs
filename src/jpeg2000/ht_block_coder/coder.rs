@@ -129,9 +129,21 @@ impl<'a> HTBlockCoder<'a> {
         // Check neighbors: left, above, above-left, above-right
         let neighbors = [
             if x > 0 { Some((x - 1, y_base)) } else { None },
-            if y_base > 0 { Some((x, y_base - 1)) } else { None },
-            if x > 0 && y_base > 0 { Some((x - 1, y_base - 1)) } else { None },
-            if x + 1 < width && y_base > 0 { Some((x + 1, y_base - 1)) } else { None },
+            if y_base > 0 {
+                Some((x, y_base - 1))
+            } else {
+                None
+            },
+            if x > 0 && y_base > 0 {
+                Some((x - 1, y_base - 1))
+            } else {
+                None
+            },
+            if x + 1 < width && y_base > 0 {
+                Some((x + 1, y_base - 1))
+            } else {
+                None
+            },
         ];
 
         for neighbor in neighbors.iter().flatten() {
@@ -151,7 +163,12 @@ impl<'a> HTBlockCoder<'a> {
         // pixel order: (0,0), (1,0), (0,1), (1,1) usually (raster within quad)
         // rho bits: bit 0 = (x, y), bit 1 = (x+1, y), bit 2 = (x, y+1), bit 3 = (x+1, y+1)
         let width = block.width as usize;
-        let coords = [(x, y_base), (x + 1, y_base), (x, y_base + 1), (x + 1, y_base + 1)];
+        let coords = [
+            (x, y_base),
+            (x + 1, y_base),
+            (x, y_base + 1),
+            (x + 1, y_base + 1),
+        ];
 
         for (i, &(px, py)) in coords.iter().enumerate() {
             if (rho >> i) & 1 != 0 {

@@ -318,29 +318,59 @@ impl<'a> BitPlaneCoder<'a> {
 
         for y_stripe in (0..height).step_by(stripe_height as usize) {
             for x in 0..width {
-                for y_offset in 0..stripe_height.min(height - y_stripe) {
-                    let y = y_stripe + y_offset;
-                    let idx = (y * width + x) as usize;
+                let remaining_height = stripe_height.min(height - y_stripe);
 
-                    if idx >= self.state.len() {
-                        continue;
+                // RLC Check
+                let mut rlc_mode = false;
+                if remaining_height == 4 {
+                    let mut all_clear = true;
+                    for y_offset in 0..4 {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * width + x) as usize;
+                        if idx < self.state.len() {
+                            if (self.state[idx] & Self::VISITED) != 0 {
+                                all_clear = false;
+                                break;
+                            }
+                            let (hc, vc, dc) = self.get_neighbors(x, y);
+                            if hc > 0 || vc > 0 || dc > 0 {
+                                all_clear = false;
+                                break;
+                            }
+                        }
                     }
+                    if all_clear {
+                        rlc_mode = true;
+                    }
+                }
 
-                    let state = self.state[idx];
+                if rlc_mode {
+                    // Decode RLC bit
+                    let rlc_bit = self.mq.decode_bit(17);
+                    if rlc_bit == 0 {
+                        // Skip entire column (all insignificant)
+                        for y_offset in 0..4 {
+                            let y = y_stripe + y_offset;
+                            let idx = (y * width + x) as usize;
+                            // Just reset visited, no other changes
+                            if idx < self.state.len() {
+                                self.state[idx] &= !Self::VISITED;
+                            }
+                        }
+                        continue;
+                    } else {
+                        // At least one significant
+                        let b1 = self.mq.decode_bit(18);
+                        let b2 = self.mq.decode_bit(18);
+                        let first_sig_idx = (b1 << 1) | b2;
 
-                    // If not visited, must be insignificant
-                    if (state & Self::VISITED) == 0 {
-                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                        // Process first significant
+                        let y = y_stripe + first_sig_idx as u32;
+                        let idx = (y * width + x) as usize;
+                        if idx < self.state.len() {
+                            self.state[idx] |= Self::SIG | Self::VISITED;
 
-                        // Decode significance bit
-                        let cx = self.get_zc_context(orientation, hc, vc, dc);
-                        let bit = self.mq.decode_bit(cx);
-
-                        if bit != 0 {
-                            // Became significant
-                            self.state[idx] |= Self::SIG;
-
-                            // Decode sign
+                            // Sign
                             let sc_data = self.get_sign_context(x, y, width, height);
                             let sc_ctx = sc_data & 0xFF;
                             let xor = (sc_data >> 8) & 1;
@@ -354,10 +384,68 @@ impl<'a> BitPlaneCoder<'a> {
                                 self.coefficients[idx] = 1 << bit_plane;
                             }
                         }
+
+                        // Process remaining in column normally
+                        for y_offset in (first_sig_idx as u32 + 1)..4 {
+                            let y = y_stripe + y_offset;
+                            self.decode_cleanup_pixel(x, y, bit_plane, orientation)?;
+                        }
+                        continue;
                     }
+                }
+
+                for y_offset in 0..remaining_height {
+                    let y = y_stripe + y_offset;
+                    self.decode_cleanup_pixel(x, y, bit_plane, orientation)?;
                 }
             }
         }
+        Ok(())
+    }
+
+    fn decode_cleanup_pixel(
+        &mut self,
+        x: u32,
+        y: u32,
+        bit_plane: u8,
+        orientation: u8,
+    ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
+        let idx = (y * self.width + x) as usize;
+        if idx >= self.state.len() {
+            return Ok(());
+        }
+
+        let state = self.state[idx];
+
+        // If not visited, must be insignificant so far
+        if (state & Self::VISITED) == 0 {
+            let (hc, vc, dc) = self.get_neighbors(x, y);
+
+            // ZC Context
+            let cx = self.get_zc_context(orientation, hc, vc, dc);
+            let bit = self.mq.decode_bit(cx);
+
+            if bit != 0 {
+                // Became Significant
+                self.state[idx] |= Self::SIG;
+
+                // Decode sign
+                let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                let sc_ctx = sc_data & 0xFF;
+                let xor = (sc_data >> 8) & 1;
+                let sym = self.mq.decode_bit(sc_ctx);
+                let sign_bit = sym ^ (xor as u8);
+
+                if sign_bit != 0 {
+                    self.state[idx] |= Self::SIGN;
+                    self.coefficients[idx] = -(1 << bit_plane);
+                } else {
+                    self.coefficients[idx] = 1 << bit_plane;
+                }
+            }
+        }
+        // Reset VISITED for next bitplane
+        self.state[idx] &= !Self::VISITED;
         Ok(())
     }
 
@@ -464,47 +552,49 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     pub fn significance_propagation(&mut self, bit_plane: u8) {
-        // Iterate scan order (simple raster for simplicity, J2K stripes 4 rows)
-        // Correct J2K is stripe order: 4 rows column-wise.
+        // Iterate in stripe order: 4 rows column-wise.
         let w = self.width;
         let h = self.height;
+        let stripe_height = 4;
 
-        for y in 0..h {
+        for y_stripe in (0..h).step_by(stripe_height) {
             for x in 0..w {
-                let idx = (y * w + x) as usize;
-                let state = self.state[idx];
+                for y_offset in 0..stripe_height.min((h - y_stripe) as usize) as u32 {
+                    let y = y_stripe + y_offset as u32;
+                    let idx = (y * w + x) as usize;
+                    let state = self.state[idx];
 
-                // If insignificant and not visited
-                if (state & (Self::SIG | Self::VISITED)) == 0 {
-                    let (hc, vc, dc) = self.get_neighbors(x, y);
-                    if hc > 0 || vc > 0 || dc > 0 {
-                        // Propagate Importance
-                        let val = self.data[idx];
-                        let bit = (val.abs() >> bit_plane) & 1;
+                    // If insignificant and not visited
+                    if (state & (Self::SIG | Self::VISITED)) == 0 {
+                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                        if hc > 0 || vc > 0 || dc > 0 {
+                            // Propagate Importance
+                            let val = self.data[idx];
+                            let bit = (val.abs() >> bit_plane) & 1;
 
-                        // Encode ZC
-                        let cx = self.get_zc_context(0, hc, vc, dc); // band 0 assumed
-                        self.mq.encode(bit as u8, cx);
+                            // Encode ZC
+                            let cx = self.get_zc_context(0, hc, vc, dc); // band 0 assumed
+                            self.mq.encode(bit as u8, cx);
 
-                        if bit == 1 {
-                            // Became Significant: Update State
-                            let sign = if val < 0 { 1 } else { 0 };
-                            self.state[idx] |= Self::SIG | Self::VISITED;
-                            if sign == 1 {
-                                self.state[idx] |= Self::SIGN;
+                            if bit == 1 {
+                                // Became Significant: Update State
+                                let sign = if val < 0 { 1 } else { 0 };
+                                self.state[idx] |= Self::SIG | Self::VISITED;
+                                if sign == 1 {
+                                    self.state[idx] |= Self::SIGN;
+                                }
+
+                                // Encode Sign (SC)
+                                // Context depends on neighbor signs
+                                let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                                let sc_ctx = sc_data & 0xFF;
+                                let xor = (sc_data >> 8) & 1;
+                                let sym = sign ^ (xor as u8);
+                                self.mq.encode(sym, sc_ctx);
+                            } else {
+                                // Visited but not significant
+                                self.state[idx] |= Self::VISITED;
                             }
-
-                            // Encode Sign (SC)
-                            // Context depends on neighbor signs
-                            // Context depends on neighbor signs
-                            let sc_data = self.get_sign_context(x, y, self.width, self.height);
-                            let sc_ctx = sc_data & 0xFF;
-                            let xor = (sc_data >> 8) & 1;
-                            let sym = sign ^ (xor as u8);
-                            self.mq.encode(sym, sc_ctx);
-                        } else {
-                            // Visited but not significant
-                            self.state[idx] |= Self::VISITED;
                         }
                     }
                 }
@@ -515,19 +605,28 @@ impl<'a> BitPlaneCoder<'a> {
     pub fn magnitude_refinement(&mut self, bit_plane: u8) {
         let w = self.width;
         let h = self.height;
-        for i in 0..(w * h) as usize {
-            let state = self.state[i];
-            // If already significant and NOT visited in SigProp (i.e., became sig in prev bitplane)
-            if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
-                self.state[i] |= Self::VISITED; // Mark visited for this bitplane
-                let val = self.data[i];
-                let bit = (val.abs() >> bit_plane) & 1;
+        let stripe_height = 4;
 
-                // MR Context
-                let mr_ctx = self.get_magnitude_refinement_context(i, w, h);
-                // Refinement logic: uses Neighbors+RefineBit state.
-                self.mq.encode(bit as u8, mr_ctx);
-                self.state[i] |= Self::REFINE; // First refinement done
+        for y_stripe in (0..h).step_by(stripe_height) {
+            for x in 0..w {
+                for y_offset in 0..stripe_height.min((h - y_stripe) as usize) as u32 {
+                    let y = y_stripe + y_offset as u32;
+                    let idx = (y * w + x) as usize;
+
+                    let state = self.state[idx];
+                    // If already significant and NOT visited in SigProp (i.e., became sig in prev bitplane)
+                    if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
+                        self.state[idx] |= Self::VISITED; // Mark visited for this bitplane
+                        let val = self.data[idx];
+                        let bit = (val.abs() >> bit_plane) & 1;
+
+                        // MR Context
+                        let mr_ctx = self.get_magnitude_refinement_context(idx, w, h);
+                        // Refinement logic: uses Neighbors+RefineBit state.
+                        self.mq.encode(bit as u8, mr_ctx);
+                        self.state[idx] |= Self::REFINE; // First refinement done
+                    }
+                }
             }
         }
     }
@@ -536,43 +635,140 @@ impl<'a> BitPlaneCoder<'a> {
         // Encode remaining insignificant samples
         let w = self.width;
         let h = self.height;
+        let stripe_height = 4;
 
-        // RLC logic would go here: check if run of 4 is all insignificant
-
-        for y in 0..h {
+        for y_stripe in (0..h).step_by(stripe_height) {
             for x in 0..w {
-                let idx = (y * w + x) as usize;
-                let state = self.state[idx];
-                if (state & Self::VISITED) == 0 {
-                    // Not visited: Must be insignificant so far
-                    let (hc, vc, dc) = self.get_neighbors(x, y);
+                // Run-Length Coding Check
+                let remaining_height = (stripe_height as u32).min(h - y_stripe);
 
-                    // ZC Context
-                    let cx = self.get_zc_context(0, hc, vc, dc);
-                    let val = self.data[idx];
-                    let bit = (val.abs() >> bit_plane) & 1;
+                // Check if RLC possible: full column (4 samples), all unvisited & insignificant neighbors
+                if remaining_height == 4 {
+                    let mut all_clear = true;
+                    let mut has_sig = false;
 
-                    self.mq.encode(bit as u8, cx);
+                    // Check context
+                    for y_offset in 0..4 {
+                        let y = y_stripe + y_offset;
+                        let idx = (y * w + x) as usize;
+                        let state = self.state[idx];
 
-                    if bit == 1 {
-                        // Became Significant
-                        let sign = if val < 0 { 1 } else { 0 };
-                        self.state[idx] |= Self::SIG;
-                        if sign == 1 {
-                            self.state[idx] |= Self::SIGN;
+                        // If visited, can't use RLC
+                        if (state & Self::VISITED) != 0 {
+                            all_clear = false;
+                            break;
                         }
 
-                        let sc_data = self.get_sign_context(x, y, self.width, self.height);
-                        let sc_ctx = sc_data & 0xFF;
-                        let xor = (sc_data >> 8) & 1;
-                        let sym = sign ^ (xor as u8); // Invert if xor is set
-                        self.mq.encode(sym, sc_ctx);
+                        // Check neighbors - RLC only if context is 0 (all neighbors insignificant)
+                        let (hc, vc, dc) = self.get_neighbors(x, y);
+                        if hc > 0 || vc > 0 || dc > 0 {
+                            all_clear = false;
+                            break;
+                        }
+
+                        // Check if this sample is significant
+                        let val = self.data[idx];
+                        if ((val.abs() >> bit_plane) & 1) != 0 {
+                            has_sig = true;
+                        }
+                    }
+
+                    if all_clear {
+                        // Enter RLC mode
+                        self.mq.encode(if has_sig { 1 } else { 0 }, 17); // Context 17 (Run-Length)
+
+                        if !has_sig {
+                            // All 0, skip column
+                            for y_offset in 0..4 {
+                                let y = y_stripe + y_offset;
+                                let idx = (y * w + x) as usize;
+                                self.state[idx] &= !Self::VISITED;
+                            }
+                            continue;
+                        } else {
+                            // Find first significant sample
+                            let mut first_sig_idx = 0;
+                            for y_offset in 0..4 {
+                                let y = y_stripe + y_offset;
+                                let idx = (y * w + x) as usize;
+                                let val = self.data[idx];
+                                if ((val.abs() >> bit_plane) & 1) != 0 {
+                                    first_sig_idx = y_offset;
+                                    break;
+                                }
+                            }
+                            // Code position (2 bits, UNIFORM context 18)
+                            self.mq.encode((first_sig_idx >> 1) as u8, 18);
+                            self.mq.encode((first_sig_idx & 1) as u8, 18);
+
+                            // Process the first significant sample
+                            let y = y_stripe + first_sig_idx;
+                            let idx = (y * w + x) as usize;
+                            let val = self.data[idx];
+
+                            // Sign
+                            let sign = if val < 0 { 1 } else { 0 };
+                            self.state[idx] |= Self::SIG | Self::VISITED;
+                            if sign == 1 {
+                                self.state[idx] |= Self::SIGN;
+                            }
+
+                            let sc_data = self.get_sign_context(x, y, w, h);
+                            let sc_ctx = sc_data & 0xFF;
+                            let xor = (sc_data >> 8) & 1;
+                            let sym = sign ^ (xor as u8);
+                            self.mq.encode(sym, sc_ctx);
+
+                            // Process remaining samples normally
+                            for y_offset in (first_sig_idx + 1)..4 {
+                                let y = y_stripe + y_offset;
+                                self.encode_cleanup_pixel(x, y, bit_plane);
+                            }
+                            continue;
+                        }
                     }
                 }
-                // Reset VISITED for next bitplane
-                self.state[idx] &= !Self::VISITED;
+
+                // Normal Processing (no RLC)
+                for y_offset in 0..remaining_height {
+                    let y = y_stripe + y_offset;
+                    self.encode_cleanup_pixel(x, y, bit_plane);
+                }
             }
         }
+    }
+
+    fn encode_cleanup_pixel(&mut self, x: u32, y: u32, bit_plane: u8) {
+        let idx = (y * self.width + x) as usize;
+        let state = self.state[idx];
+        if (state & Self::VISITED) == 0 {
+            // Not visited: Must be insignificant so far
+            let (hc, vc, dc) = self.get_neighbors(x, y);
+
+            // ZC Context
+            let cx = self.get_zc_context(0, hc, vc, dc);
+            let val = self.data[idx];
+            let bit = (val.abs() >> bit_plane) & 1;
+
+            self.mq.encode(bit as u8, cx);
+
+            if bit == 1 {
+                // Became Significant
+                let sign = if val < 0 { 1 } else { 0 };
+                self.state[idx] |= Self::SIG;
+                if sign == 1 {
+                    self.state[idx] |= Self::SIGN;
+                }
+
+                let sc_data = self.get_sign_context(x, y, self.width, self.height);
+                let sc_ctx = sc_data & 0xFF;
+                let xor = (sc_data >> 8) & 1;
+                let sym = sign ^ (xor as u8); // Invert if xor is set
+                self.mq.encode(sym, sc_ctx);
+            }
+        }
+        // Reset VISITED for next bitplane
+        self.state[idx] &= !Self::VISITED;
     }
 }
 

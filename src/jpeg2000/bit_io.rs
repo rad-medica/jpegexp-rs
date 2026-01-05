@@ -18,9 +18,7 @@ pub struct J2kBitReader<'a, 'b> {
 
 impl<'a, 'b> J2kBitReader<'a, 'b> {
     pub fn new(reader: &'a mut crate::jpeg_stream_reader::JpegStreamReader<'b>) -> Self {
-        Self {
-            reader,
-        }
+        Self { reader }
     }
 
     pub fn read_bit(&mut self) -> Result<u8, BitIoError> {

@@ -72,7 +72,11 @@ pub fn bit_wise_sign(i: i32) -> i32 {
 }
 
 pub fn apply_sign(val: i32, sign: i32) -> i32 {
-    if sign < 0 { -val } else { val }
+    if sign < 0 {
+        -val
+    } else {
+        val
+    }
 }
 
 pub fn apply_sign_for_index(val: i32, sign: i32) -> usize {

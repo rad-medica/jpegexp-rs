@@ -5,8 +5,8 @@
 
 use super::image::J2kImage;
 use super::parser::J2kParser;
-use crate::JpeglsError;
 use crate::jpeg_stream_reader::JpegStreamReader;
+use crate::JpeglsError;
 
 use crate::jpeg2000::packet::PrecinctState;
 use std::collections::HashMap;
@@ -375,9 +375,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         // We need width/height here.
                         // Since we are iterating c, r, we can pull from parser.image
                         let tile = &parser.image.tiles[tile_state_idx]; // assuming isot matches idx
-                        // Wait, tile_idx passed to decode_tile_data was isot.
-                        // Here tile_states uses tile_state_idx.
-                        // We should lookup tile by index if possible, but for now assume sequential.
+                                                                        // Wait, tile_idx passed to decode_tile_data was isot.
+                                                                        // Here tile_states uses tile_state_idx.
+                                                                        // We should lookup tile by index if possible, but for now assume sequential.
                         let comp_info = &tile.components[c];
                         let res_info = &comp_info.resolutions[r];
                         comp_state.resolutions.resize_with(r + 1, || {
@@ -433,34 +433,70 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             }
 
                             // Read Packet Header
-                            let mut header = None;
-                            let mut _pos_to_advance = 0;
+                            let header: Option<crate::jpeg2000::packet::PacketHeader>;
                             {
-                                let remaining = parser.reader.remaining_data();
-                                if !remaining.is_empty() {
-                                    // J2kBitReader now uses parser.reader internal bit state, so creating/destroying it is safe
-                                    // We create a new scope to limit lifetime of bit_reader
-                                    let h = {
-                                        let mut bit_reader = crate::jpeg2000::bit_io::J2kBitReader::new(&mut parser.reader);
-                                        crate::jpeg2000::packet::PacketHeader::read(
-                                            &mut bit_reader,
-                                            precinct_state,
-                                            l as u32,
-                                            grid_w as usize,
-                                            grid_h as usize,
-                                            num_subbands,
-                                        )
-                                    };
-                                    match h {
-                                        Ok(h) => {
-                                            header = Some(h);
-                                        }
-                                        Err(_) => {
-                                            return Err(JpeglsError::InvalidData);
-                                        }
-                                    }
-                                }
+                                // We create a new scope to limit lifetime of bit_reader
+                                let mut bit_reader =
+                                    crate::jpeg2000::bit_io::J2kBitReader::new(&mut parser.reader);
+
+                                // Determine grid dimensions for this precinct (needed for TagTree)
+                                // In this simplified implementation we treat the whole resolution as one precinct
+                                // So grid size is num_px x num_py? No, grid size is num codeblocks in the precinct.
+                                // If precinct covers the whole resolution, then it's grid_w x grid_h calculated earlier.
+                                // We computed num_px and num_py as number of PRECINCTS.
+                                // But TagTree needs number of CODEBLOCKS.
+                                // We computed grid_w, grid_h as num codeblocks.
+
+                                // Since we are iterating precincts (px, py), we need to know the codeblock range for THIS precinct.
+                                // If precinct_size is used, we need to map precinct to codeblocks.
+                                // For now, assume 1 precinct = whole resolution (if ppx is huge), so use grid_w, grid_h.
+                                // If multiple precincts, we need to subset.
+                                // PacketHeader::read expects grid_width/height to init new subbands if needed.
+
+                                // Let's use the full grid_w/grid_h for now, assuming 1 big TagTree per resolution per subband if we share state.
+                                // But state is per-precinct (precinct_state).
+                                // Standard says: Tag trees are defined for each precinct.
+                                // The leaf nodes correspond to code-blocks in that precinct.
+                                // So we need the dimensions of the precinct in codeblocks.
+
+                                // Calculate precinct dimensions in codeblocks
+
+                                let nom_w = 1 << (cod.codeblock_width_exp + 2);
+                                let nom_h = 1 << (cod.codeblock_height_exp + 2);
+
+                                // Calculate grid dimensions for this precinct (px, py)
+                                let p_x_start = px * ppx;
+                                let p_y_start = py * ppy;
+                                let p_x_end = (p_x_start + ppx).min(res_w);
+                                let p_y_end = (p_y_start + ppy).min(res_h);
+
+                                let cb_per_precinct_x =
+                                    p_x_end.saturating_sub(p_x_start).div_ceil(nom_w);
+                                let cb_per_precinct_y =
+                                    p_y_end.saturating_sub(p_y_start).div_ceil(nom_h);
+
+                                // Avoid 0-size if precinct is outside valid area (should not happen in loop)
+                                let cb_per_precinct_x = if cb_per_precinct_x == 0 {
+                                    1
+                                } else {
+                                    cb_per_precinct_x
+                                };
+                                let cb_per_precinct_y = if cb_per_precinct_y == 0 {
+                                    1
+                                } else {
+                                    cb_per_precinct_y
+                                };
+
+                                header = Some(crate::jpeg2000::packet::PacketHeader::read(
+                                    &mut bit_reader,
+                                    precinct_state,
+                                    l as u32,
+                                    cb_per_precinct_x as usize,
+                                    cb_per_precinct_y as usize,
+                                    num_subbands,
+                                )?);
                             }
+
                             if let Some(h) = header {
                                 if std::env::var("J2K_DEBUG").is_ok() {
                                     let pos = parser.reader.position();
@@ -491,7 +527,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                     // EPH: FF 92 (2 bytes)
                                     let marker = parser.reader.read_u16().unwrap_or(0);
                                     if marker == 0xFF92 {
-                                        // eprintln!("DEBUG: Found EPH marker at {}", pos);
+                                        // Found EPH
                                     } else {
                                         // If EPH is mandatory and missing, error.
                                         return Err(JpeglsError::InvalidData);
@@ -601,13 +637,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     let cb_width = nom_w.min(sb_w.saturating_sub(cb_x));
                     let cb_height = nom_h.min(sb_h.saturating_sub(cb_y));
 
-                    let qcd = parser
-                        .image
-                        .qcd
-                        .as_ref()
-                        .map_or(Default::default(), |q| q.clone());
-                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                    // Use zero_bp from packet header
+                    let zero_bp = cb_info.zero_bp;
 
+                    // Determine max_bit_plane
+                    // Epsilon_b (base step size exponent)
+                    let qcd = parser.image.qcd.as_ref().unwrap();
+                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     let qcd_idx = if res == 0 {
                         0
                     } else {
@@ -616,27 +652,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                     let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
                         (qcd.step_sizes[qcd_idx] >> 11) as u8
-                    } else if comp < parser.image.components.len() {
-                        parser.image.components[comp].depth
                     } else {
-                        8
+                        8 // Default fallback
                     };
 
-                    let m_b = if cod.transformation == 1 {
-                        // Reversible: Use Depth instead of Epsilon?
-                        // Epsilon from file is 10. Depth is 8.
-                        // Experiment: Force based on depth
-                        guard_bits
-                            + if comp < parser.image.components.len() {
-                                parser.image.components[comp].depth - 1
-                            } else {
-                                7
-                            }
-                    } else {
-                        guard_bits + epsilon_b - 1
-                    };
-
-                    let max_bit_plane = m_b.saturating_sub(1).saturating_sub(cb_info.zero_bp);
+                    // M_b = G + epsilon_b - 1
+                    let m_b = (guard_bits + epsilon_b).saturating_sub(1);
+                    let max_bit_plane = m_b.saturating_sub(zero_bp);
 
                     let cb_idx = subband
                         .codeblocks
@@ -657,11 +679,16 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         bpc.state = block.state.clone();
                         bpc.num_passes_decoded = block.coding_passes as u32;
 
-                        let _ = bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8);
+                        let _ = bpc.decode_codeblock(
+                            &data,
+                            max_bit_plane,
+                            cb_info.num_passes,
+                            subband.orientation as u8,
+                        );
 
                         block.coefficients = bpc.coefficients;
                         block.state = bpc.state;
-                        block.coding_passes = bpc.num_passes_decoded as u8;
+                        block.coding_passes += cb_info.num_passes; // Accumulate passes
                     } else {
                         let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
                         block.x = cb_info.x as u32;
@@ -671,18 +698,22 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         block.layer_data.push(data.clone());
                         block.layers_decoded = (layer + 1) as u8;
                         block.coding_passes = 0;
+                        block.zero_bit_planes = zero_bp;
 
                         let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
                             cb_width as u32,
                             cb_height as u32,
                             &[],
                         );
-                        if let Ok(coefficients) =
-                            bpc.decode_codeblock(&data, max_bit_plane, cb_info.num_passes, subband.orientation as u8)
-                        {
+                        if let Ok(coefficients) = bpc.decode_codeblock(
+                            &data,
+                            max_bit_plane,
+                            cb_info.num_passes,
+                            subband.orientation as u8,
+                        ) {
                             block.coefficients = coefficients;
                             block.state = bpc.state;
-                            block.coding_passes = bpc.num_passes_decoded as u8;
+                            block.coding_passes = cb_info.num_passes;
                         }
                         subband.codeblocks.push(block);
                     }
@@ -691,14 +722,16 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         }
         Ok(())
     }
+
+    // Removed decode_simplified_packet_body as it is no longer needed/correct.
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jpeg_stream_reader::JpegStreamReader;
     use crate::jpeg2000::image::{J2kCod, J2kComponentInfo, J2kImage};
     use crate::jpeg2000::parser::J2kParser;
+    use crate::jpeg_stream_reader::JpegStreamReader;
 
     #[test]
     fn test_subsampling_resolution_calculation() {

@@ -5,18 +5,14 @@ fn main() {
     println!("Benchmarking IDCT implementations...");
 
     let input = [
-        10.0, 5.0, -2.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-        3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        10.0, 5.0, -2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
     ]; // Simple mock DCT coefficients
 
     let iterations = 1_000_000;
-    
+
     // Benchmark Baseline
     let mut output_baseline = [0.0f32; 64];
     let start = Instant::now();
@@ -26,7 +22,10 @@ fn main() {
         std::hint::black_box(output_baseline);
     }
     let duration_baseline = start.elapsed();
-    println!("Baseline (Float) IDCT: {:?} for {} iterations", duration_baseline, iterations);
+    println!(
+        "Baseline (Float) IDCT: {:?} for {} iterations",
+        duration_baseline, iterations
+    );
 
     // Benchmark Fixed Point
     let mut output_fixed = [0.0f32; 64];
@@ -37,7 +36,10 @@ fn main() {
         std::hint::black_box(output_fixed);
     }
     let duration_fixed = start.elapsed();
-    println!("Fixed Point IDCT: {:?} for {} iterations", duration_fixed, iterations);
+    println!(
+        "Fixed Point IDCT: {:?} for {} iterations",
+        duration_fixed, iterations
+    );
 
     // Calc speedup
     let speedup = duration_baseline.as_secs_f64() / duration_fixed.as_secs_f64();
@@ -51,8 +53,11 @@ fn main() {
             max_diff = diff;
         }
     }
-    println!("Max difference between baseline and fixed-point: {}", max_diff);
-    
+    println!(
+        "Max difference between baseline and fixed-point: {}",
+        max_diff
+    );
+
     if max_diff < 2.0 {
         println!("Accuracy: PASSED (Tolerance < 2.0)");
     } else {

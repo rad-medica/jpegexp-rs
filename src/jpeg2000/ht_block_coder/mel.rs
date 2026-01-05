@@ -68,7 +68,8 @@ impl<'a> MelDecoder<'a> {
                 }
                 temp_buffer = self.data[temp_pos];
                 temp_pos += 1;
-                if temp_buffer == 0xFF && temp_pos < self.data.len() && self.data[temp_pos] == 0x00 {
+                if temp_buffer == 0xFF && temp_pos < self.data.len() && self.data[temp_pos] == 0x00
+                {
                     temp_pos += 1;
                 }
                 temp_left = 8;

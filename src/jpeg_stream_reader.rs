@@ -3,11 +3,11 @@
 //! This module provides the `JpegStreamReader` which handles the sequential
 //! reading of JPEG markers and segments (DQT, DHT, SOF, SOS, etc.).
 
-use crate::FrameInfo;
 use crate::error::JpeglsError;
-use crate::jpeg_marker_code::{JPEG_MARKER_START_BYTE, JpegMarkerCode};
+use crate::jpeg_marker_code::{JpegMarkerCode, JPEG_MARKER_START_BYTE};
 use crate::jpegls::coding_parameters::{CodingParameters, JpeglsPcParameters};
 use crate::jpegls::{InterleaveMode, SpiffHeader};
+use crate::FrameInfo;
 use std::convert::{TryFrom, TryInto};
 
 /// Metadata for an individual image component (e.g. Y, Cb, Cr).

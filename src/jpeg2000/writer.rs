@@ -1,7 +1,7 @@
 use super::image::{J2kCod, J2kQcd};
-use crate::JpeglsError;
 use crate::jpeg_marker_code::JpegMarkerCode;
 use crate::jpeg_stream_writer::JpegStreamWriter;
+use crate::JpeglsError;
 
 pub struct J2kWriter<'a> {
     writer: JpegStreamWriter<'a>,
@@ -69,15 +69,8 @@ impl<'a> J2kWriter<'a> {
         self.writer
             .write_marker(JpegMarkerCode::CodingStyleDefault)?;
 
-        // Length: 10 + headers?
-        // Lcod + Scod + SGcod + SPcod
-        // Scod (1) + SGcod (4) + SPcod (5??) = 10?
-        // SGcod: Progression (1), Layers (2), MCT (1) = 4 bytes.
-        // SPcod: Decomp (1), Codeblock W (1), Codeblock H (1), Codeblock Style (1), Transform (1)?
-        // Total 1 byte Scod + 4 bytes SG + 5 bytes SP = 10 bytes payload.
-        // So len = 12.
-
-        let length = 12; // Minimal COD length
+        // Length: Lcod (2 included) + Scod (1) + SGcod (4) + SPcod (5) = 12 bytes
+        let length = 12;
         self.writer.write_u16(length)?;
 
         self.writer.write_byte(cod.coding_style)?;
@@ -85,14 +78,14 @@ impl<'a> J2kWriter<'a> {
         // SGcod
         self.writer.write_byte(cod.progression_order)?;
         self.writer.write_u16(cod.number_of_layers)?;
-        self.writer.write_byte(0)?; // MCT enabled?
+        self.writer.write_byte(cod.mct)?;
 
         // SPcod
-        self.writer.write_byte(5)?; // Number of decomposition levels (default 5 or struct field?)
-        self.writer.write_byte(4)?; // Code-block width (xcb) - 4 -> 16
-        self.writer.write_byte(4)?; // Code-block height (ycb) - 4 -> 16
+        self.writer.write_byte(cod.decomposition_levels)?;
+        self.writer.write_byte(cod.codeblock_width_exp)?;
+        self.writer.write_byte(cod.codeblock_height_exp)?;
         self.writer.write_byte(0)?; // Code-block style
-        self.writer.write_byte(0)?; // Wavelet transform (0=9-7, 1=5-3)
+        self.writer.write_byte(cod.transformation)?;
 
         Ok(())
     }
@@ -192,7 +185,7 @@ mod tests {
         // Verify markers present
         assert_eq!(written[0], 0xFF);
         assert_eq!(written[1], 0x4F); // SOC
-        // SIZ
+                                      // SIZ
         assert_eq!(written[2], 0xFF);
         assert_eq!(written[3], 0x51);
         // COD

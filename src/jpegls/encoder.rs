@@ -1,9 +1,9 @@
-use crate::FrameInfo;
 use crate::error::JpeglsError;
 use crate::jpeg_stream_writer::JpegStreamWriter;
 use crate::jpegls::coding_parameters::{compute_default, compute_limit_parameter};
 use crate::jpegls::scan_encoder::ScanEncoder;
 use crate::jpegls::{CodingParameters, InterleaveMode, JpeglsPcParameters};
+use crate::FrameInfo;
 
 pub struct JpeglsEncoder<'a> {
     writer: JpegStreamWriter<'a>,

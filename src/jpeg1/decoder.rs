@@ -1,9 +1,9 @@
 //! JPEG 1 Baseline and Progressive Decoder implementation.
 
 use crate::error::JpeglsError;
-use crate::jpeg_stream_reader::JpegStreamReader;
 use crate::jpeg1::huffman::{HuffmanEncoder, JpegBitReader};
 use crate::jpeg1::quantization::dequantize_block;
+use crate::jpeg_stream_reader::JpegStreamReader;
 
 pub struct Jpeg1Decoder<'a> {
     reader: JpegStreamReader<'a>,
@@ -32,17 +32,29 @@ impl<'a> Jpeg1Decoder<'a> {
         let components_count = self.reader.components.len();
 
         // Calculate MCU dimensions based on maximum sampling factors
-        let max_h_samp = self.reader.components.iter().map(|c| c.h_samp_factor as usize).max().unwrap_or(1);
-        let max_v_samp = self.reader.components.iter().map(|c| c.v_samp_factor as usize).max().unwrap_or(1);
+        let max_h_samp = self
+            .reader
+            .components
+            .iter()
+            .map(|c| c.h_samp_factor as usize)
+            .max()
+            .unwrap_or(1);
+        let max_v_samp = self
+            .reader
+            .components
+            .iter()
+            .map(|c| c.v_samp_factor as usize)
+            .max()
+            .unwrap_or(1);
         let mcu_width = max_h_samp * 8;
         let mcu_height = max_v_samp * 8;
-        
+
         // Calculate number of MCUs
         #[allow(clippy::manual_div_ceil)]
         let mcus_w = (width + mcu_width - 1) / mcu_width;
         #[allow(clippy::manual_div_ceil)]
         let mcus_h = (height + mcu_height - 1) / mcu_height;
-        
+
         // Calculate blocks per component based on sampling factors
         let mut coefficient_buffers = Vec::new();
         for comp in &self.reader.components {
@@ -50,7 +62,7 @@ impl<'a> Jpeg1Decoder<'a> {
             let comp_blocks_h = mcus_h * comp.v_samp_factor as usize;
             coefficient_buffers.push(vec![0i16; comp_blocks_w * comp_blocks_h * 64]);
         }
-        
+
         let mut dc_preds = vec![0i16; components_count];
         let mut eob_runs = vec![0u16; components_count];
 
@@ -116,17 +128,17 @@ impl<'a> Jpeg1Decoder<'a> {
                             let h_samp = comp.h_samp_factor as usize;
                             let v_samp = comp.v_samp_factor as usize;
                             let comp_blocks_w = mcus_w * h_samp;
-                            
+
                             // Decode h_samp * v_samp blocks for this component
                             for v in 0..v_samp {
                                 for h in 0..h_samp {
                                     let block_x = mcu_x * h_samp + h;
                                     let block_y = mcu_y * v_samp + v;
                                     let block_offset = (block_y * comp_blocks_w + block_x) * 64;
-                                    
+
                                     if block_offset + 64 <= coefficient_buffers[comp_idx].len() {
-                                        let target_block =
-                                            &mut coefficient_buffers[comp_idx][block_offset..block_offset + 64];
+                                        let target_block = &mut coefficient_buffers[comp_idx]
+                                            [block_offset..block_offset + 64];
 
                                         if self.reader.is_progressive {
                                             if ss == 0 {
@@ -175,7 +187,7 @@ impl<'a> Jpeg1Decoder<'a> {
                 let comp_blocks_w = mcus_w * h_samp;
                 let comp_blocks_h = mcus_h * v_samp;
                 let total_blocks = comp_blocks_h * comp_blocks_w;
-                
+
                 for block_y in 0..comp_blocks_h {
                     for block_x in 0..comp_blocks_w {
                         if restart_interval > 0
@@ -240,10 +252,10 @@ impl<'a> Jpeg1Decoder<'a> {
             let v_samp = comp.v_samp_factor as usize;
             let comp_blocks_w = mcus_w * h_samp;
             let comp_blocks_h = mcus_h * v_samp;
-            
+
             let quant_idx = comp.quant_table_dest as usize;
             let quant_table = &self.reader.quantization_tables[quant_idx];
-            
+
             let mut comp_buffer = vec![0.0f32; comp_blocks_w * comp_blocks_h * 64];
             for b in 0..(comp_blocks_w * comp_blocks_h) {
                 let block_offset = b * 64;
@@ -269,13 +281,13 @@ impl<'a> Jpeg1Decoder<'a> {
                     let comp = &self.reader.components[0];
                     let h_samp = comp.h_samp_factor as usize;
                     let comp_blocks_w = mcus_w * h_samp;
-                    
+
                     let bx = px / 8;
                     let by = py / 8;
                     let tx = px % 8;
                     let ty = py % 8;
                     let block_idx = (by * comp_blocks_w + bx) * 64 + (ty * 8 + tx);
-                    
+
                     if block_idx < component_buffers_f32[0].len() {
                         let val = (component_buffers_f32[0][block_idx] + 128.0)
                             .round()
@@ -285,29 +297,29 @@ impl<'a> Jpeg1Decoder<'a> {
                 } else if components_count == 3 {
                     // RGB/YCbCr - may have subsampling
                     let mut component_values = [0.0f32; 3];
-                    
+
                     for c in 0..3 {
                         let comp = &self.reader.components[c];
                         let h_samp = comp.h_samp_factor as usize;
                         let v_samp = comp.v_samp_factor as usize;
                         let comp_blocks_w = mcus_w * h_samp;
-                        
+
                         // Calculate position in component's coordinate system
                         // For subsampled components, we need to scale down the pixel position
                         let comp_px = (px * h_samp) / max_h_samp;
                         let comp_py = (py * v_samp) / max_v_samp;
-                        
+
                         let bx = comp_px / 8;
                         let by = comp_py / 8;
                         let tx = comp_px % 8;
                         let ty = comp_py % 8;
                         let block_idx = (by * comp_blocks_w + bx) * 64 + (ty * 8 + tx);
-                        
+
                         if block_idx < component_buffers_f32[c].len() {
                             component_values[c] = component_buffers_f32[c][block_idx];
                         }
                     }
-                    
+
                     // Convert YCbCr to RGB
                     let y_val = component_values[0];
                     let cb_val = component_values[1];
@@ -315,7 +327,7 @@ impl<'a> Jpeg1Decoder<'a> {
                     let r = y_val + 1.402 * cr_val + 128.0;
                     let g = y_val - 0.344136 * cb_val - 0.714136 * cr_val + 128.0;
                     let b = y_val + 1.772 * cb_val + 128.0;
-                    
+
                     let pixel_idx = (py * width + px) * 3;
                     if pixel_idx + 2 < destination.len() {
                         destination[pixel_idx] = r.clamp(0.0, 255.0) as u8;

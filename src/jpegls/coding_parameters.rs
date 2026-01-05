@@ -1,5 +1,5 @@
-use crate::constants::DEFAULT_RESET_THRESHOLD;
 use super::{ColorTransformation, InterleaveMode};
+use crate::constants::DEFAULT_RESET_THRESHOLD;
 use std::cmp::{max, min};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -26,7 +26,11 @@ impl RegularModeContext {
         if k != 0 {
             return 0;
         }
-        if 2 * self.b + self.n - 1 < 0 { -1 } else { 0 }
+        if 2 * self.b + self.n - 1 < 0 {
+            -1
+        } else {
+            0
+        }
     }
 
     pub fn update_variables_and_bias(

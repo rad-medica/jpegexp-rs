@@ -1,8 +1,8 @@
 use crate::error::JpeglsError;
 use crate::jpeg_stream_reader::JpegStreamReader;
 use crate::jpegls::validate_spiff_header::validate_spiff_header;
-use crate::FrameInfo;
 use crate::jpegls::SpiffHeader;
+use crate::FrameInfo;
 
 pub struct JpeglsDecoder<'a> {
     reader: JpegStreamReader<'a>,
@@ -70,11 +70,14 @@ impl<'a> JpeglsDecoder<'a> {
 
         let components = frame_info.component_count as usize;
         let width = frame_info.width as usize;
-        let bytes_per_sample = if frame_info.bits_per_sample <= 8 { 1 } else { 2 };
+        let bytes_per_sample = if frame_info.bits_per_sample <= 8 {
+            1
+        } else {
+            2
+        };
         let stride = width * components * bytes_per_sample;
 
         scan_decoder.decode_scan(destination, stride)?;
-
 
         Ok(())
     }

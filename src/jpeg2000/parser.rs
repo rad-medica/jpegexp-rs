@@ -4,9 +4,9 @@
 //! Tile-Part Headers (SOT, SOD).
 
 use super::image::{J2kCap, J2kCod, J2kComponentInfo, J2kImage, J2kQcd};
-use crate::JpeglsError;
 use crate::jpeg_marker_code::JpegMarkerCode;
 use crate::jpeg_stream_reader::JpegStreamReader;
+use crate::JpeglsError;
 
 /// A parser that transforms raw J2K marker segments into structured metadata.
 pub struct J2kParser<'a, 'b> {
@@ -167,7 +167,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             return Err(JpeglsError::InvalidData);
         }
         let sqcd = self.reader.read_u8()?; // quantization style flags
-        // eprintln!("DEBUG: parse_qcd sqcd={:02X}", sqcd);
+                                           // eprintln!("DEBUG: parse_qcd sqcd={:02X}", sqcd);
 
         // Remaining in the marker segment
         // len includes 2 bytes for len.

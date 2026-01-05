@@ -391,36 +391,38 @@ impl Dwt97 {
         }
 
         // Inverse Lifting (Reverse Order, Reverse Signs)
-        // Update 2
-        for i in 0..len {
-            if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-                x[i] -= Self::DELTA * (left + right);
+        if len > 1 {
+            // Update 2
+            for i in 0..len {
+                if i % 2 == 0 {
+                    let left = if i > 0 { x[i - 1] } else { x[i + 1] };
+                    let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                    x[i] -= Self::DELTA * (left + right);
+                }
             }
-        }
-        // Prediction 2
-        for i in 0..len {
-            if i % 2 != 0 {
-                let left = x[i - 1];
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-                x[i] -= Self::GAMMA * (left + right);
+            // Prediction 2
+            for i in 0..len {
+                if i % 2 != 0 {
+                    let left = x[i - 1];
+                    let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                    x[i] -= Self::GAMMA * (left + right);
+                }
             }
-        }
-        // Update 1
-        for i in 0..len {
-            if i % 2 == 0 {
-                let left = if i > 0 { x[i - 1] } else { x[i + 1] };
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-                x[i] -= Self::BETA * (left + right);
+            // Update 1
+            for i in 0..len {
+                if i % 2 == 0 {
+                    let left = if i > 0 { x[i - 1] } else { x[i + 1] };
+                    let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                    x[i] -= Self::BETA * (left + right);
+                }
             }
-        }
-        // Prediction 1
-        for i in 0..len {
-            if i % 2 != 0 {
-                let left = x[i - 1];
-                let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-                x[i] -= Self::ALPHA * (left + right);
+            // Prediction 1
+            for i in 0..len {
+                if i % 2 != 0 {
+                    let left = x[i - 1];
+                    let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+                    x[i] -= Self::ALPHA * (left + right);
+                }
             }
         }
 
