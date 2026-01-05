@@ -19,9 +19,9 @@ This repository includes a complete DevContainer configuration for GitHub Codesp
     - Grayscale 8-bit: Lossless (MAE = 0) ✅
     - Grayscale 16-bit: Lossless (MAE = 0) ✅
     - RGB/multi-component: Not yet supported (see `src/jpegls/mod.rs` for details)
-*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ⚠️ **Decoder Working, Encoder Stub**
+*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ⚠️ **Decoder Working, Encoder In Progress**
     - Decoder: Parses JP2/J2K, performs IDWT reconstruction ✅
-    - Encoder: Produces valid J2K structure (headers only)
+    - Encoder: Forward DWT implemented, EBCOT packet encoding in progress
 *   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ⚠️ **Decoder Working**
     - Decoder: CAP marker, HT block coder support
     - Encoder components implemented, integration pending
@@ -138,6 +138,7 @@ Commands:
 
 ### Documentation
 - [DEVELOPMENT.md](DEVELOPMENT.md) - Complete development guide
+- [docs/JPEG2000_TODO.md](docs/JPEG2000_TODO.md) - JPEG 2000 implementation progress
 - [CODEC_TEST_RESULTS.md](CODEC_TEST_RESULTS.md) - Detailed test results and analysis
 - [SUMMARY.md](SUMMARY.md) - Project summary and findings
 - [COMPLIANCE.md](COMPLIANCE.md) - Conformance testing details
@@ -152,8 +153,8 @@ Commands:
 
 **In Development**:
 - ⚠️ JPEG-LS RGB/multi-component (sample-interleave not yet supported)
-- ⚠️ JPEG 2000 Encoder (stub, 4-8 weeks)
-- ✅ JPEG 2000 Decoder now performs basic reconstruction
+- ⚠️ JPEG 2000 Encoder (DWT implemented, packet encoding in progress - see [JPEG2000_TODO.md](docs/JPEG2000_TODO.md))
+- ✅ JPEG 2000 Decoder performs full reconstruction with IDWT
 
 See [tests/jpegls_charls_validation.rs](tests/jpegls_charls_validation.rs) for JPEG-LS test results.
 

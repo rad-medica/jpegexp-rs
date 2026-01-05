@@ -155,6 +155,37 @@ fn decode_j2k(data: &[u8]) -> Result<(), jpegexp_rs::JpeglsError> {
 }
 ```
 
+### Encoding
+
+```rust
+use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
+use jpegexp_rs::FrameInfo;
+
+fn encode_j2k(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, jpegexp_rs::JpeglsError> {
+    let mut output = vec![0u8; pixels.len() * 2];
+    let mut encoder = J2kEncoder::new();
+
+    // Configure encoder (optional - defaults shown)
+    encoder.set_decomposition_levels(5);  // DWT levels
+    encoder.set_irreversible(false);      // Use 5-3 reversible transform (lossless)
+    encoder.set_quality(100);             // Quality level (unused for lossless)
+
+    let frame_info = FrameInfo {
+        width,
+        height,
+        bits_per_sample: 8,
+        component_count: 1,  // Grayscale
+    };
+
+    let len = encoder.encode(&pixels, &frame_info, &mut output)?;
+    output.truncate(len);
+
+    Ok(output)
+}
+```
+
+**Note:** JPEG 2000 encoder currently produces valid codestream structure with forward DWT, but packet encoding is still in development. Roundtrip decode/encode will not achieve lossless compression until packet encoding is complete.
+
 ## Complete Example
 
 ```rust

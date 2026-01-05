@@ -179,23 +179,29 @@ cargo run --release --bin jpegexp -- encode -i input.raw -o output.jpg -w 512 -H
 4. Add comprehensive unit tests
 5. Validate against standard test images
 
-### ⚠️ JPEG 2000 (Stub Implementation)
-**Status**: Proof-of-concept only
+### ⚠️ JPEG 2000 (Encoder In Progress)
+**Status**: Decoder working, encoder partially implemented
 
-**Issues**:
-- Encoder doesn't use pixel data (parameter unused)
-- Encoder only writes empty packets
-- Decoder fails reconstruction
-- Falls back to constant value (all 128)
+**Current Progress**:
+- ✅ Decoder: Full reconstruction with IDWT
+- ✅ Encoder: Forward DWT (5-3 reversible transform) implemented
+- ⚠️ Encoder: Packet encoding in progress (empty packets currently)
+- ✅ Infrastructure: Tag trees, bit-plane coder, MQ coder ready
 
-**Development Priority**: ⭐⭐ Medium (4-8 weeks estimated)
+**Remaining Work**:
+- Implement proper EBCOT packet encoding with codeblock data
+- Generate MQ-coded bit-plane data from DWT coefficients
+- Achieve lossless roundtrip (MAE = 0)
+
+**Development Priority**: ⭐⭐ Medium (2-4 weeks estimated)
 
 **Recommended Approach**:
-1. Complete DWT implementation
-2. Implement bit-plane coding
-3. Implement MQ/HT coder
-4. Complete packet formation
-5. Extensive testing
+1. Complete packet header encoding (tag trees for inclusion/zero_bp/lblock)
+2. Implement bit-plane coding for codeblock data
+3. Test roundtrip encode/decode for lossless compression
+4. Add comprehensive test suite
+
+**See Also**: [docs/JPEG2000_TODO.md](docs/JPEG2000_TODO.md) for detailed progress
 
 ## Contributing
 
@@ -287,8 +293,8 @@ perf report
 **Q: Why is JPEG-LS not working?**  
 A: The JPEG-LS implementation has fundamental architectural issues that require a complete rewrite of the encoder/decoder core logic. This is documented in CODEC_TEST_RESULTS.md.
 
-**Q: Can I use JPEG 2000?**  
-A: Not yet. The current implementation is a stub that only writes/reads headers. The actual wavelet transform and bit-plane coding are not implemented.
+**Q: Can I use JPEG 2000?**
+A: The decoder is fully functional for reading JP2/J2K files. The encoder has forward DWT implemented but packet encoding is still in progress. For production use, stick with JPEG 1 or JPEG-LS. See [docs/JPEG2000_TODO.md](docs/JPEG2000_TODO.md) for current progress.
 
 **Q: Which codec should I use for production?**  
 A: Use JPEG 1 for both grayscale and RGB images. It's fully tested and production-ready.

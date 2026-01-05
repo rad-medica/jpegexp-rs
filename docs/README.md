@@ -7,6 +7,7 @@
 - [Python API](python-api.md) - Python bindings
 - [C API](c-api.md) - C/C++ FFI
 - [WebAssembly API](wasm-api.md) - JavaScript/Browser bindings
+- [JPEG 2000 Progress](JPEG2000_TODO.md) - Current implementation status
 
 ## Overview
 
@@ -16,8 +17,8 @@ jpegexp-rs is a universal JPEG codec library supporting:
 | --------- | ---------------- | ------ | ------ | ----- |
 | JPEG      | ISO/IEC 10918-1  | ✓      | ✓      | Production ready |
 | JPEG-LS   | ISO/IEC 14495-1  | ✓      | ✓      | Grayscale lossless (MAE=0) |
-| JPEG 2000 | ISO/IEC 15444-1  | ✗      | ⚠️     | Stub implementation |
-| HTJ2K     | ISO/IEC 15444-15 | ✗      | ⚠️     | Not yet implemented |
+| JPEG 2000 | ISO/IEC 15444-1  | ⚠️     | ✓      | Encoder: DWT done, packets in progress |
+| HTJ2K     | ISO/IEC 15444-15 | ✗      | ⚠️     | Decoder working, encoder pending |
 
 ### JPEG-LS Support Details
 
@@ -92,6 +93,34 @@ cd python && maturin develop
 # C header
 cbindgen --output jpegexp.h
 ```
+
+## Troubleshooting
+
+### Common Issues
+
+**JPEG 2000 encoding produces large files or fails roundtrip testing:**
+- The encoder currently produces empty packets, resulting in constant-value reconstruction
+- This is expected behavior during development - packet encoding is in progress
+- Use JPEG 1 or JPEG-LS for production compression
+
+**JPEG-LS RGB encoding not supported:**
+- JPEG-LS currently only supports grayscale images
+- Use JPEG 1 for RGB images
+
+**High MAE values in testing:**
+- Check which codec you're testing - JPEG 1 should have MAE < 1.0
+- JPEG 2000 encoder currently has MAE ~108 due to empty packets
+
+**Compilation errors:**
+- Ensure you have Rust 1.70+ installed
+- Run `rustup update` to get the latest toolchain
+- For Python bindings: `pip install maturin` and `cd python && maturin develop`
+
+### Getting Help
+
+- **GitHub Issues**: https://github.com/rad-medica/jpegexp-rs/issues
+- **Documentation**: Check [DEVELOPMENT.md](../DEVELOPMENT.md) for detailed setup
+- **Tests**: Run `cargo test` to verify your installation
 
 ## Repository
 

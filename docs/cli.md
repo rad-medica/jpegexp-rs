@@ -9,7 +9,7 @@ The `jpegexp` command-line utility provides full access to the jpegexp-rs codec 
 | JPEG | ✓ | ✓ | Production ready |
 | JPEG-LS (grayscale) | ✓ | ✓ | Lossless (MAE=0) |
 | JPEG-LS (RGB) | ✗ | ✗ | Not yet supported |
-| JPEG 2000 | ✗ | ⚠️ | Stub implementation |
+| JPEG 2000 | ⚠️ | ✓ | Encoder: DWT done, packets in progress |
 
 ## Installation
 
@@ -89,8 +89,10 @@ jpegexp encode -i pixels16.raw -o output.jls -w 512 -H 512 -c jpegls --bits 16
 jpegexp encode -i rgb_pixels.raw -o photo.jpg -w 800 -H 600 -n 3
 ```
 
-**Note:** JPEG-LS currently only supports grayscale images (1 component). 
+**Note:** JPEG-LS currently only supports grayscale images (1 component).
 RGB encoding with `-n 3` is not yet supported for JPEG-LS.
+
+**Note:** JPEG 2000 encoding produces valid codestream structure but does not yet achieve lossless compression. Packet encoding is in progress.
 
 ### transcode
 
