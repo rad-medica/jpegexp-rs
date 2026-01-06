@@ -149,19 +149,27 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
     fn find_next_marker(
         parser: &mut J2kParser,
     ) -> Result<crate::jpeg_marker_code::JpegMarkerCode, JpeglsError> {
+        let mut byte = parser.reader.read_u8()?;
         loop {
-            match parser.reader.read_u8() {
-                Ok(0xFF) => {
-                    let b2 = parser.reader.read_u8()?;
-                    if b2 == 0x90 {
-                        return Ok(crate::jpeg_marker_code::JpegMarkerCode::StartOfTile);
-                    } else if b2 == 0xD9 {
-                        return Ok(crate::jpeg_marker_code::JpegMarkerCode::EndOfImage);
-                    };
+            if byte == 0xFF {
+                let b2 = parser.reader.read_u8()?;
+                if b2 == 0x90 {
+                    return Ok(crate::jpeg_marker_code::JpegMarkerCode::StartOfTile);
+                } else if b2 == 0xD9 {
+                    return Ok(crate::jpeg_marker_code::JpegMarkerCode::EndOfImage);
+                } else if b2 == 0xFF {
+                    // FF FF ... second FF could be start of marker
+                    byte = 0xFF;
+                    continue;
+                } else {
+                    if std::env::var("J2K_DEBUG").is_ok() {
+                        eprintln!("Skipping marker {:02X}", b2);
+                    }
+                    // Not a marker, continue scanning
+                    // byte = next byte
                 }
-                Ok(_) => continue,
-                Err(_) => return Err(JpeglsError::InvalidData),
             }
+            byte = parser.reader.read_u8()?;
         }
     }
 
@@ -439,41 +447,39 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 let mut bit_reader =
                                     crate::jpeg2000::bit_io::J2kBitReader::new(&mut parser.reader);
 
-                                // Determine grid dimensions for this precinct (needed for TagTree)
-                                // In this simplified implementation we treat the whole resolution as one precinct
-                                // So grid size is num_px x num_py? No, grid size is num codeblocks in the precinct.
-                                // If precinct covers the whole resolution, then it's grid_w x grid_h calculated earlier.
-                                // We computed num_px and num_py as number of PRECINCTS.
-                                // But TagTree needs number of CODEBLOCKS.
-                                // We computed grid_w, grid_h as num codeblocks.
-
-                                // Since we are iterating precincts (px, py), we need to know the codeblock range for THIS precinct.
-                                // If precinct_size is used, we need to map precinct to codeblocks.
-                                // For now, assume 1 precinct = whole resolution (if ppx is huge), so use grid_w, grid_h.
-                                // If multiple precincts, we need to subset.
-                                // PacketHeader::read expects grid_width/height to init new subbands if needed.
-
-                                // Let's use the full grid_w/grid_h for now, assuming 1 big TagTree per resolution per subband if we share state.
-                                // But state is per-precinct (precinct_state).
-                                // Standard says: Tag trees are defined for each precinct.
-                                // The leaf nodes correspond to code-blocks in that precinct.
-                                // So we need the dimensions of the precinct in codeblocks.
-
                                 // Calculate precinct dimensions in codeblocks
+                                // NOTE: The PacketHeader expects grid dimensions in SUBBAND codeblocks.
+                                // For r=0, subband size ~ resolution size.
+                                // For r>0, subband size ~ resolution size / 2.
+                                // We approximate using division by 2 for r>0.
+                                let sb_scale_x = if r == 0 { 1 } else { 2 };
+                                let sb_scale_y = if r == 0 { 1 } else { 2 };
 
                                 let nom_w = 1 << (cod.codeblock_width_exp + 2);
                                 let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
-                                // Calculate grid dimensions for this precinct (px, py)
+                                // Calculate grid dimensions for this precinct (px, py) projected to subband
                                 let p_x_start = px * ppx;
                                 let p_y_start = py * ppy;
                                 let p_x_end = (p_x_start + ppx).min(res_w);
                                 let p_y_end = (p_y_start + ppy).min(res_h);
 
-                                let cb_per_precinct_x =
-                                    p_x_end.saturating_sub(p_x_start).div_ceil(nom_w);
-                                let cb_per_precinct_y =
-                                    p_y_end.saturating_sub(p_y_start).div_ceil(nom_h);
+                                // Project to subband domain
+                                // We use simple scaling.
+                                // Precincts are defined on Resolution Grid.
+                                // Codeblocks are defined on Subband Grid.
+                                // Range [p_x_start, p_x_end) in Res -> [p_x_start/scale, p_x_end/scale) in Subband?
+                                // Standard B.6 eq B-16.
+                                // We simply divide the Resolution-based precinct width by scale to get Subband width.
+
+                                let prec_w = p_x_end.saturating_sub(p_x_start);
+                                let prec_h = p_y_end.saturating_sub(p_y_start);
+
+                                let sb_prec_w = prec_w.div_ceil(sb_scale_x);
+                                let sb_prec_h = prec_h.div_ceil(sb_scale_y);
+
+                                let cb_per_precinct_x = sb_prec_w.div_ceil(nom_w);
+                                let cb_per_precinct_y = sb_prec_h.div_ceil(nom_h);
 
                                 // Avoid 0-size if precinct is outside valid area (should not happen in loop)
                                 let cb_per_precinct_x = if cb_per_precinct_x == 0 {
@@ -509,13 +515,17 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 // but only when there's actual codeblock data to follow
                                 if !h.empty && !h.included_cblks.is_empty() {
                                     // Only align if there's codeblock data to read
-                                    let has_data = h.included_cblks.iter().any(|cb| cb.data_len > 0);
+                                    let has_data =
+                                        h.included_cblks.iter().any(|cb| cb.data_len > 0);
                                     if has_data {
                                         if std::env::var("J2K_DEBUG").is_ok() {
                                             let pos_before = parser.reader.position();
                                             parser.reader.align_to_byte();
                                             let pos_after = parser.reader.position();
-                                            eprintln!("  align_to_byte: {} -> {}", pos_before, pos_after);
+                                            eprintln!(
+                                                "  align_to_byte: {} -> {}",
+                                                pos_before, pos_after
+                                            );
                                         } else {
                                             parser.reader.align_to_byte();
                                         }
@@ -557,21 +567,38 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         for cb_info in header.included_cblks {
             if cb_info.data_len > 0 {
                 let data_len = cb_info.data_len as usize;
-                if std::env::var("J2K_DEBUG").is_ok() {
-                    let pos_before = parser.reader.position();
-                    eprintln!("  reading {} bytes of codeblock data at pos={}", data_len, pos_before);
-                }
+                let pos_before = parser.reader.position();
+
                 let mut data = vec![0u8; data_len];
                 for item in &mut data {
                     *item = parser.reader.read_u8()?;
                 }
-                if std::env::var("J2K_DEBUG").is_ok() {
-                    let pos_after = parser.reader.position();
-                    let remaining = parser.reader.remaining_data().len();
-                    let next_bytes: Vec<_> = parser.reader.remaining_data().iter().take(4).collect();
-                    eprintln!("  after reading: pos={} remaining={} next_bytes={:02X?}", 
-                        pos_after, remaining, next_bytes);
-                }
+
+                // Always print debug info for now
+                eprintln!(
+                    "DECODE_BODY: res={} subband={} pos={} len={} data={:02X?}",
+                    res, cb_info.subband_index, pos_before, data_len, &data
+                );
+
+                // Print max_bit_plane calculation
+                let qcd = parser.image.qcd.as_ref().unwrap();
+                let qcd_idx = if res == 0 {
+                    0
+                } else {
+                    1 + (res - 1) * 3 + cb_info.subband_index as usize
+                };
+                let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
+                    (qcd.step_sizes[qcd_idx] >> 11) as u8
+                } else {
+                    8
+                };
+                let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                let m_b = (guard_bits + epsilon_b).saturating_sub(1);
+                let max_bit_plane_calc = m_b.saturating_sub(cb_info.zero_bp);
+                eprintln!(
+                    "  -> qcd_idx={} eps_b={} guard={} mb={} zero_bp={} max_bp={}",
+                    qcd_idx, epsilon_b, guard_bits, m_b, cb_info.zero_bp, max_bit_plane_calc
+                );
 
                 let tile = &mut parser.image.tiles[isot as usize];
                 if tile.components.len() <= comp {
@@ -586,18 +613,23 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 }
                 let resolution = &mut component.resolutions[res];
 
-                let subband_idx = cb_info.subband_index as usize;
-                if resolution.subbands.len() <= subband_idx {
+                let target_subband_idx = if res == 0 {
+                    0
+                } else {
+                    cb_info.subband_index as usize + 1
+                };
+
+                if resolution.subbands.len() <= target_subband_idx {
                     resolution
                         .subbands
-                        .resize_with(subband_idx + 1, Default::default);
+                        .resize_with(target_subband_idx + 1, Default::default);
                 }
-                let subband = &mut resolution.subbands[subband_idx];
+                let subband = &mut resolution.subbands[target_subband_idx];
 
                 if res == 0 {
                     subband.orientation = crate::jpeg2000::image::SubbandOrientation::LL;
                 } else {
-                    match subband_idx {
+                    match cb_info.subband_index {
                         0 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HL,
                         1 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::LH,
                         2 => subband.orientation = crate::jpeg2000::image::SubbandOrientation::HH,
@@ -624,7 +656,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     } else {
                         let ll_w = res_w.div_ceil(2);
                         let ll_h = res_h.div_ceil(2);
-                        match subband_idx {
+                        match cb_info.subband_index {
                             0 => (res_w - ll_w, ll_h),         // HL
                             1 => (ll_w, res_h - ll_h),         // LH
                             2 => (res_w - ll_w, res_h - ll_h), // HH
@@ -643,11 +675,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     // Determine max_bit_plane
                     // Epsilon_b (base step size exponent)
                     let qcd = parser.image.qcd.as_ref().unwrap();
-                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     let qcd_idx = if res == 0 {
                         0
                     } else {
-                        1 + (res - 1) * 3 + subband_idx
+                        1 + (res - 1) * 3 + cb_info.subband_index as usize
                     };
 
                     let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
@@ -657,8 +688,18 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     };
 
                     // M_b = G + epsilon_b - 1
+                    // Note: epsilon_b already includes guard bits in Reversible mode?
+                    // Standard says eps_b is exponent. QCD stores exponent.
+                    // Standard E.1.1: M_b = G + epsilon_b - 1.
+                    // We extract `epsilon_b` directly from QCD.
+                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     let m_b = (guard_bits + epsilon_b).saturating_sub(1);
                     let max_bit_plane = m_b.saturating_sub(zero_bp);
+
+                    if std::env::var("J2K_DEBUG").is_ok() {
+                        eprintln!("  Decoding CB[{},{}] subband={} zero_bp={} eps={} guard={} mb={} max_bp={}", 
+                            cb_info.x, cb_info.y, cb_info.subband_index, zero_bp, epsilon_b, guard_bits, m_b, max_bit_plane);
+                    }
 
                     let cb_idx = subband
                         .codeblocks
@@ -676,17 +717,23 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             &[],
                         );
                         bpc.coefficients = block.coefficients.clone();
-                        bpc.state = block.state.clone();
+                        if !block.state.is_empty() {
+                            bpc.state = block.state.clone();
+                        }
                         bpc.num_passes_decoded = block.coding_passes as u32;
 
-                        let _ = bpc.decode_codeblock(
+                        let res = bpc.decode_codeblock(
                             &data,
                             max_bit_plane,
                             cb_info.num_passes,
                             subband.orientation as u8,
                         );
 
-                        block.coefficients = bpc.coefficients;
+                        if let Err(e) = res {
+                            eprintln!("Error decoding block update: {:?}", e);
+                            return Err(JpeglsError::InvalidData);
+                        }
+
                         block.state = bpc.state;
                         block.coding_passes += cb_info.num_passes; // Accumulate passes
                     } else {
@@ -701,21 +748,34 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         block.zero_bit_planes = zero_bp;
 
                         let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
-                            cb_width as u32,
-                            cb_height as u32,
+                            block.width,
+                            block.height,
                             &[],
                         );
-                        if let Ok(coefficients) = bpc.decode_codeblock(
+                        // If it's a fresh block (not found in list), new() inits state to 0.
+
+                        let res = bpc.decode_codeblock(
                             &data,
                             max_bit_plane,
                             cb_info.num_passes,
                             subband.orientation as u8,
-                        ) {
-                            block.coefficients = coefficients;
-                            block.state = bpc.state;
-                            block.coding_passes = cb_info.num_passes;
+                        );
+
+                        match res {
+                            Ok(coefficients) => {
+                                block.coefficients = coefficients;
+                                block.state = bpc.state;
+                                block.coding_passes = cb_info.num_passes;
+                                subband.codeblocks.push(block);
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Warning: decode_codeblock failed for block {},{}: {:?}",
+                                    block.x, block.y, e
+                                );
+                                subband.codeblocks.push(block);
+                            }
                         }
-                        subband.codeblocks.push(block);
                     }
                 }
             }

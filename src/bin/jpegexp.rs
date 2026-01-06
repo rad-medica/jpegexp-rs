@@ -281,10 +281,11 @@ fn encode_image(
             dest
         }
         Codec::J2k => {
-            let mut dest = vec![0u8; pixels.len() * 4]; // J2K can be larger
+            let mut dest = vec![0u8; (pixels.len() * 4).max(4096)]; // J2K can be larger
             let mut encoder = jpegexp_rs::jpeg2000::encoder::J2kEncoder::new();
             encoder.set_quality(quality);
             let len = encoder.encode(&pixels[..expected_size], &frame_info, &mut dest)?;
+
             dest.truncate(len);
             dest
         }

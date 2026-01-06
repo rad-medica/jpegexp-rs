@@ -4,6 +4,7 @@
 //! quantization, and EBCOT entropy coding.
 
 use super::bit_io::J2kBitWriter;
+use super::bit_plane_coder::BitPlaneCoder;
 use super::dwt::Dwt53;
 use super::image::{J2kCod, J2kQcd};
 use super::packet::{PacketHeader, PrecinctState};
@@ -22,6 +23,15 @@ pub struct J2kEncoder {
     /// Quality parameter (unused for lossless, kept for API compatibility)
     #[allow(dead_code)]
     quality: u8,
+}
+
+/// Encoded packet data structure
+struct Packet {
+    resolution: u8,
+    component: u8,
+    layer: u8,
+    header_data: Vec<u8>,
+    body_data: Vec<u8>,
 }
 
 impl J2kEncoder {
@@ -133,20 +143,47 @@ impl J2kEncoder {
         let cb_size = 1usize << (self.codeblock_exp + 2);
 
         // Transform and encode each component
-        let mut all_tile_data: Vec<u8> = Vec::new();
+        let mut packets: Vec<Packet> = Vec::new();
 
-        for comp_idx in 0..components {
-            // Extract component data with DC level shift
-            let level_shift = (1i32 << (depth - 1)) as i32;
-            let mut comp_data: Vec<i32> = (0..width * height)
-                .map(|i| pixels[i * components + comp_idx] as i32 - level_shift)
-                .collect();
+        // Level shift
+        let level_shift = (1i32 << (depth - 1)) as i32;
+        let mut component_data: Vec<Vec<i32>> = (0..components)
+            .map(|c| {
+                (0..width * height)
+                    .map(|i| pixels[i * components + c] as i32 - level_shift)
+                    .collect()
+            })
+            .collect();
 
+        // Apply RCT (Reversible Color Transform) if 3 components and not using irreversible transform
+        if components == 3 && !self.use_irreversible {
+            for i in 0..width * height {
+                let r = component_data[0][i];
+                let g = component_data[1][i];
+                let b = component_data[2][i];
+
+                let y = (r + 2 * g + b) >> 2;
+                let u = b - g;
+                let v = r - g;
+
+                component_data[0][i] = y;
+                component_data[1][i] = u;
+                component_data[2][i] = v;
+            }
+        }
+        // Apply ICT (Irreversible Color Transform) if 3 components and using irreversible transform
+        else if components == 3 && self.use_irreversible {
+            // ICT implementation (floating point usually, but let's stick to integer approx or skip for now)
+            // For now, let's just stick to RGB or implement simplified ICT if needed.
+            // Given the user wants Lossless, RCT is the priority.
+        }
+
+        for (comp_idx, mut comp_data) in component_data.into_iter().enumerate() {
             // Apply forward 2D DWT
             let coeffs = self.apply_forward_dwt_2d(&mut comp_data, width, height)?;
 
             // Encode component into packets
-            let comp_data = self.encode_component(
+            let comp_packets = self.encode_component_packets(
                 &coeffs,
                 width,
                 height,
@@ -154,19 +191,39 @@ impl J2kEncoder {
                 decomposition_levels,
                 depth,
                 guard_bits,
+                comp_idx as u8,
             )?;
-            all_tile_data.extend(comp_data);
+            packets.extend(comp_packets);
         }
 
+        // Sort packets by LRCP (Layer, Resolution, Component, Precinct)
+        // Currently only 1 layer, 1 precinct.
+        // So Sort Key: (layer, resolution, component)
+        packets.sort_by(|a, b| {
+            a.layer
+                .cmp(&b.layer)
+                .then(a.resolution.cmp(&b.resolution))
+                .then(a.component.cmp(&b.component))
+        });
+
         // Write SOT (Start of Tile)
-        let tile_total_len = 12 + 2 + all_tile_data.len() as u32;
+        // Calculate total length first
+        let total_packet_len: usize = packets
+            .iter()
+            .map(|p| p.header_data.len() + p.body_data.len())
+            .sum();
+        let tile_total_len = 12 + 2 + total_packet_len as u32; // SOT + SOD + Data
+
         writer.write_sot(0, tile_total_len, 0, 1)?;
 
         // Write SOD (Start of Data)
         writer.write_sod()?;
 
-        // Write tile data
-        writer.write_bytes(&all_tile_data)?;
+        // Write packet data
+        for p in packets {
+            writer.write_bytes(&p.header_data)?;
+            writer.write_bytes(&p.body_data)?;
+        }
 
         // Write EOC (End of Codestream)
         writer.write_eoc()?;
@@ -236,140 +293,188 @@ impl J2kEncoder {
         Ok(result)
     }
 
-    /// Encode a component's coefficients into packet data
-    fn encode_component(
+    /// Encode a component's coefficients into packets (internal)
+    fn encode_component_packets(
         &self,
-        _coeffs: &[i32],
-        _width: usize,
-        _height: usize,
-        _cb_size: usize,
+        coeffs: &[i32],
+        width: usize,
+        height: usize,
+        cb_size: usize,
         num_levels: u8,
-        _depth: u8,
-        _guard_bits: u8,
-    ) -> Result<Vec<u8>, JpeglsError> {
-        let mut output = Vec::new();
+        depth: u8,
+        guard_bits: u8,
+        comp_idx: u8,
+    ) -> Result<Vec<Packet>, JpeglsError> {
+        let mut packets = Vec::new();
         let num_resolutions = (num_levels + 1) as usize;
 
-        // For now, write empty packets for all resolutions
-        // This produces valid codestream that decodes to 128 (gray)
-        // TODO: Implement full EBCOT encoding with proper tag trees
-        for _res in 0..num_resolutions {
-            let mut bit_writer = J2kBitWriter::new();
-            bit_writer.write_bit(0); // Empty packet
-            output.extend(bit_writer.finish());
-        }
+        // Iterate through resolutions (lowest to highest)
+        for res in 0..num_resolutions {
+            let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
 
-        Ok(output)
-    }
+            // For now, assume 1 precinct per resolution
+            let cb_log2 = self.codeblock_exp;
+            let cb_dim = 1 << (cb_log2 + 2); // 64
 
-    /// Write packet header with proper tag tree encoding
-    #[allow(dead_code)]
-    fn write_packet_header(
-        &self,
-        writer: &mut J2kBitWriter,
-        header: &PacketHeader,
-        state: &mut PrecinctState,
-        grid_width: usize,
-        grid_height: usize,
-        num_subbands: usize,
-    ) {
-        // Non-empty packet
-        writer.write_bit(1);
+            // Calculate grid dimensions (in codeblocks) based on subband size
+            // We use the largest subband size to size the precinct grid
+            let (sb_w, sb_h) = if res == 0 {
+                (ll_w, ll_h)
+            } else {
+                // HL/LH/HH are roughly same size as previous LL
+                let (prev_w, prev_h) =
+                    self.get_ll_size(width, height, num_levels as usize, res - 1);
+                (ll_w - prev_w, ll_h - prev_h) // Approximate
+            };
 
-        for s in 0..num_subbands {
-            // Ensure subband state exists
-            if state.subbands.len() <= s {
-                state
-                    .subbands
-                    .push(super::packet::SubbandState::new(grid_width, grid_height));
-            }
-            let subband_state = &mut state.subbands[s];
+            let grid_w = (sb_w + cb_dim - 1) / cb_dim;
+            let grid_h = (sb_h + cb_dim - 1) / cb_dim;
 
-            for y in 0..grid_height {
-                for x in 0..grid_width {
-                    // Find codeblock info for this position
-                    let cb_info = header
-                        .included_cblks
-                        .iter()
-                        .find(|c| c.x == x && c.y == y && c.subband_index == s as u8);
+            let mut precinct_state = PrecinctState::new(grid_w, grid_h);
+            let mut packet_header = PacketHeader {
+                packet_seq_num: 0, // Ignored in structure
+                empty: false,
+                layer_index: 0,
+                included_cblks: Vec::new(),
+            };
 
-                    let included = cb_info.map_or(false, |c| c.included);
-                    let threshold = (header.layer_index + 1) as i32;
+            let mut packet_body = Vec::new();
+            let num_bands = if res == 0 { 1 } else { 3 };
 
-                    if included {
-                        let cb = cb_info.unwrap();
+            for band in 0..num_bands {
+                let sb_idx = if res == 0 { 0 } else { band }; // 0, 1, 2
 
-                        // Set inclusion value to current layer (0 for first inclusion)
-                        subband_state
-                            .inclusion_tree
-                            .set_value(x, y, header.layer_index as i32);
-                        subband_state.inclusion_tree.encode(writer, x, y, threshold);
+                let (sb_coeffs, sb_w, sb_h) = self.extract_subband_coeffs(
+                    coeffs,
+                    width,
+                    height,
+                    num_levels as usize,
+                    res,
+                    sb_idx,
+                );
 
-                        // Zero bit-planes
-                        subband_state
-                            .zero_bp_tree
-                            .set_value(x, y, cb.zero_bp as i32);
-                        subband_state
-                            .zero_bp_tree
-                            .encode(writer, x, y, cb.zero_bp as i32 + 1);
+                // Calculate epsilon for this subband (matches write_qcd)
+                let is_ll = res == 0;
+                let epsilon = if is_ll {
+                    depth + guard_bits
+                } else {
+                    depth + guard_bits + 1
+                };
 
-                        // Number of coding passes (Table B.4)
-                        Self::write_coding_passes(writer, cb.num_passes);
+                for cby in 0..grid_h {
+                    for cbx in 0..grid_w {
+                        let x0 = cbx * cb_dim;
+                        let y0 = cby * cb_dim;
 
-                        // LBlock increment (base is 3)
-                        let lblock = if cb.data_len > 0 {
-                            ((cb.data_len as f32).log2().ceil() as i32).max(3)
-                        } else {
-                            3
-                        };
-                        let lblock_inc = (lblock - 3).max(0);
+                        if x0 >= sb_w || y0 >= sb_h {
+                            continue;
+                        }
 
-                        subband_state.lblock_tree.set_value(x, y, lblock_inc);
-                        subband_state
-                            .lblock_tree
-                            .encode(writer, x, y, lblock_inc + 1);
+                        let x1 = (x0 + cb_dim).min(sb_w);
+                        let y1 = (y0 + cb_dim).min(sb_h);
+                        let bw = x1 - x0;
+                        let bh = y1 - y0;
 
-                        // Write data length
-                        writer.write_bits(cb.data_len, lblock as u8);
-                    } else {
-                        // Not included - encode "not included yet" via tag tree
-                        subband_state.inclusion_tree.set_value(x, y, i32::MAX);
-                        subband_state.inclusion_tree.encode(writer, x, y, threshold);
+                        if bw == 0 || bh == 0 {
+                            continue;
+                        }
+
+                        let mut block_data = Vec::with_capacity(bw * bh);
+                        for y in 0..bh {
+                            for x in 0..bw {
+                                block_data.push(sb_coeffs[(y0 + y) * sb_w + (x0 + x)]);
+                            }
+                        }
+
+                        let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
+                        if let Some(max_bp) = bpc.calculate_max_bit_plane() {
+                            // Map band 0..2 to orientation 1..3?
+                            // encoder.rs loop: band 0..num_bands.
+                            // if res=0, band=0 (LL -> orient 0).
+                            // if res>0, band 0..2 (HL, LH, HH -> orient 1, 2, 3).
+                            let orientation = if res == 0 { 0 } else { band as u8 + 1 };
+
+                            // DEBUG:
+                            if std::env::var("J2K_DEBUG").is_ok() {
+                                let max_val = block_data.iter().map(|v| v.abs()).max().unwrap_or(0);
+                                eprintln!(
+                                    "ENC: CB[{},{}] res={} band={} orient={} max_val={} max_bp={}",
+                                    cbx, cby, res, band, orientation, max_val, max_bp
+                                );
+                            }
+
+                            let passes = bpc.encode_codeblock(max_bp, orientation);
+                            bpc.mq.flush();
+                            let encoded = bpc.mq.get_buffer();
+
+                            if std::env::var("J2K_DEBUG").is_ok() {
+                                eprintln!(
+                                    "Enc CB[{},{}] band={} len={} max_bp={} passes={}",
+                                    cbx,
+                                    cby,
+                                    band,
+                                    encoded.len(),
+                                    max_bp,
+                                    passes
+                                );
+                            }
+
+                            // zero_bp calculation
+                            // M_b = G + epsilon - 1
+                            let mb = (guard_bits + epsilon).saturating_sub(1);
+
+                            let zero_bp = if max_bp < mb { mb - max_bp } else { 0 };
+
+                            if std::env::var("J2K_DEBUG").is_ok() {
+                                eprintln!("    -> zero_bp={}", zero_bp);
+                            }
+
+                            packet_header
+                                .included_cblks
+                                .push(super::packet::CodeBlockInfo {
+                                    x: cbx,
+                                    y: cby,
+                                    subband_index: band as u8,
+                                    included: true,
+                                    num_passes: passes,
+                                    data_len: encoded.len() as u32,
+                                    zero_bp,
+                                });
+
+                            packet_body.extend_from_slice(encoded);
+                        }
                     }
                 }
             }
-        }
-    }
 
-    /// Write number of coding passes using Table B.4 codewords
-    fn write_coding_passes(writer: &mut J2kBitWriter, passes: u8) {
-        match passes {
-            1 => writer.write_bit(0),
-            2 => {
-                writer.write_bit(1);
-                writer.write_bit(0);
+            // Write Packet
+            if packet_header.included_cblks.is_empty() {
+                packet_header.empty = true;
             }
-            3..=5 => {
-                writer.write_bit(1);
-                writer.write_bit(1);
-                writer.write_bits((passes - 3) as u32, 2);
-            }
-            6..=36 => {
-                writer.write_bit(1);
-                writer.write_bit(1);
-                writer.write_bits(3, 2);
-                writer.write_bits((passes - 6) as u32, 5);
-            }
-            _ => {
-                writer.write_bit(1);
-                writer.write_bit(1);
-                writer.write_bits(3, 2);
-                writer.write_bits(31, 5);
-            }
+
+            let mut header_writer = J2kBitWriter::new();
+            packet_header.write(
+                &mut header_writer,
+                &mut precinct_state,
+                grid_w,
+                grid_h,
+                num_bands,
+            );
+
+            packets.push(Packet {
+                resolution: res as u8,
+                component: comp_idx,
+                layer: 0,
+                header_data: header_writer.finish(),
+                body_data: packet_body,
+            });
         }
+
+        Ok(packets)
     }
 
     /// Get LL subband size at a given resolution level
+    /// This matches the iterative ceiling division used in the forward DWT
     fn get_ll_size(
         &self,
         width: usize,
@@ -377,9 +482,15 @@ impl J2kEncoder {
         num_levels: usize,
         res: usize,
     ) -> (usize, usize) {
+        // Must use iterative ceiling division to match the actual DWT
+        // The forward DWT uses: current_w = (current_w + 1) / 2 at each level
         let levels_remaining = num_levels - res;
-        let w = width >> levels_remaining;
-        let h = height >> levels_remaining;
+        let mut w = width;
+        let mut h = height;
+        for _ in 0..levels_remaining {
+            w = (w + 1) / 2; // Ceiling division, matching DWT
+            h = (h + 1) / 2;
+        }
         (w.max(1), h.max(1))
     }
 

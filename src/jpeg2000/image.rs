@@ -223,15 +223,20 @@ impl J2kImage {
                 }
                 sb_data
             } else {
+                // Subband size calculation based on DWT structure:
+                // LL and LH are in the LEFT half (low-pass columns) → ceil(width/2)
+                // HL and HH are in the RIGHT half (high-pass columns) → floor(width/2)
+                // LL and HL are in the TOP half (low-pass rows) → ceil(height/2)
+                // LH and HH are in the BOTTOM half (high-pass rows) → floor(height/2)
                 let w = if orientation == SubbandOrientation::LL
-                    || orientation == SubbandOrientation::HL
+                    || orientation == SubbandOrientation::LH
                 {
                     (res.width as usize + 1) / 2
                 } else {
                     res.width as usize / 2
                 };
                 let h = if orientation == SubbandOrientation::LL
-                    || orientation == SubbandOrientation::LH
+                    || orientation == SubbandOrientation::HL
                 {
                     (res.height as usize + 1) / 2
                 } else {

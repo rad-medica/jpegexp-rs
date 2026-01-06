@@ -133,7 +133,7 @@ impl Dwt53 {
 
     /// Inverse 2D 5/3 Transform
     /// Reconstructs image from LL, HL, LH, HH subbands
-    /// 
+    ///
     /// The 2D DWT structure:
     /// ```
     /// +-------+-------+
@@ -144,7 +144,7 @@ impl Dwt53 {
     ///    ^       ^
     ///  low-col  high-col
     /// ```
-    /// 
+    ///
     /// Inverse order:
     /// 1. Vertical inverse: combine LL+LH → left cols, HL+HH → right cols
     /// 2. Horizontal inverse: combine left+right → output rows
@@ -159,14 +159,14 @@ impl Dwt53 {
     ) {
         let w = width as usize;
         let h = height as usize;
-        
+
         // Subband dimensions
         #[allow(clippy::manual_div_ceil)]
-        let ll_w = (w + 1) / 2;  // LL and LH width (low-pass cols)
-        let hl_w = w / 2;        // HL and HH width (high-pass cols)
+        let ll_w = (w + 1) / 2; // LL and LH width (low-pass cols)
+        let hl_w = w / 2; // HL and HH width (high-pass cols)
         #[allow(clippy::manual_div_ceil)]
-        let ll_h = (h + 1) / 2;  // LL and HL height (low-pass rows)
-        let lh_h = h / 2;        // LH and HH height (high-pass rows)
+        let ll_h = (h + 1) / 2; // LL and HL height (low-pass rows)
+        let lh_h = h / 2; // LH and HH height (high-pass rows)
 
         // Intermediate buffer after vertical inverse
         let mut temp = vec![0i32; w * h];

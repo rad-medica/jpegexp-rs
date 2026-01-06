@@ -1,5 +1,13 @@
 use super::mq_coder::MqCoder;
 
+// enum PassType moved to top level
+#[derive(Debug)]
+enum PassType {
+    SigProp,
+    MagRef,
+    Cleanup,
+}
+
 pub struct BitPlaneCoder<'a> {
     pub width: u32,
     pub height: u32,
@@ -139,15 +147,35 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn encode_codeblock(&mut self) {
-        // Iterate bitplanes from MSB to LSB
-        // Assume 30 down to 0? Or determined by max value.
-        // For testing, let's start at bit 5.
-        for bp in (0..5).rev() {
-            self.significance_propagation(bp);
+    pub fn encode_codeblock(&mut self, start_bit_plane: u8, orientation: u8) -> u8 {
+        let mut passes = 0;
+
+        // First plane (start_bit_plane) only has Cleanup pass
+        self.cleanup(start_bit_plane, orientation);
+        passes += 1;
+
+        // Subsequent planes have all 3 passes
+        for bp in (0..start_bit_plane).rev() {
+            self.significance_propagation(bp, orientation);
             self.magnitude_refinement(bp);
-            self.cleanup(bp);
+            self.cleanup(bp, orientation);
+            passes += 3;
         }
+
+        passes
+    }
+
+    pub fn calculate_max_bit_plane(&self) -> Option<u8> {
+        let max_val = self.data.iter().map(|&v| v.abs()).max().unwrap_or(0);
+        if max_val == 0 {
+            return None;
+        }
+        // log2(max_val)
+        let mut bp = 0;
+        while (1 << (bp + 1)) <= max_val {
+            bp += 1;
+        }
+        Some(bp)
     }
 
     pub fn decode_codeblock(
@@ -162,13 +190,6 @@ impl<'a> BitPlaneCoder<'a> {
         }
 
         self.mq.init_decoder(data);
-
-        #[derive(Debug)]
-        enum PassType {
-            SigProp,
-            MagRef,
-            Cleanup,
-        }
 
         for _i in 0..num_new_passes {
             let pass_idx = self.num_passes_decoded;
@@ -271,37 +292,46 @@ impl<'a> BitPlaneCoder<'a> {
         &mut self,
         bit_plane: u8,
     ) -> Result<(), crate::jpeg2000::bit_io::BitIoError> {
+        // Must iterate in stripe order to match the encoder exactly
+        let stripe_height = 4u32;
         let width = self.width;
         let height = self.height;
-        let size = (width * height) as usize;
 
-        // Collect indices and compute contexts before mutable borrow
-        let mut indices_to_process = Vec::new();
-        for i in 0..size {
-            let state = self.state[i];
-            if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
-                let mr_ctx = self.get_magnitude_refinement_context(i, width, height);
-                indices_to_process.push((i, state, mr_ctx));
-            }
-        }
+        for y_stripe in (0..height).step_by(stripe_height as usize) {
+            for x in 0..width {
+                for y_offset in 0..stripe_height.min(height - y_stripe) {
+                    let y = y_stripe + y_offset;
+                    let idx = (y * width + x) as usize;
 
-        // Now process with mutable borrow
-        for (i, state, mr_ctx) in indices_to_process {
-            self.state[i] |= Self::VISITED;
+                    if idx >= self.state.len() {
+                        continue;
+                    }
 
-            // Decode refinement bit
-            let bit = self.mq.decode_bit(mr_ctx);
+                    let state = self.state[idx];
 
-            if bit != 0 {
-                // Add bit to coefficient
-                if (state & Self::SIGN) != 0 {
-                    self.coefficients[i] -= 1 << bit_plane;
-                } else {
-                    self.coefficients[i] += 1 << bit_plane;
+                    // If already significant and NOT visited in SigProp
+                    if (state & Self::SIG) != 0 && (state & Self::VISITED) == 0 {
+                        self.state[idx] |= Self::VISITED;
+
+                        // Get MR context
+                        let mr_ctx = self.get_magnitude_refinement_context(idx, width, height);
+
+                        // Decode refinement bit
+                        let bit = self.mq.decode_bit(mr_ctx);
+
+                        if bit != 0 {
+                            // Add bit to coefficient
+                            if (state & Self::SIGN) != 0 {
+                                self.coefficients[idx] -= 1 << bit_plane;
+                            } else {
+                                self.coefficients[idx] += 1 << bit_plane;
+                            }
+                        }
+
+                        self.state[idx] |= Self::REFINE;
+                    }
                 }
             }
-
-            self.state[i] |= Self::REFINE;
         }
         Ok(())
     }
@@ -383,6 +413,9 @@ impl<'a> BitPlaneCoder<'a> {
                             } else {
                                 self.coefficients[idx] = 1 << bit_plane;
                             }
+
+                            // Clear VISITED for the next bit-plane
+                            self.state[idx] &= !Self::VISITED;
                         }
 
                         // Process remaining in column normally
@@ -551,7 +584,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn significance_propagation(&mut self, bit_plane: u8) {
+    pub fn significance_propagation(&mut self, bit_plane: u8, orientation: u8) {
         // Iterate in stripe order: 4 rows column-wise.
         let w = self.width;
         let h = self.height;
@@ -573,7 +606,7 @@ impl<'a> BitPlaneCoder<'a> {
                             let bit = (val.abs() >> bit_plane) & 1;
 
                             // Encode ZC
-                            let cx = self.get_zc_context(0, hc, vc, dc); // band 0 assumed
+                            let cx = self.get_zc_context(orientation, hc, vc, dc);
                             self.mq.encode(bit as u8, cx);
 
                             if bit == 1 {
@@ -631,7 +664,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
     }
 
-    pub fn cleanup(&mut self, bit_plane: u8) {
+    pub fn cleanup(&mut self, bit_plane: u8, orientation: u8) {
         // Encode remaining insignificant samples
         let w = self.width;
         let h = self.height;
@@ -719,10 +752,13 @@ impl<'a> BitPlaneCoder<'a> {
                             let sym = sign ^ (xor as u8);
                             self.mq.encode(sym, sc_ctx);
 
+                            // Clear VISITED for the next bit-plane
+                            self.state[idx] &= !Self::VISITED;
+
                             // Process remaining samples normally
                             for y_offset in (first_sig_idx + 1)..4 {
                                 let y = y_stripe + y_offset;
-                                self.encode_cleanup_pixel(x, y, bit_plane);
+                                self.encode_cleanup_pixel(x, y, bit_plane, orientation);
                             }
                             continue;
                         }
@@ -732,13 +768,13 @@ impl<'a> BitPlaneCoder<'a> {
                 // Normal Processing (no RLC)
                 for y_offset in 0..remaining_height {
                     let y = y_stripe + y_offset;
-                    self.encode_cleanup_pixel(x, y, bit_plane);
+                    self.encode_cleanup_pixel(x, y, bit_plane, orientation);
                 }
             }
         }
     }
 
-    fn encode_cleanup_pixel(&mut self, x: u32, y: u32, bit_plane: u8) {
+    fn encode_cleanup_pixel(&mut self, x: u32, y: u32, bit_plane: u8, orientation: u8) {
         let idx = (y * self.width + x) as usize;
         let state = self.state[idx];
         if (state & Self::VISITED) == 0 {
@@ -746,7 +782,7 @@ impl<'a> BitPlaneCoder<'a> {
             let (hc, vc, dc) = self.get_neighbors(x, y);
 
             // ZC Context
-            let cx = self.get_zc_context(0, hc, vc, dc);
+            let cx = self.get_zc_context(orientation, hc, vc, dc);
             let val = self.data[idx];
             let bit = (val.abs() >> bit_plane) & 1;
 
@@ -783,7 +819,8 @@ mod tests {
         let mut bpc = BitPlaneCoder::new(4, 4, &data);
 
         // This should not panic
-        bpc.encode_codeblock();
+        let max_bp = bpc.calculate_max_bit_plane().unwrap_or(0);
+        bpc.encode_codeblock(max_bp, 0); // orientation 0 for LL
 
         // We can't easily verify exact bytes without full J2K compliance check,
         // but we can check that state updated (e.g., significant samples marked)

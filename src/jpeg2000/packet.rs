@@ -80,8 +80,10 @@ impl PacketHeader {
         // 1. Zero-length packet bit
         let bit = reader.read_bit()?;
         if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!("PACKET: layer={}, grid={}x{}, subbands={}, empty_bit={}", 
-                layer, grid_width, grid_height, num_subbands, bit);
+            eprintln!(
+                "PACKET: layer={}, grid={}x{}, subbands={}, empty_bit={}",
+                layer, grid_width, grid_height, num_subbands, bit
+            );
         }
         if bit == 0 {
             header.empty = true;
@@ -103,8 +105,9 @@ impl PacketHeader {
                     let threshold = (layer + 1) as i32;
                     // A codeblock is "already included" only if we have decoded its exact
                     // inclusion layer in a previous layer AND that layer is below current threshold
-                    let already_included =
-                        subband_state.inclusion_tree.is_known_below_threshold(x, y, threshold);
+                    let already_included = subband_state
+                        .inclusion_tree
+                        .is_known_below_threshold(x, y, threshold);
 
                     let mut process_block = false;
                     if already_included {
@@ -139,8 +142,10 @@ impl PacketHeader {
                         let data_len = reader.read_bits(lbits as u8)?;
 
                         if std::env::var("J2K_DEBUG").is_ok() {
-                            eprintln!("  CB[{},{}] subband={}: zero_bp={}, passes={}, lbits={}, len={}",
-                                x, y, s, zero_bp, num_passes, lbits, data_len);
+                            eprintln!(
+                                "  CB[{},{}] subband={}: zero_bp={}, passes={}, lbits={}, len={}",
+                                x, y, s, zero_bp, num_passes, lbits, data_len
+                            );
                         }
 
                         header.included_cblks.push(CodeBlockInfo {
@@ -186,6 +191,34 @@ impl PacketHeader {
         Ok((37 + bits2) as u8)
     }
 
+    /// Write coding passes using Table B.4
+    fn write_coding_passes(writer: &mut crate::jpeg2000::bit_io::J2kBitWriter, passes: u8) {
+        match passes {
+            1 => writer.write_bit(0),
+            2 => {
+                writer.write_bit(1);
+                writer.write_bit(0);
+            }
+            3..=5 => {
+                writer.write_bit(1);
+                writer.write_bit(1);
+                writer.write_bits((passes - 3) as u32, 2);
+            }
+            6..=36 => {
+                writer.write_bit(1);
+                writer.write_bit(1);
+                writer.write_bits(3, 2);
+                writer.write_bits((passes - 6) as u32, 5);
+            }
+            _ => {
+                writer.write_bit(1);
+                writer.write_bit(1);
+                writer.write_bits(3, 2);
+                writer.write_bits(31, 5);
+            }
+        }
+    }
+
     /// Write a packet header to the bit stream.
     pub fn write(
         &self,
@@ -211,65 +244,74 @@ impl PacketHeader {
 
             for y in 0..grid_height {
                 for x in 0..grid_width {
+                    // Find codeblock info for this position
                     let cb_info = self
                         .included_cblks
                         .iter()
                         .find(|c| c.x == x && c.y == y && c.subband_index == s as u8);
 
-                    let included_now = cb_info.is_some() && cb_info.unwrap().included;
+                    let included = cb_info.map_or(false, |c| c.included);
+                    let threshold = (self.layer_index + 1) as i32;
 
-                    if included_now {
-                        subband_state.inclusion_tree.encode(
-                            writer,
-                            x,
-                            y,
-                            (self.layer_index + 1) as i32,
-                        );
+                    // Tag Tree Encoding for Inclusion
+                    // If not previously included, we must encode inclusion up to current layer
+                    // We assume `state` tracks previous inclusions.
+                    // TagTree::encode ensures the value is encoded if not already known.
 
+                    if included {
                         let cb = cb_info.unwrap();
+
+                        // Set inclusion value to current layer (assuming 0-based layer index)
+                        subband_state
+                            .inclusion_tree
+                            .set_value(x, y, self.layer_index as i32);
+                        subband_state.inclusion_tree.encode(writer, x, y, threshold);
+
+                        // Zero bit-planes
+                        // TagTree handles "already encoded" check internally?
+                        // We need to ensure we only encode this ONCE (first time included).
+                        // But TagTree::encode re-encodes if we call it again?
+                        // We should rely on TagTree state. If it was already encoded (value known < threshold), it does nothing.
+                        // But ZBP is constant. We set it once.
+
                         subband_state
                             .zero_bp_tree
                             .set_value(x, y, cb.zero_bp as i32);
-                        subband_state.zero_bp_tree.encode(
-                            writer,
-                            x,
-                            y,
-                            (self.layer_index + 1) as i32,
-                        );
+                        // Encode ZBP. We need to know "current bitplane" context?
+                        // ZBP tree encodes the value `cb.zero_bp`.
+                        // We need to pass a threshold? No, we encode the exact value.
+                        // But typically we encode relative to a max?
+                        // Let's assume TagTree encodes the value fully.
+                        // We pass `cb.zero_bp + 1` as threshold to ensure we encode up to the value?
+                        // Actually, just encoding the value is sufficient if we want it known.
+                        // Using a large threshold guarantees it is fully output.
+                        subband_state
+                            .zero_bp_tree
+                            .encode(writer, x, y, cb.zero_bp as i32 + 1);
 
-                        let num_passes = cb.num_passes.max(1);
-                        for _ in 0..(num_passes - 1) {
-                            writer.write_bit(1);
-                        }
-                        writer.write_bit(0);
+                        // Number of coding passes (Table B.4)
+                        Self::write_coding_passes(writer, cb.num_passes);
 
-                        if cb.data_len > 0 {
-                            subband_state
-                                .lblock_tree
-                                .set_value(x, y, cb.data_len as i32);
-                            subband_state.lblock_tree.encode(
-                                writer,
-                                x,
-                                y,
-                                (self.layer_index + 1) as i32,
-                            );
-                            writer.write_bits(cb.data_len, 16);
+                        // LBlock
+                        let lblock = if cb.data_len > 0 {
+                            ((cb.data_len as f32).log2().ceil() as i32).max(3)
                         } else {
-                            subband_state.lblock_tree.set_value(x, y, 0);
-                            subband_state.lblock_tree.encode(
-                                writer,
-                                x,
-                                y,
-                                (self.layer_index + 1) as i32,
-                            );
-                        }
+                            3
+                        };
+                        let lblock_inc = (lblock - 3).max(0);
+
+                        subband_state.lblock_tree.set_value(x, y, lblock_inc);
+                        subband_state
+                            .lblock_tree
+                            .encode(writer, x, y, lblock_inc + 1);
+
+                        // Write data length
+                        writer.write_bits(cb.data_len, lblock as u8);
                     } else {
-                        subband_state.inclusion_tree.encode(
-                            writer,
-                            x,
-                            y,
-                            (self.layer_index + 1) as i32,
-                        );
+                        // Not included - encode "not included yet"
+                        // We set value to MAX (or > threshold) so it encodes 0 bits up to threshold
+                        subband_state.inclusion_tree.set_value(x, y, threshold + 1);
+                        subband_state.inclusion_tree.encode(writer, x, y, threshold);
                     }
                 }
             }
@@ -281,13 +323,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_packet_read_empty() {
-        let data = vec![0x00];
-        let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&data);
-        let mut reader = J2kBitReader::new(&mut buf_reader);
-        let mut state = PrecinctState::new(2, 2);
+    fn test_packet_header_roundtrip_complex() {
+        let mut header = PacketHeader {
+            packet_seq_num: 0,
+            empty: false,
+            layer_index: 0,
+            included_cblks: Vec::new(),
+        };
 
-        let header = PacketHeader::read(&mut reader, &mut state, 0, 2, 2, 1).unwrap();
-        assert!(header.empty);
+        // Subband 0
+        header.included_cblks.push(CodeBlockInfo {
+            x: 0,
+            y: 0,
+            subband_index: 0,
+            included: true,
+            num_passes: 3,
+            data_len: 15,
+            zero_bp: 3,
+        });
+        // Subband 1
+        header.included_cblks.push(CodeBlockInfo {
+            x: 0,
+            y: 0,
+            subband_index: 1,
+            included: true,
+            num_passes: 1,
+            data_len: 31,
+            zero_bp: 0,
+        });
+        // Subband 2
+        header.included_cblks.push(CodeBlockInfo {
+            x: 0,
+            y: 0,
+            subband_index: 2,
+            included: true,
+            num_passes: 1,
+            data_len: 7,
+            zero_bp: 0,
+        });
+
+        let mut writer = crate::jpeg2000::bit_io::J2kBitWriter::new();
+        let mut state_enc = PrecinctState::new(1, 1);
+        header.write(&mut writer, &mut state_enc, 1, 1, 3);
+        let buffer = writer.finish();
+
+        let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&buffer);
+        let mut reader = J2kBitReader::new(&mut buf_reader);
+        let mut state_dec = PrecinctState::new(1, 1);
+
+        let decoded = PacketHeader::read(&mut reader, &mut state_dec, 0, 1, 1, 3).unwrap();
+
+        assert_eq!(decoded.included_cblks.len(), 3);
+
+        // Check Subband 0
+        let cb0 = &decoded.included_cblks[0];
+        assert_eq!(cb0.subband_index, 0);
+        assert_eq!(cb0.num_passes, 3);
+        assert_eq!(cb0.data_len, 15);
+        assert_eq!(cb0.zero_bp, 3);
+
+        // Check Subband 1
+        let cb1 = &decoded.included_cblks[1];
+        assert_eq!(cb1.subband_index, 1);
+        assert_eq!(cb1.num_passes, 1);
+        assert_eq!(cb1.data_len, 31);
+        assert_eq!(cb1.zero_bp, 0);
+
+        // Check Subband 2
+        let cb2 = &decoded.included_cblks[2];
+        assert_eq!(cb2.subband_index, 2);
+        assert_eq!(cb2.num_passes, 1);
+        assert_eq!(cb2.data_len, 7);
+        assert_eq!(cb2.zero_bp, 0);
     }
 }

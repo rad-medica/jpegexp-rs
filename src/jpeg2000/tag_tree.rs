@@ -207,8 +207,10 @@ impl TagTree {
                 }
                 let bit = reader.read_bit()?;
                 if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!("    TT[{}]: bit={} low={} known={} threshold={}", 
-                        curr_idx, bit, node.low, node.known, threshold);
+                    eprintln!(
+                        "    TT[{}]: bit={} low={} known={} threshold={}",
+                        curr_idx, bit, node.low, node.known, threshold
+                    );
                 }
                 // JPEG 2000 tag tree semantics (per OpenJPEG):
                 // bit=1 means "value equals current low" (found!)
@@ -225,8 +227,10 @@ impl TagTree {
 
         let result = self.nodes[leaf_idx].low >= threshold;
         if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!("    TT result: low={} >= threshold={} ? {}", 
-                self.nodes[leaf_idx].low, threshold, result);
+            eprintln!(
+                "    TT result: low={} >= threshold={} ? {}",
+                self.nodes[leaf_idx].low, threshold, result
+            );
         }
         Ok(result)
     }

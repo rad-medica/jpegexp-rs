@@ -1,8 +1,6 @@
 //! MQ Arithmetic Coder (ISO/IEC 15444-1 Annex C)
 
 // State Transition Tables (Index, Qe, NMPS, NLPS, Switch)
-// Compressed format or full struct? Let's use full arrays.
-
 #[derive(Clone, Copy)]
 struct MqContextState {
     pub qe: u16,
@@ -300,21 +298,19 @@ const MQ_TABLE: [MqContextState; 47] = [
 pub struct MqCoder {
     // Registers
     a: u16, // Interval size (16 bits)
-    c: u32, // Code register (28 bits essentially)
+    c: u32, // Code register (32 bits, but effectively 28 bits active)
 
     // Buffer (Encoder)
     bp: Vec<u8>,
-    bp_idx: usize,
+    // bp_idx: usize, // Unused with Vec push
 
     // State (Shared/Encoder)
     ct: u8,
-    #[allow(dead_code)]
-    b: u8,
+    b: u8, // Buffered byte B
 
     // State for Decoder
     source: Vec<u8>,
     src_pos: usize,
-    buffer_byte: u8, // 'B' register in spec? Or temp?
 
     // Contexts
     contexts: Vec<u8>,
@@ -326,13 +322,12 @@ impl Default for MqCoder {
             a: 0x8000,
             c: 0,
             bp: Vec::new(),
-            bp_idx: 0,
+            // bp_idx: 0,
             ct: 12,
             b: 0,
             contexts: vec![0; 47], // Usually 19 but context indices can be higher?
             source: Vec::new(),
             src_pos: 0,
-            buffer_byte: 0,
         }
     }
 }
@@ -345,8 +340,6 @@ impl MqCoder {
     pub fn init_contexts(&mut self, size: usize) {
         self.contexts = vec![0; size];
     }
-
-    // ... (Encoder methods omitted or assumed present) ...
 
     // Decoder Initialization (C.3.1) - Following OpenJPEG's approach
     pub fn init_decoder(&mut self, data: &[u8]) {
@@ -408,43 +401,12 @@ impl MqCoder {
         let mps = ctx & 1;
         let qe = MQ_TABLE[idx].qe;
 
-        // This corresponds to "DECODE" procedure
-        // My Encoder put LPS at [0, Qe), MPS at [Qe, A).
-        // So check C against Qe.
-        // Wait, C is high 16 bits of register?
-        // C register is 28 bits?
-        // "C register ... 16 bits active + spacers"
-        // Let's check `c` magnitude relative to `a` (0x8000..0xFFFF).
-        // My `c` is u32.
-        // If I mapped encoder `c += qe` (move base up).
-        // Then `c` represents the base.
-        // The *incoming* stream represents a value `V`.
-        // `C_reg` holds bits from `V`?
-        // "Chigh contains the most significant 16 bits of the code"
-        // In my `init_decoder`, I fill `c` with shifts.
-        // `a` is 16 bits (0x8000).
-        // So `c-buffers` needs to align with `a`.
-        // C should be effectively 16 bits for comparison?
-        // `c` variable here holds `Chigh` (16 bits) + `Clow` (12 bits) = 28 bits?
-        // Let's assume `c` (u32) holds `Chigh << 16 | Clow`.
-        // `a` operates on `Chigh`.
-
-        // Comparison: `Chigh < Qe` is impossible if `Chigh` is 16 bits and `Qe` is 16 bits?
-        // `Chigh` is normalized to be roughly in range of `a`?
-        // Spec C.3.2:
-        // `A -= Qe`
-        // `if (Chigh < Qe)` -> LPS (Exchange intervals?)
-        // `else` -> MPS
-
-        // Chigh is `self.c >> 16`.
-
         self.a -= qe;
         let chigh = (self.c >> 16) as u16;
 
         let d;
         if chigh < qe {
             // LPS path - C_high < Qe
-            // Apply LPS exchange (per OpenJPEG's opj_mqc_lpsexchange_macro)
             if self.a < qe {
                 // Conditional exchange: return MPS, use NMPS context
                 self.a = qe;
@@ -463,7 +425,6 @@ impl MqCoder {
             d
         } else {
             // MPS path - C_high >= Qe
-            // C -= Qe << 16 (subtract from C register)
             self.c -= (qe as u32) << 16;
 
             if self.a < 0x8000 {
@@ -489,7 +450,6 @@ impl MqCoder {
     }
 
     fn renormalize_input(&mut self) {
-        // Following OpenJPEG's opj_mqc_renormd_macro
         loop {
             if self.ct == 0 {
                 self.byte_in(); // byte_in already adds to c
@@ -564,42 +524,191 @@ impl MqCoder {
         }
     }
 
+    // Correct BYTEOUT procedure (C.2.3)
     fn byte_out(&mut self) {
-        if self.bp_idx == 0 {
-            // First byte?
+        // C register: 28 bits (C27..C0)
+        // Check carry (bit 27, mask 0x8000000? No, bit 27 is 0x8000000)
+        // Wait, OpenJPEG uses 28 bits?
+        // OpenJPEG uses `c` as 32 bits.
+        // `byte_out` output `c >> 19` (bits 19..27 approx).
+        // If `c` overflows 27 bits, it carries into 28.
+
+        // Standard says:
+        // 1. If B == 0xFF:
+        //    Write (B). ct=7.
+        //    (Actually we wrote B already, we just check overflow)
+
+        // Let's implement the buffering logic:
+        // We accumulate in `C`. When `ct` triggers `byte_out`:
+        // We have 8 (or 7) bits ready in the high part of `C`.
+        // We verify if `C` has carried into `B`.
+
+        // At start (new): B=0?
+        // First byte is not written until second byte_out?
+
+        // Let's follow OpenJPEG `opj_mqc_byteout_macro`.
+        // `if (*bp == 0xff) { bp++; *bp = c >> 20; c &= 0xfffff; ct = 7; } else ...`
+        // OpenJPEG uses `c` shifted by 20?
+        // My previous code used 19.
+
+        // Standard C.2.3 BYTEOUT:
+        // T = (C >> 19) & 0xFF? Or just C >> 19?
+        // "Transfer the MSBs of C to B".
+
+        // Let's stick to C.2.3 strict interpretation.
+        // C is 28 bits (0..27).
+        // A is added to C at bit 16?
+        // If A=0x8000 (16 bits), we add at bit 0 of A.
+        // Wait, C is 1.5 + 0.5?
+
+        // Let's use the implementation that mirrors OpenJPEG which is proven.
+        // OpenJPEG state: c (32), a (32), ct (32), bp (ptr).
+        // Init: c=0, a=0x8000, ct=12, bp=start-1.
+
+        // ByteOut:
+        // if (*bp == 0xff) {
+        //    *++bp = c >> 20;
+        //    c &= 0xfffff;
+        //    ct = 7;
+        // } else {
+        //    if ((c >> 27) == 1) { // Carry!
+        //       *bp += 1; // Propagate carry to B
+        //       if (*bp == 0xff) { // B became FF
+        //           // Stuffing needed
+        //           *++bp = c >> 20;
+        //           c &= 0xfffff;
+        //           ct = 7;
+        //       } else {
+        //           *++bp = c >> 19;
+        //           c &= 0x7ffff;
+        //           ct = 8;
+        //       }
+        //    } else {
+        //       *++bp = c >> 19;
+        //       c &= 0x7ffff;
+        //       ct = 8;
+        //    }
+        // }
+
+        // My struct has `b` which acts as `*bp` (the LAST written byte).
+        // Since we push to Vec, we can modify the last element if we need to propagate carry.
+
+        if self.bp.is_empty() {
+            // First time called (after init ct=12)
+            // Just output. Carry is impossible?
+            let b = (self.c >> 19) as u8;
+            self.c &= 0x7FFFF;
+            self.ct = 8;
+            self.bp.push(b);
+            // self.b = b; // Not needed, we inspect bp.last()
+            return;
         }
-        let b_out = (self.c >> 19) as u8;
-        if b_out == 0xFF {
+
+        // Inspect B (last byte written)
+        let last_byte = *self.bp.last().unwrap();
+
+        if last_byte == 0xFF {
+            // Previous byte was 0xFF.
+            // We output 7 bits (from 20..26).
+            // Bit 27 is Spacer/Carry?
+            let b = (self.c >> 20) as u8;
+            self.c &= 0xFFFFF;
             self.ct = 7;
+            self.bp.push(b);
+        } else {
+            // Previous byte < 0xFF.
+            // Check for carry (Bit 27)
+            if (self.c >> 27) & 1 == 1 {
+                // Carry occurred!
+                // Add to last byte
+                let len = self.bp.len();
+                self.bp[len - 1] += 1;
+                let new_last = self.bp[len - 1];
+
+                // If it became 0xFF, we must stuff
+                if new_last == 0xFF {
+                    let b = (self.c >> 20) as u8;
+                    self.c &= 0xFFFFF;
+                    self.ct = 7;
+                    self.bp.push(b);
+                } else {
+                    let b = (self.c >> 19) as u8;
+                    self.c &= 0x7FFFF;
+                    self.ct = 8;
+                    self.bp.push(b);
+                }
+            } else {
+                // No carry
+                let b = (self.c >> 19) as u8;
+                self.c &= 0x7FFFF;
+                self.ct = 8;
+                self.bp.push(b);
+            }
         }
-        self.c &= 0x7FFFF;
-        self.bp.push(b_out);
-        self.bp_idx += 1;
     }
 
     /// Flush the encoder - must be called after encoding to finalize the bitstream
     /// Per JPEG2000 spec C.2.9
     pub fn flush(&mut self) {
-        // Set bits in c to 1 (SETBITS procedure)
+        // SETBITS
         let temp = self.c + self.a as u32;
         self.c |= 0xFFFF;
         if self.c >= temp {
             self.c -= 0x8000;
         }
 
-        // Shift out the final bytes
-        self.c <<= self.ct;
-        self.byte_out();
-        self.c <<= self.ct;
+        // Output remaining bits
+        let remaining = self.ct;
+        self.c <<= remaining;
         self.byte_out();
 
-        // Remove trailing 0xFF if present (marker avoidance)
-        while self.bp.len() > 1 && *self.bp.last().unwrap_or(&0) == 0xFF {
-            self.bp.pop();
+        // C.2.9 says:
+        // C <<= CT; BYTEOUT();
+        // C <<= CT; BYTEOUT();
+        // Discard any 0xFF at end.
+
+        // We already did shift in loop? No.
+        // byte_out consumes bits from C high.
+        // We just shifted remaining bits up.
+
+        // We might need another flush byte to clear buffer?
+        // Typically length is sufficient.
+        // Standard says "shifted ... until all bits are output".
+
+        // OpenJPEG does:
+        // opj_mqc_setbits_macro
+        // c <<= ct; byteout();
+        // c <<= ct; byteout();
+        // if (bp != start) bp--; // Backtrack one?
+
+        self.c <<= self.ct; // ct set by byte_out
+        self.byte_out();
+
+        // Remove trailing 0xFF if present (per C.2.9)
+        // "The byte pointed to by BP is discarded if it is 0xFF."
+        if let Some(&last) = self.bp.last() {
+            if last == 0xFF {
+                self.bp.pop();
+            }
         }
     }
 
     pub fn get_buffer(&self) -> &[u8] {
+        // Some implementations skip the very first byte if it was a dummy?
+        // My implementation pushes first byte immediately.
+        // OpenJPEG initializes `bp = start - 1`. First byte_out writes to `start`.
+        // So first byte IS valid.
+
+        // But wait, in Init: ct=12.
+        // First byte_out happens after 12 shifts.
+        // Is that byte significant?
+        // C=0 initially. 12 shifts -> C=0.
+        // byte_out writes 0.
+        // Is the first 0 byte part of stream?
+        // Yes, C.2.5 InitEnc: "The first byte ... is 0".
+        // But do we transmit it?
+        // "The first byte of the codestream ... is the byte pointed to by BP".
+        // So yes.
         &self.bp
     }
 }
@@ -626,23 +735,5 @@ mod tests {
 
         // After encoding, A should be renormalized to >= 0x8000
         assert!(mq.a >= 0x8000);
-    }
-
-    #[test]
-    fn test_mq_encode_decode_roundtrip() {
-        let mut mq_enc = MqCoder::new();
-        mq_enc.init_contexts(1);
-
-        // Encode sequence: 0, 0, 1, 0, 1 (Context 0)
-        let bits = vec![0, 0, 1, 0, 1];
-        for &b in &bits {
-            mq_enc.encode(b, 0);
-        }
-        // Flush? We need flush logic for encoder to ensure bits are out.
-        // Simplified flush:
-
-        // NOTE: MqCoder flush is missing.
-        // Let's assume for partial test we check what we have.
-        // With simplified encoder, we might leave bits in C.
     }
 }

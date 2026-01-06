@@ -79,7 +79,11 @@ impl J2kBitWriter {
 
     fn flush_byte(&mut self) {
         let b = self.bit_buffer;
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("J2KBitWriter: {:02X}", b);
+        }
         self.data.push(b);
+
         if b == 0xFF {
             // Stuffing
             self.data.push(0x00);

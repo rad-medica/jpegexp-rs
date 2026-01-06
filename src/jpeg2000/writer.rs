@@ -94,15 +94,27 @@ impl<'a> J2kWriter<'a> {
         self.writer
             .write_marker(JpegMarkerCode::QuantizationDefault)?;
 
-        // Length: 3 (Sqcd) + 2 * step_sizes.len() + 2 (len field) = 5?
-        // Lqcd (2) + Sqcd (1) + SPqcd (n)
-        let payload_len = 1 + qcd.step_sizes.len() * 2;
+        // Determine step size format based on quantization type
+        let quant_type = qcd.quant_style & 0x1F;
+        let is_16bit = quant_type == 0x02; // Scalar Expounded uses 16-bit steps
+
+        // Lqcd (2) + Sqcd (1) + SPqcd (n bytes)
+        let step_size_bytes = if is_16bit { 2 } else { 1 };
+        let payload_len = 1 + qcd.step_sizes.len() * step_size_bytes;
         self.writer.write_u16((payload_len + 2) as u16)?;
 
         self.writer.write_byte(qcd.quant_style)?;
 
         for &step in &qcd.step_sizes {
-            self.writer.write_u16(step)?;
+            if is_16bit {
+                self.writer.write_u16(step)?;
+            } else {
+                // For reversible mode (quant_type 0 or 1), step_sizes store
+                // epsilon in the high 5 bits of the stored byte value.
+                // The encoder stores (epsilon << 11) in u16, so we extract
+                // the high byte which contains (epsilon << 3).
+                self.writer.write_byte((step >> 8) as u8)?;
+            }
         }
         Ok(())
     }
