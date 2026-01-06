@@ -23,6 +23,10 @@ impl<'a> BitPlaneCoder<'a> {
         let size = (width * height) as usize;
         let mut mq = MqCoder::new();
         mq.init_contexts(19);
+        // Initialize Uniform Context (18) to index 46 (0x5C << 1 | 0 = 92?)
+        // Index 46 is the last entry in MQ table.
+        // Val = (Index << 1) | MPS. Index 46 -> 92.
+        mq.set_context(18, 46 << 1);
 
         // Load coefficients if provided usually
         // But for standard new, init to zero if not reusing

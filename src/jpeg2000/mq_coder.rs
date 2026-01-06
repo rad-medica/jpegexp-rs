@@ -341,6 +341,12 @@ impl MqCoder {
         self.contexts = vec![0; size];
     }
 
+    pub fn set_context(&mut self, cx: usize, value: u8) {
+        if cx < self.contexts.len() {
+            self.contexts[cx] = value;
+        }
+    }
+
     // Decoder Initialization (C.3.1) - Following OpenJPEG's approach
     pub fn init_decoder(&mut self, data: &[u8]) {
         self.source = data.to_vec();

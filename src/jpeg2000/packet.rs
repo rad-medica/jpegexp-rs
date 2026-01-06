@@ -294,10 +294,13 @@ impl PacketHeader {
 
                         // LBlock
                         let lblock = if cb.data_len > 0 {
-                            ((cb.data_len as f32).log2().ceil() as i32).max(3)
+                            // Number of bits needed to represent data_len
+                            // (32 - leading_zeros) gives exact bit width
+                            (u32::BITS - cb.data_len.leading_zeros()) as i32
                         } else {
                             3
-                        };
+                        }
+                        .max(3);
                         let lblock_inc = (lblock - 3).max(0);
 
                         subband_state.lblock_tree.set_value(x, y, lblock_inc);

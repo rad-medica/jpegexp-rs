@@ -306,14 +306,16 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 }
                             } else {
                                 // Res > 0: Subbands split the resolution
-                                // LL(0), HL(1): width approx (W+1)/2
-                                // LH(2), HH(3): width approx W/2
-                                let w_sb = if i == 0 || i == 1 {
+                                // LL(0), LH(2): width approx (W+1)/2 -> ceil
+                                // HL(1), HH(3): width approx W/2 -> floor
+                                let w_sb = if i == 0 || i == 2 {
                                     res_w.div_ceil(2)
                                 } else {
                                     res_w / 2
                                 };
-                                let h_sb = if i == 0 || i == 2 {
+                                // LL(0), HL(1): height approx (H+1)/2 -> ceil
+                                // LH(2), HH(3): height approx H/2 -> floor
+                                let h_sb = if i == 0 || i == 1 {
                                     res_h.div_ceil(2)
                                 } else {
                                     res_h / 2

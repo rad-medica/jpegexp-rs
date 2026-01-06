@@ -177,7 +177,13 @@ impl J2kImage {
             return Err("No tiles in image".to_string());
         }
 
-        let mut pixels = vec![0u8; (self.width * self.height * self.component_count) as usize];
+        let max_depth = self.components.iter().map(|c| c.depth).max().unwrap_or(8);
+        let bytes_per_sample = if max_depth > 8 { 2 } else { 1 };
+        let mut pixels = vec![
+            0u8;
+            (self.width * self.height * self.component_count) as usize
+                * bytes_per_sample
+        ];
         let pixels_per_component = (self.width * self.height) as usize;
 
         // For now, handle single tile case
@@ -483,17 +489,38 @@ impl J2kImage {
                     8
                 };
 
-                let shift = depth.saturating_sub(8);
+                let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+                let shift = if bytes_per_sample == 2 {
+                    0
+                } else {
+                    depth.saturating_sub(8)
+                };
+
                 let level_offset = (1 << (depth - 1)) as f32;
                 let scale_div = (1 << shift) as f32;
 
                 let v = buffer[i];
+                let max_val = ((1 << depth) - 1) as f32;
+                let val_f32 = ((v + level_offset) / scale_div).round();
 
-                let val = ((v + level_offset) / scale_div).round().clamp(0.0, 255.0) as u8;
+                // Clamp based on output depth
+                let val_clamped = if bytes_per_sample == 2 {
+                    val_f32.clamp(0.0, max_val) as i32
+                } else {
+                    val_f32.clamp(0.0, 255.0) as i32
+                };
 
-                let dest_idx = i * self.component_count as usize + c;
-                if dest_idx < pixels.len() {
-                    pixels[dest_idx] = val;
+                let dest_idx = (i * self.component_count as usize + c) * bytes_per_sample;
+
+                if bytes_per_sample == 2 {
+                    if dest_idx + 1 < pixels.len() {
+                        pixels[dest_idx] = val_clamped as u8;
+                        pixels[dest_idx + 1] = (val_clamped >> 8) as u8;
+                    }
+                } else {
+                    if dest_idx < pixels.len() {
+                        pixels[dest_idx] = val_clamped as u8;
+                    }
                 }
             }
         }

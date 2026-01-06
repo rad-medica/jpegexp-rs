@@ -73,7 +73,8 @@ impl J2kEncoder {
         let depth = frame_info.bits_per_sample as u8;
 
         // Validate input
-        let expected_size = width * height * components;
+        let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+        let expected_size = width * height * components * bytes_per_sample;
         if pixels.len() < expected_size {
             return Err(JpeglsError::InvalidData);
         }
@@ -150,7 +151,18 @@ impl J2kEncoder {
         let mut component_data: Vec<Vec<i32>> = (0..components)
             .map(|c| {
                 (0..width * height)
-                    .map(|i| pixels[i * components + c] as i32 - level_shift)
+                    .map(|i| {
+                        let val = if depth > 8 {
+                            let idx = (i * components + c) * 2;
+                            // Assume Little Endian input for 16-bit
+                            let b0 = pixels[idx] as i32;
+                            let b1 = pixels[idx + 1] as i32;
+                            (b1 << 8) | b0
+                        } else {
+                            pixels[i * components + c] as i32
+                        };
+                        val - level_shift
+                    })
                     .collect()
             })
             .collect();
