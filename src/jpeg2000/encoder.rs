@@ -123,12 +123,28 @@ impl J2kEncoder {
         let guard_bits = 2u8;
 
         // For reversible transform, use no quantization (style 0)
+        // Epsilon calculation per OpenJPEG convention:
+        // LL: depth (e.g., 8 for 8-bit)
+        // HL/LH at each level: depth + 1 (e.g., 9)
+        // HH at each level: depth + 2 (e.g., 10)
+        // This pattern repeats for all decomposition levels
         let step_sizes: Vec<u16> = (0..num_subbands)
             .map(|i| {
                 let epsilon = if i == 0 {
-                    depth + guard_bits
+                    // LL band: epsilon = bit_depth
+                    depth
                 } else {
-                    depth + guard_bits + 1
+                    // Detail subbands: band_in_level: 0=HL, 1=LH, 2=HH
+                    let band_in_level = (i - 1) % 3;
+                    
+                    // For reversible 5-3 transform (OpenJPEG convention):
+                    // HL/LH bands: depth + 1
+                    // HH bands: depth + 2
+                    if band_in_level < 2 {
+                        depth + 1 // HL or LH
+                    } else {
+                        depth + 2 // HH
+                    }
                 };
                 (epsilon as u16) << 11
             })
@@ -311,7 +327,7 @@ impl J2kEncoder {
         coeffs: &[i32],
         width: usize,
         height: usize,
-        cb_size: usize,
+        _cb_size: usize,
         num_levels: u8,
         depth: u8,
         guard_bits: u8,
@@ -328,21 +344,34 @@ impl J2kEncoder {
             let cb_log2 = self.codeblock_exp;
             let cb_dim = 1 << (cb_log2 + 2); // 64
 
-            // Calculate grid dimensions (in codeblocks) based on subband size
-            // We use the largest subband size to size the precinct grid
-            let (sb_w, sb_h) = if res == 0 {
-                (ll_w, ll_h)
-            } else {
-                // HL/LH/HH are roughly same size as previous LL
-                let (prev_w, prev_h) =
-                    self.get_ll_size(width, height, num_levels as usize, res - 1);
-                (ll_w - prev_w, ll_h - prev_h) // Approximate
-            };
+            // Calculate exact grid dimensions for each subband
+            let num_bands = if res == 0 { 1 } else { 3 };
+            let mut subband_grids = Vec::with_capacity(num_bands);
 
-            let grid_w = (sb_w + cb_dim - 1) / cb_dim;
-            let grid_h = (sb_h + cb_dim - 1) / cb_dim;
+            let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
+            
+            for band in 0..num_bands {
+                 let (sb_w, sb_h) = if res == 0 {
+                    (ll_w, ll_h)
+                } else {
+                    let (prev_w, prev_h) =
+                        self.get_ll_size(width, height, num_levels as usize, res - 1);
+                    
+                    // Logic must match extract_subband_coeffs
+                    match band {
+                        0 => (ll_w - prev_w, prev_h), // HL
+                        1 => (prev_w, ll_h - prev_h), // LH
+                        2 => (ll_w - prev_w, ll_h - prev_h), // HH
+                        _ => (0, 0),
+                    }
+                };
+                let gw = (sb_w + cb_dim - 1) / cb_dim;
+                let gh = (sb_h + cb_dim - 1) / cb_dim;
+                subband_grids.push((gw, gh));
+            }
 
-            let mut precinct_state = PrecinctState::new(grid_w, grid_h);
+            // Start with empty state, it will grow as needed
+            let mut precinct_state = PrecinctState::new(0, 0);
             let mut packet_header = PacketHeader {
                 packet_seq_num: 0, // Ignored in structure
                 empty: false,
@@ -351,10 +380,10 @@ impl J2kEncoder {
             };
 
             let mut packet_body = Vec::new();
-            let num_bands = if res == 0 { 1 } else { 3 };
 
             for band in 0..num_bands {
                 let sb_idx = if res == 0 { 0 } else { band }; // 0, 1, 2
+                let (grid_w, grid_h) = subband_grids[band];
 
                 let (sb_coeffs, sb_w, sb_h) = self.extract_subband_coeffs(
                     coeffs,
@@ -365,12 +394,24 @@ impl J2kEncoder {
                     sb_idx,
                 );
 
-                // Calculate epsilon for this subband (matches write_qcd)
-                let is_ll = res == 0;
-                let epsilon = if is_ll {
-                    depth + guard_bits
+                // Calculate epsilon for this subband (matches write_qcd / OpenJPEG)
+                // LL=depth, HL/LH=depth+1, HH=depth+2 (same for all levels)
+                let qcd_idx = if res == 0 {
+                    0
                 } else {
-                    depth + guard_bits + 1
+                    1 + (res - 1) * 3 + band
+                };
+                
+                let epsilon = if qcd_idx == 0 {
+                    // LL band
+                    depth
+                } else {
+                    let band_in_level = (qcd_idx - 1) % 3;
+                    if band_in_level < 2 {
+                        depth + 1 // HL or LH
+                    } else {
+                        depth + 2 // HH
+                    }
                 };
 
                 for cby in 0..grid_h {
@@ -468,8 +509,7 @@ impl J2kEncoder {
             packet_header.write(
                 &mut header_writer,
                 &mut precinct_state,
-                grid_w,
-                grid_h,
+                &subband_grids,
                 num_bands,
             );
 

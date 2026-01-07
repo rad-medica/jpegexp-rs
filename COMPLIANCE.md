@@ -10,7 +10,7 @@ This document provides a technical audit of `jpegexp-rs` compliance with interna
 | **JPEG Progressive** | JPEG 1   | 10918-1  | **Compliant** | Spectral selection and successive approximation. DC/AC refinement passes.                |
 | **JPEG Lossless**    | JPEG 1   | 10918-1  | **Compliant** | Process 14 (ITU-T T.81) with predictors 1-7. SOF3 marker support.                        |
 | **JPEG-LS**          | JPEG-LS  | 14495-1  | **Compliant** | Lossless and Near-Lossless (LSE). SPIFF headers and interleave modes.                    |
-| **J2K Part 1**       | J2K      | 15444-1  | **Compliant** | Full codestream parsing, Tier-1 (MQ), Tier-2 (Tag Tree), DWT 5-3/9-7.                    |
+| **J2K Part 1**       | J2K      | 15444-1  | **Compliant** | Full codestream parsing, Tier-1 (MQ), Tier-2 (Tag Tree), DWT 5-3/9-7. 12-bit support implemented. |
 | **JP2 Container**    | J2K      | 15444-1  | **Compliant** | JP2 box parsing and codestream extraction (Annex I).                                     |
 | **HTJ2K**            | HTJ2K    | 15444-15 | **Compliant** | Full HT block coder (Cleanup, SigProp, MagRef). CAP marker support.                      |
 

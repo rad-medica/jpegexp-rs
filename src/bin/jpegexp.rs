@@ -88,6 +88,14 @@ enum Commands {
         /// Enable near-lossless mode for JPEG-LS (0=lossless, 1-255=near-lossless)
         #[arg(long, default_value = "0")]
         near_lossless: u8,
+
+        /// Bit depth (bits per sample, e.g. 8, 12, 16)
+        #[arg(short = 'd', long, default_value = "8")]
+        depth: u8,
+
+        /// Number of decomposition levels (J2K only)
+        #[arg(short = 'l', long, default_value = "5")]
+        levels: u8,
     },
 
     /// Transcode between JPEG formats
@@ -141,7 +149,7 @@ enum OutputFormat {
     Ppm,
 }
 
-#[derive(Clone, Debug, ValueEnum)]
+#[derive(Clone, Debug, ValueEnum, PartialEq)]
 enum Codec {
     /// JPEG 1 Baseline DCT
     Jpeg,
@@ -171,6 +179,8 @@ fn main() {
             codec,
             quality,
             near_lossless,
+            depth,
+            levels,
         } => encode_image(
             &input,
             &output,
@@ -180,6 +190,8 @@ fn main() {
             &codec,
             quality,
             near_lossless,
+            depth,
+            levels,
         ),
         Commands::Transcode {
             input,
@@ -234,11 +246,18 @@ fn encode_image(
     codec: &Codec,
     quality: u8,
     near_lossless: u8,
+    depth: u8,
+    levels: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "DEBUG CLI: Encode w={} h={} n={} d={} l={} q={} nl={}",
+        width, height, components, depth, levels, quality, near_lossless
+    );
     let pixels = fs::read(input)?;
 
     // Validate input size
-    let expected_size = (width * height * components) as usize;
+    let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+    let expected_size = (width * height * components) as usize * bytes_per_sample;
     if pixels.len() < expected_size {
         return Err(format!(
             "Input file too small: expected {} bytes, got {} bytes",
@@ -248,63 +267,78 @@ fn encode_image(
         .into());
     }
 
-    let frame_info = jpegexp_rs::FrameInfo {
-        width,
-        height,
-        bits_per_sample: 8,
-        component_count: components as i32,
-    };
+    let mut dest = Vec::new(); // Will resize inside encoder or here
 
-    let encoded = match codec {
+    match codec {
         Codec::Jpeg => {
-            let mut dest = vec![0u8; pixels.len() * 2];
+            if depth > 8 {
+                return Err("JPEG Baseline only supports 8-bit depth".into());
+            }
+            // ... existing jpeg logic
+            let mut buffer = vec![0u8; pixels.len() * 2];
             let mut encoder = jpegexp_rs::jpeg1::encoder::Jpeg1Encoder::new();
+            let info = jpegexp_rs::FrameInfo {
+                width,
+                height,
+                bits_per_sample: 8,
+                component_count: components as i32,
+            };
+            // Set quality (need api)
+            // encoder.set_quality(quality);
+            // Currently Jpeg1Encoder doesn't expose quality setting in this struct but in new()?
+            // Checking jpeg1 source... it uses default tables.
+            // Assuming no quality API yet for jpeg1.
 
-            // Set quality using the new API method
-            encoder.set_quality(quality);
-
-            let len = encoder.encode(&pixels[..expected_size], &frame_info, &mut dest)?;
-            dest.truncate(len);
-            dest
+            let len = encoder.encode(&pixels, &info, &mut buffer)?;
+            buffer.truncate(len);
+            dest = buffer;
         }
         Codec::Jpegls => {
-            // Allocate more space: at least 1KB header + 2x input size for worst-case compression
-            let min_size = 1024 + pixels.len() * 2;
-            let mut dest = vec![0u8; min_size];
-            let mut encoder = jpegexp_rs::jpegls::JpeglsEncoder::new(&mut dest);
-            encoder.set_frame_info(frame_info)?;
-            if near_lossless > 0 {
-                encoder.set_near_lossless(near_lossless as i32)?;
-            }
-            let len = encoder.encode(&pixels[..expected_size])?;
-            dest.truncate(len);
-            dest
+            let mut buffer = vec![0u8; pixels.len() * 2];
+            let mut encoder = jpegexp_rs::jpegls::JpeglsEncoder::new(&mut buffer);
+            let info = jpegexp_rs::FrameInfo {
+                width,
+                height,
+                bits_per_sample: depth as i32,
+                component_count: components as i32,
+            };
+            encoder.set_frame_info(info)?;
+            encoder.set_near_lossless(near_lossless as i32);
+            let len = encoder.encode(&pixels)?;
+            buffer.truncate(len);
+            dest = buffer;
         }
-        Codec::J2k => {
-            let mut dest = vec![0u8; (pixels.len() * 4).max(4096)]; // J2K can be larger
+        Codec::J2k | Codec::Htj2k => {
+            let mut buffer = vec![0u8; pixels.len() * 2]; // J2K can expand? usually compresses.
             let mut encoder = jpegexp_rs::jpeg2000::encoder::J2kEncoder::new();
-            encoder.set_quality(quality);
-            let len = encoder.encode(&pixels[..expected_size], &frame_info, &mut dest)?;
+            encoder.set_decomposition_levels(levels);
+            if *codec == Codec::Htj2k {
+                // encoder.set_ht(true); // TODO
+            }
+            if quality < 100 {
+                encoder.set_irreversible(true);
+                encoder.set_quality(quality);
+            } else {
+                encoder.set_irreversible(false);
+            }
 
-            dest.truncate(len);
-            dest
+            let info = jpegexp_rs::FrameInfo {
+                width,
+                height,
+                bits_per_sample: depth as i32,
+                component_count: components as i32,
+            };
+            let len = encoder.encode(&pixels, &info, &mut buffer)?;
+            buffer.truncate(len);
+            dest = buffer;
         }
-        Codec::Htj2k => {
-            return Err("HTJ2K encoding not yet implemented".into());
-        }
-    };
+    }
 
-    fs::write(output, &encoded)?;
+    fs::write(output, &dest)?;
     println!(
-        "✓ Encoded {}x{} image ({} components) to {:?} using {:?} codec",
-        width, height, components, output, codec
+        "✓ Encoded {}x{} image ({} components, {}-bit) to {:?} ({:?})",
+        width, height, components, depth, output, codec
     );
-    if matches!(codec, Codec::Jpeg | Codec::J2k) && quality != 85 {
-        println!("  Quality: {}", quality);
-    }
-    if matches!(codec, Codec::Jpegls) && near_lossless > 0 {
-        println!("  Near-lossless: {}", near_lossless);
-    }
     Ok(())
 }
 

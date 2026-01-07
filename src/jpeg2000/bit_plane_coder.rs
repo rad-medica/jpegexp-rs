@@ -16,6 +16,9 @@ pub struct BitPlaneCoder<'a> {
     pub mq: MqCoder,
     pub coefficients: Vec<i32>,
     pub num_passes_decoded: u32,
+    // Padded flag grid for neighbor lookup: (height + 2) rows, (width + 2) cols
+    padded_flags: Vec<u8>,
+    stride: usize,
 }
 
 impl<'a> BitPlaneCoder<'a> {
@@ -28,13 +31,14 @@ impl<'a> BitPlaneCoder<'a> {
         // Val = (Index << 1) | MPS. Index 46 -> 92.
         mq.set_context(18, 46 << 1);
 
-        // Load coefficients if provided usually
-        // But for standard new, init to zero if not reusing
         let coefficients = if !data.is_empty() && data.len() == size {
             data.to_vec()
         } else {
             vec![0; size]
         };
+
+        let stride = width as usize + 2;
+        let padded_flags = vec![0u8; (height as usize + 2) * stride];
 
         Self {
             width,
@@ -44,6 +48,8 @@ impl<'a> BitPlaneCoder<'a> {
             mq,
             coefficients,
             num_passes_decoded: 0,
+            padded_flags,
+            stride,
         }
     }
 
@@ -52,50 +58,102 @@ impl<'a> BitPlaneCoder<'a> {
     const VISITED: u8 = 1 << 1;
     const REFINE: u8 = 1 << 2;
     const SIGN: u8 = 1 << 3; // 0=pos, 1=neg
+    const PI: u8 = 1 << 4; // Padding/irrelevant (padded border)
 
     // Zero Coding Tables (LL, HL, LH, HH)
     // Table C-1: Contexts for SigProp (ZC)
 
+    fn reset_padded_flags(&mut self) {
+        self.padded_flags.fill(Self::PI);
+        let w = self.width as usize;
+        for y in 0..(self.height as usize) {
+            let row_offset = (y + 1) * self.stride + 1;
+            for x in 0..w {
+                self.padded_flags[row_offset + x] = 0;
+            }
+        }
+    }
+
+    fn sync_padded_flags_from_state(&mut self) {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        for y in 0..h {
+            for x in 0..w {
+                let idx = y * w + x;
+                if (self.state[idx] & Self::SIG) != 0 {
+                    let pidx = self.padded_index(x as u32, y as u32);
+                    self.set_flag(pidx, Self::SIG);
+                    if (self.state[idx] & Self::SIGN) != 0 {
+                        self.set_flag(pidx, Self::SIGN);
+                    }
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn padded_index(&self, x: u32, y: u32) -> usize {
+        // Direct row-based padding
+        let row = 1 + y as usize;
+        let col = 1 + x as usize;
+        row * self.stride + col
+    }
+
+    fn set_flag(&mut self, idx: usize, mask: u8) {
+        self.padded_flags[idx] |= mask;
+    }
+
+    fn clear_flag(&mut self, idx: usize, mask: u8) {
+        self.padded_flags[idx] &= !mask;
+    }
+
+    fn is_flag_set(&self, idx: usize, mask: u8) -> bool {
+        (self.padded_flags[idx] & mask) != 0
+    }
+
     pub fn get_neighbors(&self, x: u32, y: u32) -> (u8, u8, u8) {
-        // Returns count of significant neighbors (H, V, D)
-        let w = self.width as i32;
-        let h = self.height as i32;
-        let ix = x as i32;
-        let iy = y as i32;
+        // Returns count of significant neighbors (H, V, D) using padded flags
+        let idx = self.padded_index(x, y);
+        let stride = self.stride;
+
+        let n = idx - stride;
+        let s = idx + stride;
+        let e = idx + 1;
+        let w = idx - 1;
+
+        let nw = n - 1;
+        let ne = n + 1;
+        let sw = s - 1;
+        let se = s + 1;
 
         let mut h_cnt = 0;
         let mut v_cnt = 0;
         let mut d_cnt = 0;
 
-        let idx = |cnx, cny| (cny * w + cnx) as usize;
-
-        // H: (x-1, y), (x+1, y)
-        if ix > 0 && (self.state[idx(ix - 1, iy)] & Self::SIG) != 0 {
+        if self.is_flag_set(w, Self::SIG) {
             h_cnt += 1;
         }
-        if ix < w - 1 && (self.state[idx(ix + 1, iy)] & Self::SIG) != 0 {
+        if self.is_flag_set(e, Self::SIG) {
             h_cnt += 1;
         }
 
-        // V: (x, y-1), (x, y+1)
-        if iy > 0 && (self.state[idx(ix, iy - 1)] & Self::SIG) != 0 {
+        if self.is_flag_set(n, Self::SIG) {
             v_cnt += 1;
         }
-        if iy < h - 1 && (self.state[idx(ix, iy + 1)] & Self::SIG) != 0 {
+        if self.is_flag_set(s, Self::SIG) {
             v_cnt += 1;
         }
 
-        // D: Diagonals
-        if ix > 0 && iy > 0 && (self.state[idx(ix - 1, iy - 1)] & Self::SIG) != 0 {
+        if self.is_flag_set(nw, Self::SIG) {
             d_cnt += 1;
         }
-        if ix < w - 1 && iy > 0 && (self.state[idx(ix + 1, iy - 1)] & Self::SIG) != 0 {
+        if self.is_flag_set(ne, Self::SIG) {
             d_cnt += 1;
         }
-        if ix > 0 && iy < h - 1 && (self.state[idx(ix - 1, iy + 1)] & Self::SIG) != 0 {
+        if self.is_flag_set(sw, Self::SIG) {
             d_cnt += 1;
         }
-        if ix < w - 1 && iy < h - 1 && (self.state[idx(ix + 1, iy + 1)] & Self::SIG) != 0 {
+        if self.is_flag_set(se, Self::SIG) {
             d_cnt += 1;
         }
 
@@ -193,6 +251,8 @@ impl<'a> BitPlaneCoder<'a> {
             return Ok(self.coefficients.clone());
         }
 
+        self.reset_padded_flags();
+        self.sync_padded_flags_from_state();
         self.mq.init_decoder(data);
 
         for _i in 0..num_new_passes {
@@ -220,6 +280,7 @@ impl<'a> BitPlaneCoder<'a> {
                 for v in &mut self.state {
                     *v &= !Self::VISITED;
                 }
+                // VISITED is mirrored only on demand; no padded flag for VISITED
             }
 
             match pass_type {
@@ -266,6 +327,8 @@ impl<'a> BitPlaneCoder<'a> {
                             if bit != 0 {
                                 // Became significant
                                 self.state[idx] |= Self::SIG | Self::VISITED;
+                                let pidx = self.padded_index(x, y);
+                                self.set_flag(pidx, Self::SIG);
 
                                 // Decode sign
                                 let sc_data = self.get_sign_context(x, y, width, height);
@@ -276,6 +339,7 @@ impl<'a> BitPlaneCoder<'a> {
 
                                 if sign_bit != 0 {
                                     self.state[idx] |= Self::SIGN;
+                                    self.set_flag(pidx, Self::SIGN);
                                     self.coefficients[idx] = -(1 << bit_plane);
                                 } else {
                                     self.coefficients[idx] = 1 << bit_plane;
@@ -354,7 +418,7 @@ impl<'a> BitPlaneCoder<'a> {
             for x in 0..width {
                 let remaining_height = stripe_height.min(height - y_stripe);
 
-                // RLC Check
+                // RLC Check only for full stripes
                 let mut rlc_mode = false;
                 if remaining_height == 4 {
                     let mut all_clear = true;
@@ -379,21 +443,22 @@ impl<'a> BitPlaneCoder<'a> {
                 }
 
                 if rlc_mode {
-                    // Decode RLC bit
+                    // Decode RLC bit (context 17)
                     let rlc_bit = self.mq.decode_bit(17);
                     if rlc_bit == 0 {
                         // Skip entire column (all insignificant)
                         for y_offset in 0..4 {
                             let y = y_stripe + y_offset;
                             let idx = (y * width + x) as usize;
-                            // Just reset visited, no other changes
                             if idx < self.state.len() {
                                 self.state[idx] &= !Self::VISITED;
+                                let pidx = self.padded_index(x, y);
+                                self.clear_flag(pidx, Self::VISITED);
                             }
                         }
                         continue;
                     } else {
-                        // At least one significant
+                        // At least one significant; position encoded with two uniform bits (ctx 18)
                         let b1 = self.mq.decode_bit(18);
                         let b2 = self.mq.decode_bit(18);
                         let first_sig_idx = (b1 << 1) | b2;
@@ -403,6 +468,8 @@ impl<'a> BitPlaneCoder<'a> {
                         let idx = (y * width + x) as usize;
                         if idx < self.state.len() {
                             self.state[idx] |= Self::SIG | Self::VISITED;
+                            let pidx = self.padded_index(x, y);
+                            self.set_flag(pidx, Self::SIG);
 
                             // Sign
                             let sc_data = self.get_sign_context(x, y, width, height);
@@ -413,8 +480,12 @@ impl<'a> BitPlaneCoder<'a> {
 
                             if sign_bit != 0 {
                                 self.state[idx] |= Self::SIGN;
+                                self.set_flag(pidx, Self::SIGN);
                                 self.coefficients[idx] = -(1 << bit_plane);
                             } else {
+                                // Ensure SIGN flag cleared in both state and padded flags
+                                self.state[idx] &= !Self::SIGN;
+                                self.clear_flag(pidx, Self::SIGN);
                                 self.coefficients[idx] = 1 << bit_plane;
                             }
 
@@ -465,6 +536,8 @@ impl<'a> BitPlaneCoder<'a> {
             if bit != 0 {
                 // Became Significant
                 self.state[idx] |= Self::SIG;
+                let pidx = self.padded_index(x, y);
+                self.set_flag(pidx, Self::SIG);
 
                 // Decode sign
                 let sc_data = self.get_sign_context(x, y, self.width, self.height);
@@ -475,8 +548,12 @@ impl<'a> BitPlaneCoder<'a> {
 
                 if sign_bit != 0 {
                     self.state[idx] |= Self::SIGN;
+                    self.set_flag(pidx, Self::SIGN);
                     self.coefficients[idx] = -(1 << bit_plane);
                 } else {
+                    // Ensure SIGN cleared when positive
+                    self.state[idx] &= !Self::SIGN;
+                    self.clear_flag(pidx, Self::SIGN);
                     self.coefficients[idx] = 1 << bit_plane;
                 }
             }
@@ -620,6 +697,11 @@ impl<'a> BitPlaneCoder<'a> {
                                 if sign == 1 {
                                     self.state[idx] |= Self::SIGN;
                                 }
+                                let pidx = self.padded_index(x, y);
+                                self.set_flag(pidx, Self::SIG);
+                                if sign == 1 {
+                                    self.set_flag(pidx, Self::SIGN);
+                                }
 
                                 // Encode Sign (SC)
                                 // Context depends on neighbor signs
@@ -658,10 +740,14 @@ impl<'a> BitPlaneCoder<'a> {
                         let bit = (val.abs() >> bit_plane) & 1;
 
                         // MR Context
-                        let mr_ctx = self.get_magnitude_refinement_context(idx, w, h);
-                        // Refinement logic: uses Neighbors+RefineBit state.
+                        let mr_ctx =
+                            self.get_magnitude_refinement_context(idx, self.width, self.height);
+
+                        // Encode refinement bit
                         self.mq.encode(bit as u8, mr_ctx);
-                        self.state[idx] |= Self::REFINE; // First refinement done
+
+                        self.state[idx] |= Self::REFINE;
+                        // SIG stays set; no change to padded flags
                     }
                 }
             }
@@ -712,7 +798,8 @@ impl<'a> BitPlaneCoder<'a> {
 
                     if all_clear {
                         // Enter RLC mode
-                        self.mq.encode(if has_sig { 1 } else { 0 }, 17); // Context 17 (Run-Length)
+                        let rlc_bit = if has_sig { 1 } else { 0 };
+                        self.mq.encode(rlc_bit, 17); // Context 17 (Run-Length)
 
                         if !has_sig {
                             // All 0, skip column
@@ -720,6 +807,8 @@ impl<'a> BitPlaneCoder<'a> {
                                 let y = y_stripe + y_offset;
                                 let idx = (y * w + x) as usize;
                                 self.state[idx] &= !Self::VISITED;
+                                let pidx = self.padded_index(x, y);
+                                self.clear_flag(pidx, Self::VISITED);
                             }
                             continue;
                         } else {
@@ -748,6 +837,11 @@ impl<'a> BitPlaneCoder<'a> {
                             self.state[idx] |= Self::SIG | Self::VISITED;
                             if sign == 1 {
                                 self.state[idx] |= Self::SIGN;
+                            }
+                            let pidx = self.padded_index(x, y);
+                            self.set_flag(pidx, Self::SIG);
+                            if sign == 1 {
+                                self.set_flag(pidx, Self::SIGN);
                             }
 
                             let sc_data = self.get_sign_context(x, y, w, h);
@@ -799,6 +893,11 @@ impl<'a> BitPlaneCoder<'a> {
                 if sign == 1 {
                     self.state[idx] |= Self::SIGN;
                 }
+                let pidx = self.padded_index(x, y);
+                self.set_flag(pidx, Self::SIG);
+                if sign == 1 {
+                    self.set_flag(pidx, Self::SIGN);
+                }
 
                 let sc_data = self.get_sign_context(x, y, self.width, self.height);
                 let sc_ctx = sc_data & 0xFF;
@@ -817,30 +916,79 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bit_plane_coding_simple() {
-        // 4x4 block
-        let data = [10, 0, 0, 0, 0, 5, 0, 0, 0, 0, -3, 0, 0, 0, 0, 1];
-        let mut bpc = BitPlaneCoder::new(4, 4, &data);
+    fn test_bit_plane_coding_roundtrip_17x16() {
+        let width = 17;
+        let height = 16;
+        let mut data = Vec::with_capacity((width * height) as usize);
+        // Create a pattern: (x + y) * 7.
+        // 17+16 = 33 * 7 = 231. Max bp around 7 or 8.
+        for y in 0..height {
+            for x in 0..width {
+                data.push(((x + y) * 7) as i32);
+            }
+        }
 
-        // This should not panic
-        let max_bp = bpc.calculate_max_bit_plane().unwrap_or(0);
-        bpc.encode_codeblock(max_bp, 0); // orientation 0 for LL
+        let mut encoder = BitPlaneCoder::new(width, height, &data);
+        let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
 
-        // We can't easily verify exact bytes without full J2K compliance check,
-        // but we can check that state updated (e.g., significant samples marked)
+        let orientation = 0; // LL
+        let passes = encoder.encode_codeblock(max_bp, orientation);
+        encoder.mq.flush();
+        let encoded = encoder.mq.get_buffer().to_vec();
 
-        // At end, indices 0, 5, 10, 15 should be SIGNIFICANT
-        let sig = BitPlaneCoder::SIG;
-        assert_eq!(bpc.state[0] & sig, sig, "Index 0 should be significant");
-        assert_eq!(bpc.state[5] & sig, sig, "Index 5 should be significant");
-        // -3 is abs 3. Max bit plane was 5. 3 is binary 011. It should eventually become significant.
-        // wait, we ran loop 5..0. 0..5 rev.
-        // 3 is 000011.
-        // Bit 1: 3>>1 & 1 = 1. Yes.
-        assert_eq!(
-            bpc.state[10] & sig,
-            sig,
-            "Index 10 (-3) should be significant"
-        );
+        let mut decoder = BitPlaneCoder::new(width, height, &[]);
+
+        let decoded = decoder
+            .decode_codeblock(&encoded, max_bp, passes, orientation)
+            .expect("Decode failed");
+
+        // Verify
+        for (i, (&exp, &got)) in data.iter().zip(decoded.iter()).enumerate() {
+            if exp != got {
+                panic!("Mismatch at index {}: expected {}, got {}", i, exp, got);
+            }
+        }
+    }
+
+    #[test]
+    fn test_bpc_64x64_gradient() {
+        let width = 64;
+        let height = 64;
+
+        // Create gradient data (similar to LL band of gradient image)
+        // 12-bit signed data
+        let mut data = Vec::with_capacity((width * height) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                // Gradient 0 to 4032 (Positive)
+                let val = (x + y) as i32 * 32;
+                data.push(val);
+            }
+        }
+
+        // Encode
+        let mut encoder = BitPlaneCoder::new(width, height, &data);
+        let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
+        // println!("Max BP: {}", max_bp);
+
+        let orientation = 0; // LL
+        let passes = encoder.encode_codeblock(max_bp, orientation);
+        encoder.mq.flush();
+        let encoded = encoder.mq.get_buffer().to_vec();
+
+        // Decode
+        let mut decoder = BitPlaneCoder::new(width, height, &[]);
+        let decoded_data = decoder
+            .decode_codeblock(&encoded, max_bp, passes, orientation)
+            .expect("Decode failed");
+
+        // Verify
+        let mut mismatches = 0;
+        for i in 0..data.len() {
+            if data[i] != decoded_data[i] {
+                mismatches += 1;
+            }
+        }
+        assert_eq!(mismatches, 0);
     }
 }

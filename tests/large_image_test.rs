@@ -4,7 +4,7 @@ use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
 use jpegexp_rs::FrameInfo;
 
 #[test]
-#[ignore] // Fails on 64x64 blocks due to potential MQ coder desync
+#[ignore] // Fails on 64x64 color (large signed blocks)
 fn test_12bit_color_large_roundtrip() {
     // Parameters
     let width = 64;
@@ -54,7 +54,61 @@ fn test_12bit_color_large_roundtrip() {
     encoder.set_irreversible(false); // Lossless
     encoder.set_decomposition_levels(5); // Typical for large images
 
-    // ...
+    let start = std::time::Instant::now();
+    let encoded_len = encoder
+        .encode(&original_bytes, &frame_info, &mut encoded)
+        .expect("Encoding failed");
+    let encode_time = start.elapsed();
+    encoded.truncate(encoded_len);
+
+    std::fs::write("output.jp2", &encoded).expect("Failed to write output.jp2");
+
+    println!("Encoded size: {} bytes", encoded_len);
+    println!(
+        "Compression ratio: {:.2}:1",
+        original_bytes.len() as f64 / encoded_len as f64
+    );
+    println!("Encode time: {:.2?}", encode_time);
+
+    // Decode
+    let mut reader = JpegStreamReader::new(&encoded);
+    let mut decoder = J2kDecoder::new(&mut reader);
+
+    let start = std::time::Instant::now();
+    let decoded_image = decoder.decode().expect("Decoding failed");
+    let reconstructed_bytes = decoded_image
+        .reconstruct_pixels()
+        .expect("Reconstruction failed");
+    let decode_time = start.elapsed();
+
+    println!("Decode time: {:.2?}", decode_time);
+
+    // Verify size
+    assert_eq!(
+        reconstructed_bytes.len(),
+        original_bytes.len(),
+        "Output size mismatch"
+    );
+
+    // Verify content (convert back to u16)
+    let mut mismatches = 0;
+    let mut max_diff = 0;
+
+    for i in 0..original_u16.len() {
+        let orig = original_u16[i];
+        let rec_lo = reconstructed_bytes[i * 2] as u16;
+        let rec_hi = reconstructed_bytes[i * 2 + 1] as u16;
+        let rec = (rec_hi << 8) | rec_lo;
+
+        if orig != rec {
+            let diff = (orig as i32 - rec as i32).abs();
+            max_diff = max_diff.max(diff);
+            if mismatches < 10 {
+                println!("Mismatch at pixel {}: orig={}, rec={}", i, orig, rec);
+            }
+            mismatches += 1;
+        }
+    }
 
     println!("Total mismatches: {}", mismatches);
     println!("Max difference: {}", max_diff);

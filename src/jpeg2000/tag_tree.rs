@@ -140,8 +140,28 @@ impl TagTree {
         // bit=1 means "value equals current low" (found!)
         // bit=0 means "value is higher than current low" (continue)
         while let Some(curr_idx) = stack.pop() {
+            // Sync low with parent
+            let parent_index = self.nodes[curr_idx].parent_index;
+            let parent_low = if let Some(p_idx) = parent_index {
+                self.nodes[p_idx].low
+            } else {
+                0
+            };
+
             let node = &mut self.nodes[curr_idx];
+            if node.low < parent_low {
+                node.low = parent_low;
+            }
+
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("    TT Encode[{}]: val={} low={} thresh={}", curr_idx, node.value, node.low, threshold);
+            }
+
             while node.low < threshold {
+                if node.known {
+                    // Already encoded/known, no need to send more bits
+                    break;
+                }
                 if node.value == node.low {
                     // Found: value equals current low, write 1
                     writer.write_bit(1);
@@ -199,6 +219,10 @@ impl TagTree {
             let node = &mut self.nodes[curr_idx];
             if node.low < parent_low {
                 node.low = parent_low;
+            }
+            
+            if std::env::var("J2K_DEBUG").is_ok() {
+               eprintln!("    TT Decode[{}]: parent_low={} low={} thresh={}", curr_idx, parent_low, node.low, threshold);
             }
 
             while node.low < threshold {

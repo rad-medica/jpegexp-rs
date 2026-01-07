@@ -1,0 +1,19 @@
+# Python dependencies for jpegexp-rs tests and notebooks
+# Install in a virtual environment (venv) before running tests
+
+# Core dependencies for image processing
+numpy>=1.20.0
+Pillow>=8.0.0
+
+# JPEG codec libraries for testing
+imagecodecs>=2021.0.0
+pylibjpeg>=1.3.0
+
+# Jupyter for notebook-based testing and visualization
+jupyter>=1.0.0
+ipykernel>=6.0.0
+notebook>=6.0.0
+
+# Optional: for better notebook experience
+matplotlib>=3.3.0
+ipywidgets>=7.6.0

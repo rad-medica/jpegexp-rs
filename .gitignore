@@ -35,7 +35,6 @@ dmypy.json
 .DS_Store
 
 # Logs and temporary files
-*.txt
 *.log
 *.tmp
 *.temp
@@ -51,3 +50,12 @@ desktop.ini
 tests/jpegls_test_images/*.raw
 tests/jpegls_test_images/*.jls
 tests/jpegls_test_images/*.txt
+
+openjpeg/
+
+*.raw
+*.jls
+*.jpg
+*.jpeg
+*.j2k
+*.zip

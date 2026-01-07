@@ -4,7 +4,9 @@ use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
 
 /// Test that decodes a lossless J2K file
+/// Ignored by default - requires external test files
 #[test]
+#[ignore]
 fn test_j2k_lossless_decode() {
     // Read the test file
     let data = std::fs::read("tests/jpegls_test_images/gradient_64x64_gray_lossless.j2c")

@@ -66,8 +66,7 @@ impl PacketHeader {
         reader: &mut J2kBitReader<'_, '_>,
         state: &mut PrecinctState,
         layer: u32,
-        grid_width: usize,
-        grid_height: usize,
+        subband_grids: &[(usize, usize)],
         num_subbands: usize,
     ) -> Result<Self, BitIoError> {
         let mut header = PacketHeader {
@@ -81,8 +80,8 @@ impl PacketHeader {
         let bit = reader.read_bit()?;
         if std::env::var("J2K_DEBUG").is_ok() {
             eprintln!(
-                "PACKET: layer={}, grid={}x{}, subbands={}, empty_bit={}",
-                layer, grid_width, grid_height, num_subbands, bit
+                "PACKET: layer={}, subbands={}, empty_bit={}",
+                layer, num_subbands, bit
             );
         }
         if bit == 0 {
@@ -92,6 +91,12 @@ impl PacketHeader {
 
         // 2. Code-block inclusion and header info
         for s in 0..num_subbands {
+            let (grid_width, grid_height) = if s < subband_grids.len() {
+                subband_grids[s]
+            } else {
+                (0, 0)
+            };
+            
             if state.subbands.len() <= s {
                 state
                     .subbands
@@ -137,14 +142,22 @@ impl PacketHeader {
                         // Data Length
                         // Decode LBlock parameter with arbitrary threshold (32)
                         let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
-                        let lbits = subband_state.lblock_tree.get_current_value(x, y) + 3;
+                        let lblock = subband_state.lblock_tree.get_current_value(x, y) + 3;
+
+                        // Calculate Lbits = Lblock + floor(log2(num_passes))
+                        let log2_passes = if num_passes > 0 {
+                            (u32::BITS - 1 - (num_passes as u32).leading_zeros()) as i32
+                        } else {
+                            0
+                        };
+                        let lbits = lblock + log2_passes;
 
                         let data_len = reader.read_bits(lbits as u8)?;
 
                         if std::env::var("J2K_DEBUG").is_ok() {
                             eprintln!(
-                                "  CB[{},{}] subband={}: zero_bp={}, passes={}, lbits={}, len={}",
-                                x, y, s, zero_bp, num_passes, lbits, data_len
+                                "  CB[{},{}] subband={}: zero_bp={}, passes={}, lblock={}, lbits={}, len={}",
+                                x, y, s, zero_bp, num_passes, lblock, lbits, data_len
                             );
                         }
 
@@ -224,8 +237,7 @@ impl PacketHeader {
         &self,
         writer: &mut crate::jpeg2000::bit_io::J2kBitWriter,
         state: &mut PrecinctState,
-        grid_width: usize,
-        grid_height: usize,
+        subband_grids: &[(usize, usize)],
         num_subbands: usize,
     ) {
         if self.empty {
@@ -235,6 +247,12 @@ impl PacketHeader {
         writer.write_bit(1);
 
         for s in 0..num_subbands {
+            let (grid_width, grid_height) = if s < subband_grids.len() {
+                subband_grids[s]
+            } else {
+                (0, 0)
+            };
+
             if state.subbands.len() <= s {
                 state
                     .subbands
@@ -293,15 +311,31 @@ impl PacketHeader {
                         Self::write_coding_passes(writer, cb.num_passes);
 
                         // LBlock
-                        let lblock = if cb.data_len > 0 {
-                            // Number of bits needed to represent data_len
-                            // (32 - leading_zeros) gives exact bit width
+                        // bits = Lblock + floor(log2(num_passes))
+                        // We need bits >= bits_needed
+                        let bits_needed = if cb.data_len > 0 {
                             (u32::BITS - cb.data_len.leading_zeros()) as i32
                         } else {
-                            3
-                        }
-                        .max(3);
+                            0
+                        };
+                        
+                        let log2_passes = if cb.num_passes > 0 {
+                            (u32::BITS - 1 - (cb.num_passes as u32).leading_zeros()) as i32
+                        } else {
+                            0
+                        };
+                        
+                        // Lblock >= bits_needed - log2_passes
+                        let min_lblock = bits_needed - log2_passes;
+                        let lblock = min_lblock.max(3);
                         let lblock_inc = (lblock - 3).max(0);
+                        
+                        let lbits = lblock + log2_passes;
+
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            eprintln!("    LBlock Calc: len={} bits_needed={} passes={} log2={} lblock={} inc={} lbits={}", 
+                                cb.data_len, bits_needed, cb.num_passes, log2_passes, lblock, lblock_inc, lbits);
+                        }
 
                         subband_state.lblock_tree.set_value(x, y, lblock_inc);
                         subband_state
@@ -309,7 +343,7 @@ impl PacketHeader {
                             .encode(writer, x, y, lblock_inc + 1);
 
                         // Write data length
-                        writer.write_bits(cb.data_len, lblock as u8);
+                        writer.write_bits(cb.data_len, lbits as u8);
                     } else {
                         // Not included - encode "not included yet"
                         // We set value to MAX (or > threshold) so it encodes 0 bits up to threshold
@@ -367,14 +401,15 @@ mod tests {
 
         let mut writer = crate::jpeg2000::bit_io::J2kBitWriter::new();
         let mut state_enc = PrecinctState::new(1, 1);
-        header.write(&mut writer, &mut state_enc, 1, 1, 3);
+        let grids = vec![(1, 1); 3];
+        header.write(&mut writer, &mut state_enc, &grids, 3);
         let buffer = writer.finish();
 
         let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&buffer);
         let mut reader = J2kBitReader::new(&mut buf_reader);
         let mut state_dec = PrecinctState::new(1, 1);
 
-        let decoded = PacketHeader::read(&mut reader, &mut state_dec, 0, 1, 1, 3).unwrap();
+        let decoded = PacketHeader::read(&mut reader, &mut state_dec, 0, &grids, 3).unwrap();
 
         assert_eq!(decoded.included_cblks.len(), 3);
 

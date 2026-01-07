@@ -19,9 +19,11 @@ This repository includes a complete DevContainer configuration for GitHub Codesp
     - Grayscale 8-bit: Lossless (MAE = 0) ✅
     - Grayscale 16-bit: Lossless (MAE = 0) ✅
     - RGB/multi-component: Not yet supported (see `src/jpegls/mod.rs` for details)
-*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ⚠️ **Decoder Working, Encoder In Progress**
-    - Decoder: Parses JP2/J2K, performs IDWT reconstruction ✅
-    - Encoder: Forward DWT implemented, EBCOT packet encoding in progress
+*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ✅ **Production Ready (Grayscale)** / ⚠️ **Partial Color**
+    - Decoder: Full reconstruction with IDWT (5-3/9-7) ✅
+    - Encoder: Functional lossless encoder (5-3 DWT, EBCOT) ✅
+    - 12-bit Support: Full support for 12-bit grayscale and small color images ✅
+    - Known Issue: Large 12-bit color images (>32x32 codeblocks) show artifacts ⚠️
 *   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ⚠️ **Decoder Working**
     - Decoder: CAP marker, HT block coder support
     - Encoder components implemented, integration pending
@@ -150,10 +152,11 @@ Commands:
 - ✅ JPEG 1 RGB with subsampling
 - ✅ JPEG-LS Grayscale 8-bit (Lossless, MAE = 0)
 - ✅ JPEG-LS Grayscale 16-bit (Lossless, MAE = 0)
+- ✅ JPEG 2000 Grayscale (Lossless, 8-bit & 12-bit)
 
 **In Development**:
 - ⚠️ JPEG-LS RGB/multi-component (sample-interleave not yet supported)
-- ⚠️ JPEG 2000 Encoder (DWT implemented, packet encoding in progress - see [JPEG2000_TODO.md](docs/JPEG2000_TODO.md))
+- ⚠️ JPEG 2000 Color (Small images working, large 12-bit images show artifacts)
 - ✅ JPEG 2000 Decoder performs full reconstruction with IDWT
 
 See [tests/jpegls_charls_validation.rs](tests/jpegls_charls_validation.rs) for JPEG-LS test results.

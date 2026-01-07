@@ -183,19 +183,111 @@ fn encode_j2k(
     height: u32,
     components: u32,
     quality: Option<u8>,
+    bits_per_sample: Option<u8>,
+    lossless: Option<bool>,
 ) -> PyResult<Py<PyBytes>> {
+    let depth = bits_per_sample.unwrap_or(8);
     let frame_info = jpegexp_rs::FrameInfo {
         width,
         height,
-        bits_per_sample: 8,
+        bits_per_sample: depth,
         component_count: components as i32,
     };
 
-    let mut dest = vec![0u8; pixels.len() * 4];
+    let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+    let mut dest = vec![0u8; pixels.len() * 4]; // Generous buffer
     let mut encoder = jpegexp_rs::jpeg2000::encoder::J2kEncoder::new();
+    
     if let Some(q) = quality {
         encoder.set_quality(q);
     }
+    // Default to lossless if not specified, unless quality is set (which implies lossy)
+    let is_lossless = lossless.unwrap_or(quality.is_none());
+    encoder.set_irreversible(!is_lossless);
+
+    // If encoding large images, use appropriate decomposition levels
+    if width >= 256 || height >= 256 {
+        encoder.set_decomposition_levels(5);
+    }
+
+    let len = encoder
+        .encode(pixels, &frame_info, &mut dest)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
+    dest.truncate(len);
+
+    Ok(PyBytes::new(py, &dest).into())
+}
+
+/// Transcode between formats.
+#[pyfunction]
+fn transcode(py: Python<'_>, data: &[u8], target: &str) -> PyResult<Py<PyBytes>> {
+    // Decode
+    let (pixels, width, height, components, depth) = if data.starts_with(&[0xFF, 0xD8]) {
+        let (p, w, h, c) = decode_jpeg1_with_info(data)?;
+        (p, w, h, c, 8)
+    } else if data.starts_with(&[0xFF, 0x4F]) || data.starts_with(b"\x00\x00\x00\x0CjP") {
+        decode_j2k_with_info(data)?
+    } else {
+        let (p, w, h, c) = decode_jpegls_with_info(data)?;
+        (p, w, h, c, 8) // JLS might be >8 bit but decode_jpegls_with_info returns tuple of 4. Update if needed.
+    };
+
+    // Re-encode
+    match target {
+        "jpeg" => encode_jpeg(py, &pixels, width, height, components),
+        "jpegls" => encode_jpegls(py, &pixels, width, height, components),
+        "j2k" | "jpeg2000" => encode_j2k(py, &pixels, width, height, components, None, Some(depth as u8), None),
+        _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Unsupported target format: {}",
+            target
+        ))),
+    }
+}
+
+// ...
+
+fn decode_j2k_with_info(data: &[u8]) -> PyResult<(Vec<u8>, u32, u32, u32, u32)> {
+    let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
+    let mut decoder = jpegexp_rs::jpeg2000::decoder::J2kDecoder::new(&mut reader);
+    let image = decoder
+        .decode()
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
+
+    let width = image.width;
+    let height = image.height;
+    let components = image.component_count;
+    // Get max depth from components
+    let depth = image.components.iter().map(|c| c.depth).max().unwrap_or(8) as u32;
+
+    let planar_pixels = image
+        .reconstruct_pixels()
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+
+    // Convert planar (RRR...GGG...BBB...) to interleaved (RGBRGB...)
+    // Handle 16-bit data (2 bytes per sample)
+    let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+    let pixel_count = (width * height) as usize;
+    let mut pixels = vec![0u8; planar_pixels.len()];
+
+    if components == 1 {
+        pixels.copy_from_slice(&planar_pixels);
+    } else {
+        for i in 0..pixel_count {
+            for c in 0..components {
+                let src_idx = ((c as usize * pixel_count) + i) * bytes_per_sample;
+                let dst_idx = ((i * components as usize) + c as usize) * bytes_per_sample;
+                
+                if src_idx + bytes_per_sample <= planar_pixels.len() && dst_idx + bytes_per_sample <= pixels.len() {
+                    for b in 0..bytes_per_sample {
+                        pixels[dst_idx + b] = planar_pixels[src_idx + b];
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((pixels, width, height, components, depth))
+}
     let len = encoder
         .encode(pixels, &frame_info, &mut dest)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
@@ -261,8 +353,90 @@ fn decode_jpeg1_with_info(data: &[u8]) -> PyResult<(Vec<u8>, u32, u32, u32)> {
 }
 
 fn decode_j2k(data: &[u8]) -> PyResult<Vec<u8>> {
-    let (pixels, _, _, _) = decode_j2k_with_info(data)?;
+    let (pixels, _, _, _, _) = decode_j2k_with_info(data)?;
     Ok(pixels)
+}
+
+fn decode_j2k_with_info(data: &[u8]) -> PyResult<(Vec<u8>, u32, u32, u32, u32)> {
+// ... existing impl ...
+}
+
+/// Get image information without decoding.
+#[pyfunction]
+fn get_info(data: &[u8]) -> PyResult<ImageInfo> {
+    if data.starts_with(&[0xFF, 0xD8]) {
+        // ... (jpeg1 code)
+        let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
+        let mut spiff = None;
+        reader
+            .read_header(&mut spiff)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
+        let info = reader.frame_info();
+        let format = if reader.is_progressive {
+            "jpeg-progressive"
+        } else if reader.is_lossless {
+            "jpeg-lossless"
+        } else {
+            "jpeg"
+        };
+        Ok(ImageInfo {
+            width: info.width,
+            height: info.height,
+            components: info.component_count as u32,
+            bits_per_sample: info.bits_per_sample as u32,
+            format: format.to_string(),
+        })
+    } else if data.starts_with(&[0xFF, 0x4F]) || data.starts_with(b"\x00\x00\x00\x0CjP") {
+        let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
+        let mut decoder = jpegexp_rs::jpeg2000::decoder::J2kDecoder::new(&mut reader);
+        // We must decode headers to get info.
+        // J2kDecoder parses headers in constructor? No, in decode().
+        // We need a lightweight "read_headers" method.
+        // But currently decode() does everything.
+        // Let's use decode() for now, or improve J2kDecoder API later.
+        // Wait, current get_info implementation calls decode()!
+        // "let image = decoder.decode()..."
+        // This is slow but correct.
+        
+        let image = decoder
+            .decode()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
+        
+        let format = if image
+            .cap
+            .as_ref()
+            .map_or(false, |c| (c.pcap & (1 << 14)) != 0)
+        {
+            "htj2k"
+        } else {
+            "j2k"
+        };
+        
+        // Get max depth
+        let depth = image.components.iter().map(|c| c.depth).max().unwrap_or(8) as u32;
+
+        Ok(ImageInfo {
+            width: image.width,
+            height: image.height,
+            components: image.component_count,
+            bits_per_sample: depth,
+            format: format.to_string(),
+        })
+    } else {
+        // ... (jpegls code)
+        let mut decoder = jpegexp_rs::jpegls::JpeglsDecoder::new(data);
+        decoder
+            .read_header()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{:?}", e)))?;
+        let info = decoder.frame_info();
+        Ok(ImageInfo {
+            width: info.width,
+            height: info.height,
+            components: info.component_count as u32,
+            bits_per_sample: info.bits_per_sample as u32,
+            format: "jpegls".to_string(),
+        })
+    }
 }
 
 fn decode_j2k_with_info(data: &[u8]) -> PyResult<(Vec<u8>, u32, u32, u32)> {
