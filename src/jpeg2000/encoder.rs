@@ -224,7 +224,7 @@ impl J2kEncoder {
 
         let qcd = J2kQcd {
             quant_style,
-            step_sizes,
+            step_sizes: step_sizes.clone(),
         };
         writer.write_qcd(&qcd)?;
 
