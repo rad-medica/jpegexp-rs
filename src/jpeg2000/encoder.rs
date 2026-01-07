@@ -120,7 +120,7 @@ impl J2kEncoder {
 
         // Create QCD marker with proper guard bits
         let num_subbands = 1 + 3 * decomposition_levels as usize;
-        let guard_bits = 2u8;
+        let guard_bits = 1u8; // EXPERIMENT: G=1 for OpenJPEG
 
         // For reversible transform, use no quantization (style 0)
         // Epsilon calculation per OpenJPEG convention:
@@ -476,7 +476,11 @@ impl J2kEncoder {
                             // M_b = G + epsilon - 1
                             let mb = (guard_bits + epsilon).saturating_sub(1);
 
-                            let zero_bp = if max_bp < mb { mb - max_bp } else { 0 };
+                            // zero_bp is the number of zero bit planes starting from the MSB
+                            // M_b bit planes available: M_b-1 ... 0
+                            // max_bp is the index of the most significant non-zero bit plane
+                            // So zero planes are: (M_b - 1) - max_bp
+                            let zero_bp = if max_bp < mb { mb - max_bp - 1 } else { 0 };
 
                             if std::env::var("J2K_DEBUG").is_ok() {
                                 eprintln!("    -> zero_bp={}", zero_bp);

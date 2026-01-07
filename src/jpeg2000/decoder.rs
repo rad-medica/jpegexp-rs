@@ -695,7 +695,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     // We extract `epsilon_b` directly from QCD.
                     let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     let m_b = (guard_bits + epsilon_b).saturating_sub(1);
-                    let max_bit_plane = m_b.saturating_sub(zero_bp);
+                    // max_bit_plane is 0-based index. 
+                    // zero_bp is number of skipped planes from top.
+                    // max_bit_plane = (M_b - 1) - zero_bp
+                    let max_bit_plane = m_b.saturating_sub(zero_bp).saturating_sub(1);
 
                     if std::env::var("J2K_DEBUG").is_ok() {
                         eprintln!("  Decoding CB[{},{}] subband={} zero_bp={} eps={} guard={} mb={} max_bp={}", 

@@ -140,9 +140,16 @@ impl PacketHeader {
                         let num_passes = Self::read_coding_passes(reader)?;
 
                         // Data Length
-                        // Decode LBlock parameter with arbitrary threshold (32)
-                        let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
-                        let lblock = subband_state.lblock_tree.get_current_value(x, y) + 3;
+                        // Decode LBlock parameter with Comma Code
+                        // Note: This assumes 1 layer or state reset.
+                        // Ideally we should track LBlock state in subband_state.
+                        // But currently we use new state per packet.
+                        // The base LBlock is 3.
+                        // let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
+                        // let lblock = subband_state.lblock_tree.get_current_value(x, y) + 3;
+                        
+                        let lblock_inc = Self::read_comma_code(reader)?;
+                        let lblock = (lblock_inc + 3) as i32;
 
                         // Calculate Lbits = Lblock + floor(log2(num_passes))
                         let log2_passes = if num_passes > 0 {
@@ -230,6 +237,27 @@ impl PacketHeader {
                 writer.write_bits(31, 5);
             }
         }
+    }
+
+    /// Writes a comma code (n ones followed by a zero)
+    fn write_comma_code(writer: &mut crate::jpeg2000::bit_io::J2kBitWriter, n: i32) {
+        for _ in 0..n {
+            writer.write_bit(1);
+        }
+        writer.write_bit(0);
+    }
+
+    /// Reads a comma code (sequence of ones terminated by a zero)
+    fn read_comma_code(reader: &mut J2kBitReader<'_, '_>) -> Result<u32, BitIoError> {
+        let mut count = 0;
+        loop {
+            let bit = reader.read_bit()?;
+            if bit == 0 {
+                break;
+            }
+            count += 1;
+        }
+        Ok(count)
     }
 
     /// Write a packet header to the bit stream.
@@ -337,10 +365,19 @@ impl PacketHeader {
                                 cb.data_len, bits_needed, cb.num_passes, log2_passes, lblock, lblock_inc, lbits);
                         }
 
+                        // Use Comma Code for LBlock increment instead of TagTree
+                        // Standard B.10.5 says LBlock is encoded using a unary code (comma code)
+                        // Note: TagTree logic for 1x1 grid with val=0 writes '1' (found).
+                        // Comma Code for 0 writes '0'. They are inverted.
+                        // Since OpenJPEG uses Comma Code, we must use Comma Code.
+                        Self::write_comma_code(writer, lblock_inc);
+
+                        /* 
                         subband_state.lblock_tree.set_value(x, y, lblock_inc);
                         subband_state
                             .lblock_tree
                             .encode(writer, x, y, lblock_inc + 1);
+                        */
 
                         // Write data length
                         writer.write_bits(cb.data_len, lbits as u8);
