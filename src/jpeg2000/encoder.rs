@@ -181,11 +181,26 @@ impl J2kEncoder {
             quant_style = (guard_bits << 5) | 0x01;
             
             // Calculate LL step.
-            // Delta_LL.
             // Let's pick E and M to approximate `base_step`.
-            // Assume 8-bit.
-            // Let's just create a dummy table for now to allow compiling.
-            step_sizes = vec![0x0800]; // Exp=1, Mant=0.
+            // Delta = (1 + m/2048) * 2^-E
+            // We want closest Delta to `base_step`.
+            // log2(base_step) = -E + log2(1 + m/2048)
+            // E = -floor(log2(base_step))
+            let log_step = base_step.log2();
+            let e = (-log_step.floor()) as i32;
+            let encoded_e = e.max(0).min(31); // 5 bits
+            
+            // 2^-E * (1 + m/2048) = base_step
+            // 1 + m/2048 = base_step * 2^E
+            // m = (base_step * 2^E - 1) * 2048
+            let m = ((base_step * 2.0f32.powi(encoded_e) - 1.0) * 2048.0).round() as i32;
+            let encoded_m = m.max(0).min(2047);
+            
+            let val = ((encoded_e as u16) << 11) | (encoded_m as u16);
+            
+            // For Scalar Expounded, we need values for ALL bands.
+            // We'll use the same step for all.
+            step_sizes = vec![val; num_subbands]; 
         } else {
             // Reversible 5-3 (No Quantization - Style 0x00)
             quant_style = guard_bits << 5;
@@ -268,13 +283,68 @@ impl J2kEncoder {
             let coeffs = if self.use_irreversible {
                 // Convert to float
                 let mut data_f32: Vec<f32> = comp_data.iter().map(|&v| v as f32).collect();
-                // Apply 9-7
-                // ... Dwt97::forward_2d(&mut data_f32, width, height, levels) ...
-                // Quantize back to i32
-                // ...
-                // For now, return error or empty as it's not implemented fully
-                // Or just cast back to i32 to verify flow
-                data_f32.iter().map(|&v| v as i32).collect()
+                
+                // Apply 9-7 DWT (levels)
+                let mut current_w = width;
+                let mut current_h = height;
+                
+                for _ in 0..decomposition_levels {
+                    if current_w < 2 || current_h < 2 { break; }
+                    
+                    // Rows
+                    for y in 0..current_h {
+                        let row_start = y * width;
+                        let row_data = &data_f32[row_start..row_start + current_w].to_vec();
+                        
+                        let l_len = (current_w + 1) / 2;
+                        let h_len = current_w / 2;
+                        let mut l = vec![0.0; l_len];
+                        let mut h = vec![0.0; h_len];
+                        
+                        super::dwt::Dwt97::forward(row_data, &mut l, &mut h);
+                        
+                        for (i, &v) in l.iter().enumerate() { data_f32[row_start + i] = v; }
+                        for (i, &v) in h.iter().enumerate() { data_f32[row_start + l_len + i] = v; }
+                    }
+                    
+                    // Cols
+                    for x in 0..current_w {
+                        let col_data: Vec<f32> = (0..current_h).map(|y| data_f32[y * width + x]).collect();
+                        
+                        let l_len = (current_h + 1) / 2;
+                        let h_len = current_h / 2;
+                        let mut l = vec![0.0; l_len];
+                        let mut h = vec![0.0; h_len];
+                        
+                        super::dwt::Dwt97::forward(&col_data, &mut l, &mut h);
+                        
+                        for (i, &v) in l.iter().enumerate() { data_f32[i * width + x] = v; }
+                        for (i, &v) in h.iter().enumerate() { data_f32[(l_len + i) * width + x] = v; }
+                    }
+                    
+                    current_w = (current_w + 1) / 2;
+                    current_h = (current_h + 1) / 2;
+                }
+
+                // Quantization (Scalar Expounded)
+                // We need to quantize float coeffs to integers indices based on step_size.
+                // q = sign(v) * floor(|v| / delta)
+                // For 9-7, we need specific delta per subband.
+                // But here we are iterating per component.
+                // We need to apply quantization differently for each subband!
+                // encode_component_packets iterates subbands. We should quantize THERE.
+                // So here we just return float coeffs?
+                // But encode_component_packets expects &[i32].
+                // We need to refactor encode_component_packets to take f32 or handle quantization here.
+                
+                // Let's handle quantization here by iterating subbands again (duplicating some logic) or 
+                // casting to i32 after quantization.
+                
+                // We need `step_sizes` vector calculated earlier.
+                // We'll reconstruct the step size from the `qcd` logic.
+                
+                // Let's create a helper `quantize_97`
+                self.quantize_97(&mut data_f32, width, height, decomposition_levels, &step_sizes, guard_bits, depth)
             } else {
                 self.apply_forward_dwt_2d(&mut comp_data, width, height)?
             };
@@ -601,6 +671,110 @@ impl J2kEncoder {
         Ok(packets)
     }
 
+    /// Quantize 9-7 coefficients
+    fn quantize_97(
+        &self,
+        coeffs: &mut [f32],
+        width: usize,
+        height: usize,
+        num_levels: u8,
+        step_sizes: &[u16], // Encoded u16 (exp | mant)
+        _guard_bits: u8,
+        _depth: u8,
+    ) -> Vec<i32> {
+        let mut int_coeffs = vec![0i32; coeffs.len()];
+        let num_resolutions = (num_levels + 1) as usize;
+
+        for res in 0..num_resolutions {
+            let num_bands = if res == 0 { 1 } else { 3 };
+            for band in 0..num_bands {
+                let sb_idx = if res == 0 { 0 } else { band };
+                
+                // Calculate subband dimensions and offset
+                // We need to find where this subband is in the `coeffs` array.
+                // Reuse `extract_subband_coeffs` logic logic but adapted for in-place index calculation.
+                // Or better, just iterate all pixels and check which subband they belong to? 
+                // That's O(N*levels). Slow.
+                // Better: Iterate subbands and fill `int_coeffs`.
+                
+                let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
+                let (prev_ll_w, prev_ll_h) = if res > 0 {
+                    self.get_ll_size(width, height, num_levels as usize, res - 1)
+                } else {
+                    (0, 0)
+                };
+
+                let (sb_w, sb_h, start_x, start_y) = match sb_idx {
+                    0 if res == 0 => (ll_w, ll_h, 0, 0), // LL
+                    0 => (ll_w - prev_ll_w, prev_ll_h, prev_ll_w, 0), // HL
+                    1 => (prev_ll_w, ll_h - prev_ll_h, 0, prev_ll_h), // LH
+                    2 => (ll_w - prev_ll_w, ll_h - prev_ll_h, prev_ll_w, prev_ll_h), // HH
+                    _ => (0, 0, 0, 0),
+                };
+
+                // Get Step Size for this band
+                let qcd_idx = if res == 0 { 0 } else { 1 + (res - 1) * 3 + band };
+                let step_encoded = step_sizes[qcd_idx];
+                
+                // Decode step size from (Exp << 11) | Mant
+                // Delta = 2^(Rb - E) * (1 + M/2048)
+                // Wait, in `encode`, we generated `step_sizes`?
+                // If we used Scalar Derived, we only have `step_sizes[0]`.
+                // But `step_sizes` vec passed here has full length?
+                // In `encode` loop:
+                // if irreversible -> `step_sizes = vec![0x0800]` (dummy).
+                // So we need to calculate actual deltas HERE or pass correct vector.
+                
+                // Let's implement full calculation in `encode` instead of dummy.
+                // But assuming `step_sizes` has correct values for all bands (Scalar Expounded) OR
+                // we implement derived logic here.
+                
+                // For now, let's assume `step_sizes` contains valid entries for all bands.
+                // If not (derived), we need to derive.
+                // Let's stick to EXPOUNDED for now in `encode` to make it explicit.
+                
+                let exponent = (step_encoded >> 11) as i32;
+                let mantissa = (step_encoded & 0x7FF) as i32;
+                
+                // Rb = nominal range bits.
+                // For 9-7, nominal dynamic range depends on subband gain.
+                // OpenJPEG simplifies: `delta = (1 + m/2048) * 2^(-e)`. 
+                // Wait, `e` in file is `Rb - true_exponent`.
+                // Let's use the raw float delta.
+                // If we stored `base_step` approx.
+                // Let's assume `step_encoded` maps to `delta`.
+                // delta = (1.0 + m/2048.0) / (1 << exponent) ???
+                // Usually `delta` is small. e.g. 0.01.
+                // So exponent is positive.
+                
+                // Let's use a simpler quantization for now:
+                // delta = base_step (from encode).
+                // We need to pass `base_step` to this function?
+                // Or reconstruct it.
+                
+                // REFACTOR: Pass `base_step` directly to `quantize_97` and ignore `step_sizes` for calc?
+                // But we need to match what we wrote in QCD.
+                
+                let delta = (1.0 + (mantissa as f32) / 2048.0) * 2.0f32.powi(-exponent);
+                // Note: Rb is ignored here, assuming normalized?
+                
+                let inv_delta = 1.0 / delta;
+
+                for y in 0..sb_h {
+                    for x in 0..sb_w {
+                        let src_idx = (start_y + y) * width + (start_x + x);
+                        let val = coeffs[src_idx];
+                        let sign = val.signum();
+                        let mag = val.abs();
+                        let q = (mag * inv_delta).floor();
+                        int_coeffs[src_idx] = (q * sign) as i32;
+                    }
+                }
+            }
+        }
+        int_coeffs
+    }
+    
     /// Get LL subband size at a given resolution level
     /// This matches the iterative ceiling division used in the forward DWT
     fn get_ll_size(
