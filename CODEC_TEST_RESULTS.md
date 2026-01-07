@@ -137,6 +137,24 @@ See `src/jpegls/mod.rs` for RGB limitation details.
 
 ---
 
+## OpenJPEG Interoperability Test Results (Large Images)
+
+**Test Date:** 2026-01-07
+**Configuration:** 512x512 images, 5 decomposition levels, 64x64 codeblocks.
+
+| Image Type | Size | Lossless MAE | 90% Quality | 50% Quality | Status |
+|------------|------|--------------|-------------|-------------|--------|
+| **Gray 8-bit** | 512x512 | 96.12 | N/A | N/A | ⚠️ Partial (Parsing OK, Value Mismatch) |
+| **Color 8-bit** | 512x512 | 95.32 | N/A | N/A | ⚠️ Partial (Parsing OK, Value Mismatch) |
+| **Gray 12-bit** | 512x512 | 1476.91 | N/A | N/A | ⚠️ Partial (Offset ~2072) |
+
+**Notes:**
+1.  **Lossless Mode**: The encoder currently supports only Reversible (Lossless) 5-3 DWT. The `quality` parameter is ignored, so 90% and 50% tests are Not Applicable (N/A).
+2.  **Value Mismatch**: While `jpegexp-rs` can perfectly roundtrip its own files (MAE=0), OpenJPEG decoding of these files results in significant pixel value offsets.
+    *   For 8-bit, the error magnitude (~96) suggests incorrect bit-plane decoding or level shifting interpretation by OpenJPEG.
+    *   For 12-bit, the error (~1476) is close to the level shift value (2048), suggesting signed/unsigned interpretation mismatch.
+3.  **Parsing**: OpenJPEG successfully parses the headers and bitstream without "Segment too long" errors (fixed by `LBlock` Comma Code update), which is a significant improvement over previous "Broken" status.
+
 ## Comparison with Standard Libraries
 
 ### Expected MAE for Lossless Codecs

@@ -217,7 +217,13 @@ impl<'a> BitPlaneCoder<'a> {
         passes += 1;
 
         // Subsequent planes have all 3 passes
-        for bp in (0..start_bit_plane).rev() {
+        for bp in (0..=start_bit_plane).rev() {
+            // If bp == start_bit_plane, we already did cleanup. But wait, did we?
+            // "The first bit-plane encoded is the most significant non-zero bit-plane... 
+            // It consists of a single cleanup pass."
+            if bp == start_bit_plane {
+                continue; // Skip because we handled it before loop
+            }
             self.significance_propagation(bp, orientation);
             self.magnitude_refinement(bp);
             self.cleanup(bp, orientation);
