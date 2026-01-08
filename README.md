@@ -13,12 +13,12 @@
 
 | Topic | Description |
 |-------|-------------|
-| [**Project Status**](docs/STATUS.md) | Current readiness, roadmap, and known issues. |
-| [**Comparisons**](docs/COMPARISON.md) | Benchmarks vs OpenJPEG/CharLS. Feature matrix. |
-| [**Test Results**](docs/TEST_RESULTS.md) | Validation data, interoperability reports. |
+| [**Project Status**](docs/status.md) | Current readiness, roadmap, and known issues. |
+| [**Comparisons**](docs/comparison.md) | Benchmarks vs OpenJPEG/CharLS. Feature matrix. |
+| [**Test Results**](docs/test-results.md) | Validation data, interoperability reports. |
 | [**Compliance**](docs/compliance/jpeg_standard.md) | Standard compliance details. |
 | [**DICOM**](docs/compliance/dicom.md) | Unified DICOM compliance requirements (JPEG1, LS, J2K, HTJ2K). |
-| [**Roadmap**](docs/TODO.md) | Pending tasks and future work. |
+| [**Roadmap**](docs/todo.md) | Pending tasks and future work. |
 
 ### API Reference
 *   [**CLI**](docs/api/cli.md) - Command Line Interface
