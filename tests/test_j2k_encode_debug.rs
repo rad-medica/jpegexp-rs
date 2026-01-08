@@ -1,5 +1,3 @@
-use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
-use jpegexp_rs::FrameInfo;
 
 fn main() {
     let width = 8u32;
@@ -18,7 +16,7 @@ fn main() {
     
     // Manually apply DWT to see what coefficients we get
     let level_shift = 128i32; // 2^(8-1) = 128
-    let mut shifted: Vec<i32> = original.iter().map(|&v| v as i32 - level_shift).collect();
+    let shifted: Vec<i32> = original.iter().map(|&v| v as i32 - level_shift).collect();
     
     println!("Level-shifted (first 16): {:?}", &shifted[..16]);
     

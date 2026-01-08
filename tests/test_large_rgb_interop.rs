@@ -24,7 +24,14 @@ fn mae_u8(a: &[u8], b: &[u8]) -> f64 {
 }
 
 fn find_openjpeg_binary(name: &str) -> Option<String> {
-    // Try local tests directory first
+    // Try hardcoded Windows path first
+    let hardcoded_dir = "openjpeg/openjpeg-v2.5.2-windows-x64/bin";
+    let hardcoded = format!("{}/{}.exe", hardcoded_dir, name);
+    if Path::new(&hardcoded).exists() {
+        return Some(hardcoded);
+    }
+    
+    // Try local tests directory
     let local = format!("tests/{}.exe", name);
     if Path::new(&local).exists() {
         return Some(local);
@@ -123,7 +130,7 @@ fn test_jpegexp_to_openjpeg(
     width: usize,
     height: usize,
     dwt_levels: u8,
-    compress_bin: &str,
+    _compress_bin: &str,
     decompress_bin: &str,
 ) -> Result<f64, String> {
     let temp_dir = std::env::temp_dir();

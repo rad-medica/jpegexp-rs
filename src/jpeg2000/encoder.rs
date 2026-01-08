@@ -134,7 +134,7 @@ impl J2kEncoder {
 
         // Calculate step sizes
         let step_sizes: Vec<u16>;
-        let mut quant_style: u8;
+        let quant_style: u8;
 
         if self.use_irreversible {
             // Irreversible 9-7 (Quantization Style 0x02 - Scalar Expounded)
@@ -164,7 +164,8 @@ impl J2kEncoder {
             // For now, let's fix the Lossless mode first, then come back to complex quantization logic.
             // But I must implement *something*.
             
-            quant_style = (guard_bits << 5) | 0x02; // Scalar Expounded
+            // Note: quant_style is overwritten below, this line is for documentation
+            let _quant_style_expounded = (guard_bits << 5) | 0x02; // Scalar Expounded
             
             // Temporary: Use fixed step size for all bands (simulating quality)
             // Quality 100 => small step. Quality 50 => large step.
@@ -532,8 +533,6 @@ impl J2kEncoder {
 
         // Iterate through resolutions (lowest to highest)
         for res in 0..num_resolutions {
-            let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
-
             // For now, assume 1 precinct per resolution
             let cb_log2 = self.codeblock_exp;
             let cb_dim = 1 << (cb_log2 + 2); // 64
@@ -795,7 +794,7 @@ impl J2kEncoder {
                 // That's O(N*levels). Slow.
                 // Better: Iterate subbands and fill `int_coeffs`.
                 
-                let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
+            let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
                 let (prev_ll_w, prev_ll_h) = if res > 0 {
                     self.get_ll_size(width, height, num_levels as usize, res - 1)
                 } else {

@@ -242,7 +242,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             return Err(JpeglsError::InvalidData);
         }
         let component_index = self.reader.read_u8()?;
-        let roi_style = self.reader.read_u8()?;
+        let _roi_style = self.reader.read_u8()?;
         let shift_value = self.reader.read_u8()?;
 
         // Skip remaining bytes if any

@@ -28,10 +28,10 @@ fn main() {
     let mut input2d = vec![0i32; width * height];
     for i in 0..width*height { input2d[i] = (i as i32 % 256) - 128; }
     
-    let mut l_2d = vec![0i32; 4]; // LL 2x2
-    let mut hl_2d = vec![0i32; 4]; // HL 2x2
-    let mut lh_2d = vec![0i32; 4]; // LH 2x2
-    let mut hh_2d = vec![0i32; 4]; // HH 2x2
+    let l_2d = vec![0i32; 4]; // LL 2x2
+    let hl_2d = vec![0i32; 4]; // HL 2x2
+    let lh_2d = vec![0i32; 4]; // LH 2x2
+    let hh_2d = vec![0i32; 4]; // HH 2x2
     
     // Simplified 2D forward (only 1 level)
     let mut temp = input2d.clone();

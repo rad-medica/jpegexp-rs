@@ -303,7 +303,7 @@ fn encode_image(
                 component_count: components as i32,
             };
             encoder.set_frame_info(info)?;
-            encoder.set_near_lossless(near_lossless as i32);
+            let _ = encoder.set_near_lossless(near_lossless as i32);
             let len = encoder.encode(&pixels)?;
             buffer.truncate(len);
             dest = buffer;

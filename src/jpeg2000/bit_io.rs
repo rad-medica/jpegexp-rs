@@ -123,7 +123,7 @@ impl J2kBitWriter {
     fn flush_byte(&mut self) {
         let b = self.bit_buffer;
         self.data.push(b);
-        self.last_byte_ff = (b == 0xFF);
+        self.last_byte_ff = b == 0xFF;
         self.bit_buffer = 0;
         self.bits_count = 0;
     }

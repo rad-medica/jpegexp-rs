@@ -1,6 +1,4 @@
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
-use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
-use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
 use jpegexp_rs::FrameInfo;
 use std::process::Command;
 
