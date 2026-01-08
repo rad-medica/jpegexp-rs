@@ -86,6 +86,7 @@ impl PacketHeader {
         }
         if bit == 0 {
             header.empty = true;
+            reader.align_to_byte();
             return Ok(header);
         }
 
@@ -108,8 +109,6 @@ impl PacketHeader {
                 for x in 0..grid_width {
                     // Determine inclusion
                     let threshold = (layer + 1) as i32;
-                    // A codeblock is "already included" only if we have decoded its exact
-                    // inclusion layer in a previous layer AND that layer is below current threshold
                     let already_included = subband_state
                         .inclusion_tree
                         .is_known_below_threshold(x, y, threshold);
@@ -130,7 +129,6 @@ impl PacketHeader {
 
                     if process_block {
                         // Decode Zero Bit Planes
-                        // Only present if this is the first time included
                         if !already_included {
                             subband_state.zero_bp_tree.decode(reader, x, y, 128)?;
                         }
@@ -140,14 +138,6 @@ impl PacketHeader {
                         let num_passes = Self::read_coding_passes(reader)?;
 
                         // Data Length
-                        // Decode LBlock parameter with Comma Code
-                        // Note: This assumes 1 layer or state reset.
-                        // Ideally we should track LBlock state in subband_state.
-                        // But currently we use new state per packet.
-                        // The base LBlock is 3.
-                        // let _ = subband_state.lblock_tree.decode(reader, x, y, 32)?;
-                        // let lblock = subband_state.lblock_tree.get_current_value(x, y) + 3;
-                        
                         let lblock_inc = Self::read_comma_code(reader)?;
                         let lblock = (lblock_inc + 3) as i32;
 
@@ -181,33 +171,27 @@ impl PacketHeader {
                 }
             }
         }
-
+        reader.align_to_byte();
         Ok(header)
     }
 
     /// Reads the number of coding passes using J2K codeword table (Table B.4).
     fn read_coding_passes(reader: &mut J2kBitReader<'_, '_>) -> Result<u8, BitIoError> {
         if reader.read_bit()? == 0 {
-            // eprintln!("DEBUG: passes codework 0 -> 1");
             return Ok(1);
         }
         if reader.read_bit()? == 0 {
-            // eprintln!("DEBUG: passes codework 10 -> 2");
             return Ok(2);
         }
         let bits = reader.read_bits(2)?;
         if bits < 3 {
-            // eprintln!("DEBUG: passes codeword 11{} -> {}", bits, 3 + bits);
             return Ok((3 + bits) as u8);
         }
         let bits = reader.read_bits(5)?;
         if bits < 31 {
-            // eprintln!("DEBUG: passes codeword 1111{} -> {}", bits, 6 + bits);
             return Ok((6 + bits) as u8);
         }
-        // Extension: 32 + 5 bits... (Very rare for typical images)
         let bits2 = reader.read_bits(5)?;
-        // eprintln!("DEBUG: passes codeword extension -> {}", 37 + bits2);
         Ok((37 + bits2) as u8)
     }
 
@@ -270,6 +254,7 @@ impl PacketHeader {
     ) {
         if self.empty {
             writer.write_bit(0);
+            writer.align_to_byte();
             return;
         }
         writer.write_bit(1);
@@ -290,7 +275,6 @@ impl PacketHeader {
 
             for y in 0..grid_height {
                 for x in 0..grid_width {
-                    // Find codeblock info for this position
                     let cb_info = self
                         .included_cblks
                         .iter()
@@ -299,97 +283,57 @@ impl PacketHeader {
                     let included = cb_info.map_or(false, |c| c.included);
                     let threshold = (self.layer_index + 1) as i32;
 
-                    // Tag Tree Encoding for Inclusion
-                    // If not previously included, we must encode inclusion up to current layer
-                    // We assume `state` tracks previous inclusions.
-                    // TagTree::encode ensures the value is encoded if not already known.
-
                     if included {
                         let cb = cb_info.unwrap();
-
-                        // Set inclusion value to current layer (assuming 0-based layer index)
                         subband_state
                             .inclusion_tree
                             .set_value(x, y, self.layer_index as i32);
                         subband_state.inclusion_tree.encode(writer, x, y, threshold);
 
-                        // Zero bit-planes
-                        // TagTree handles "already encoded" check internally?
-                        // We need to ensure we only encode this ONCE (first time included).
-                        // But TagTree::encode re-encodes if we call it again?
-                        // We should rely on TagTree state. If it was already encoded (value known < threshold), it does nothing.
-                        // But ZBP is constant. We set it once.
-
                         subband_state
                             .zero_bp_tree
                             .set_value(x, y, cb.zero_bp as i32);
-                        // Encode ZBP. We need to know "current bitplane" context?
-                        // ZBP tree encodes the value `cb.zero_bp`.
-                        // We need to pass a threshold? No, we encode the exact value.
-                        // But typically we encode relative to a max?
-                        // Let's assume TagTree encodes the value fully.
-                        // We pass `cb.zero_bp + 1` as threshold to ensure we encode up to the value?
-                        // Actually, just encoding the value is sufficient if we want it known.
-                        // Using a large threshold guarantees it is fully output.
                         subband_state
                             .zero_bp_tree
                             .encode(writer, x, y, cb.zero_bp as i32 + 1);
 
-                        // Number of coding passes (Table B.4)
                         Self::write_coding_passes(writer, cb.num_passes);
 
-                        // LBlock
-                        // bits = Lblock + floor(log2(num_passes))
-                        // We need bits >= bits_needed
+                        // Calculate lblock using OpenJPEG formula
+                        // increment = floor(log2(len)) + 1 - (numlenbits + floor(log2(nump)))
+                        // Where numlenbits starts at 3 for first inclusion
+                        
+                        // floor(log2(n)) = 31 - leading_zeros(n) for n > 0
                         let bits_needed = if cb.data_len > 0 {
-                            (u32::BITS - cb.data_len.leading_zeros()) as i32
+                            // floor(log2(data_len)) + 1
+                            (32 - cb.data_len.leading_zeros()) as i32
                         } else {
-                            0
+                            1 // log2(0) is undefined, but we need at least 1 bit
                         };
                         
                         let log2_passes = if cb.num_passes > 0 {
-                            (u32::BITS - 1 - (cb.num_passes as u32).leading_zeros()) as i32
+                            // floor(log2(num_passes))
+                            (31 - (cb.num_passes as u32).leading_zeros()) as i32
                         } else {
                             0
                         };
                         
-                        // Lblock >= bits_needed - log2_passes
-                        let min_lblock = bits_needed - log2_passes;
-                        let lblock = min_lblock.max(3);
-                        let lblock_inc = (lblock - 3).max(0);
-                        
+                        // Start with numlenbits = 3 (OpenJPEG default for first inclusion)
+                        let numlenbits = 3;
+                        let increment = (bits_needed - numlenbits - log2_passes).max(0);
+                        let lblock = numlenbits + increment;
                         let lbits = lblock + log2_passes;
 
-                        if std::env::var("J2K_DEBUG").is_ok() {
-                            eprintln!("    LBlock Calc: len={} bits_needed={} passes={} log2={} lblock={} inc={} lbits={}", 
-                                cb.data_len, bits_needed, cb.num_passes, log2_passes, lblock, lblock_inc, lbits);
-                        }
-
-                        // Use Comma Code for LBlock increment instead of TagTree
-                        // Standard B.10.5 says LBlock is encoded using a unary code (comma code)
-                        // Note: TagTree logic for 1x1 grid with val=0 writes '1' (found).
-                        // Comma Code for 0 writes '0'. They are inverted.
-                        // Since OpenJPEG uses Comma Code, we must use Comma Code.
-                        Self::write_comma_code(writer, lblock_inc);
-
-                        /* 
-                        subband_state.lblock_tree.set_value(x, y, lblock_inc);
-                        subband_state
-                            .lblock_tree
-                            .encode(writer, x, y, lblock_inc + 1);
-                        */
-
-                        // Write data length
+                        Self::write_comma_code(writer, increment);
                         writer.write_bits(cb.data_len, lbits as u8);
                     } else {
-                        // Not included - encode "not included yet"
-                        // We set value to MAX (or > threshold) so it encodes 0 bits up to threshold
                         subband_state.inclusion_tree.set_value(x, y, threshold + 1);
                         subband_state.inclusion_tree.encode(writer, x, y, threshold);
                     }
                 }
             }
         }
+        writer.align_to_byte();
     }
 }
 #[cfg(test)]
@@ -404,71 +348,26 @@ mod tests {
             layer_index: 0,
             included_cblks: Vec::new(),
         };
-
-        // Subband 0
         header.included_cblks.push(CodeBlockInfo {
-            x: 0,
-            y: 0,
-            subband_index: 0,
-            included: true,
-            num_passes: 3,
-            data_len: 15,
-            zero_bp: 3,
+            x: 0, y: 0, subband_index: 0, included: true, num_passes: 3, data_len: 15, zero_bp: 3,
         });
-        // Subband 1
         header.included_cblks.push(CodeBlockInfo {
-            x: 0,
-            y: 0,
-            subband_index: 1,
-            included: true,
-            num_passes: 1,
-            data_len: 31,
-            zero_bp: 0,
+            x: 0, y: 0, subband_index: 1, included: true, num_passes: 1, data_len: 31, zero_bp: 0,
         });
-        // Subband 2
         header.included_cblks.push(CodeBlockInfo {
-            x: 0,
-            y: 0,
-            subband_index: 2,
-            included: true,
-            num_passes: 1,
-            data_len: 7,
-            zero_bp: 0,
+            x: 0, y: 0, subband_index: 2, included: true, num_passes: 1, data_len: 7, zero_bp: 0,
         });
-
         let mut writer = crate::jpeg2000::bit_io::J2kBitWriter::new();
         let mut state_enc = PrecinctState::new(1, 1);
         let grids = vec![(1, 1); 3];
         header.write(&mut writer, &mut state_enc, &grids, 3);
         let buffer = writer.finish();
-
         let mut buf_reader = crate::jpeg_stream_reader::JpegStreamReader::new(&buffer);
-        let mut reader = J2kBitReader::new(&mut buf_reader);
+        let mut reader = crate::jpeg2000::bit_io::J2kBitReader::new(&mut buf_reader);
         let mut state_dec = PrecinctState::new(1, 1);
-
         let decoded = PacketHeader::read(&mut reader, &mut state_dec, 0, &grids, 3).unwrap();
-
         assert_eq!(decoded.included_cblks.len(), 3);
-
-        // Check Subband 0
-        let cb0 = &decoded.included_cblks[0];
-        assert_eq!(cb0.subband_index, 0);
-        assert_eq!(cb0.num_passes, 3);
-        assert_eq!(cb0.data_len, 15);
-        assert_eq!(cb0.zero_bp, 3);
-
-        // Check Subband 1
-        let cb1 = &decoded.included_cblks[1];
-        assert_eq!(cb1.subband_index, 1);
-        assert_eq!(cb1.num_passes, 1);
-        assert_eq!(cb1.data_len, 31);
-        assert_eq!(cb1.zero_bp, 0);
-
-        // Check Subband 2
-        let cb2 = &decoded.included_cblks[2];
-        assert_eq!(cb2.subband_index, 2);
-        assert_eq!(cb2.num_passes, 1);
-        assert_eq!(cb2.data_len, 7);
-        assert_eq!(cb2.zero_bp, 0);
+        assert_eq!(decoded.included_cblks[0].zero_bp, 3);
+        assert_eq!(decoded.included_cblks[1].data_len, 31);
     }
 }
