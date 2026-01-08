@@ -156,6 +156,11 @@ impl J2kImage {
             }
             let mut current_ll = get_subband_coeffs(&component.resolutions[0], SubbandOrientation::LL);
 
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("COMP {} RES 0 LL: len={} first_few={:?}", 
+                         comp_idx, current_ll.len(), &current_ll[..current_ll.len().min(10)]);
+            }
+
             for r in 1..component.resolutions.len() {
                 let res = &component.resolutions[r];
                 let hl = get_subband_coeffs(res, SubbandOrientation::HL);
@@ -225,6 +230,11 @@ impl J2kImage {
         }
 
         if cod.mct == 1 && component_buffers.len() >= 3 {
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("DEC RCT: Applying inverse RCT to {} pixels", component_buffers[0].len());
+                eprintln!("DEC RCT BEFORE: Y[0]={}, U[0]={}, V[0]={}", 
+                         component_buffers[0][0], component_buffers[1][0], component_buffers[2][0]);
+            }
             for i in 0..component_buffers[0].len() {
                 let y = component_buffers[0][i];
                 let u = component_buffers[1][i];
@@ -240,6 +250,10 @@ impl J2kImage {
                     component_buffers[1][i] = (yf - 0.34413 * uf - 0.71414 * vf).round() as i32;
                     component_buffers[2][i] = (yf + 1.772 * uf).round() as i32;
                 }
+            }
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("DEC RCT AFTER: R[0]={}, G[0]={}, B[0]={}", 
+                         component_buffers[0][0], component_buffers[1][0], component_buffers[2][0]);
             }
         }
 

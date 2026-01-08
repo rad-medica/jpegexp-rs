@@ -692,8 +692,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     };
 
                     // M_b = G + epsilon_b - 1
-                    // Note: epsilon_b already includes guard bits in Reversible mode?
-                    // Standard says eps_b is exponent. QCD stores exponent.
+                    // Note: This is the standard formula for reversible compression
                     // Standard E.1.1: M_b = G + epsilon_b - 1.
                     // We extract `epsilon_b` directly from QCD.
                     let guard_bits = (qcd.quant_style >> 5) & 0x07;

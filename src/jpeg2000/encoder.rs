@@ -126,7 +126,11 @@ impl J2kEncoder {
 
         // Create QCD marker
         let num_subbands = 1 + 3 * decomposition_levels as usize;
-        let guard_bits = 2u8; // OpenJPEG uses 2 guard bits
+        // Guard bits provide extra precision for bit-plane coding
+        // For RGB with RCT, we need extra guard bits because:
+        // - RCT doubles coefficient range: U=B-G, V=R-G can be [-255,255] instead of [-128,127]
+        // - This requires one extra bit of magnitude precision
+        let guard_bits = if components >= 3 { 3 } else { 2 }; // OpenJPEG uses 2 guard bits for grayscale
 
         // Calculate step sizes
         let step_sizes: Vec<u16>;
@@ -208,10 +212,14 @@ impl J2kEncoder {
             step_sizes = (0..num_subbands)
                 .map(|i| {
                     let epsilon = if i == 0 {
+                        // LL subband of resolution 0
                         depth
                     } else {
-                        let band_in_level = (i - 1) % 3;
-                        if band_in_level < 2 {
+                        // Higher resolution subbands
+                        let subband_in_decomp = i - 1;
+                        let band_type = subband_in_decomp % 3; // 0=HL, 1=LH, 2=HH
+                        
+                        if band_type < 2 {
                             depth + 1
                         } else {
                             depth + 2
@@ -259,6 +267,11 @@ impl J2kEncoder {
 
         // Apply RCT (Reversible Color Transform) if 3 components and not using irreversible transform
         if components == 3 && !self.use_irreversible {
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("RCT: Applying RCT to {}x{} image", width, height);
+                eprintln!("RCT BEFORE: R[0]={}, G[0]={}, B[0]={}", 
+                         component_data[0][0], component_data[1][0], component_data[2][0]);
+            }
             for i in 0..width * height {
                 let r = component_data[0][i];
                 let g = component_data[1][i];
@@ -272,6 +285,15 @@ impl J2kEncoder {
                 component_data[1][i] = u;
                 component_data[2][i] = v;
             }
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("RCT AFTER: Y[0]={}, U[0]={}, V[0]={}", 
+                         component_data[0][0], component_data[1][0], component_data[2][0]);
+                eprintln!("RCT AFTER: Y[1]={}, U[1]={}, V[1]={}", 
+                         component_data[0][1], component_data[1][1], component_data[2][1]);
+                let mid = width * height / 2;
+                eprintln!("RCT AFTER: Y[{}]={}, U[{}]={}, V[{}]={}", 
+                         mid, component_data[0][mid], mid, component_data[1][mid], mid, component_data[2][mid]);
+            }
         }
         // Apply ICT (Irreversible Color Transform) if 3 components and using irreversible transform
         else if components == 3 && self.use_irreversible {
@@ -279,6 +301,15 @@ impl J2kEncoder {
         }
 
         for (comp_idx, mut comp_data) in component_data.into_iter().enumerate() {
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("COMPONENT {}: Processing {} pixels, first 4: {:?}", 
+                         comp_idx, comp_data.len(), &comp_data[..comp_data.len().min(4)]);
+                let mid = comp_data.len() / 2;
+                eprintln!("COMPONENT {}: Mid 4: {:?}", 
+                         comp_idx, &comp_data[mid..comp_data.len().min(mid+4)]);
+                eprintln!("COMPONENT {}: Last 4: {:?}", 
+                         comp_idx, &comp_data[comp_data.len().saturating_sub(4)..]);
+            }
             // Apply forward 2D DWT
             let coeffs = if self.use_irreversible {
                 // Convert to float
@@ -349,8 +380,17 @@ impl J2kEncoder {
                 self.apply_forward_dwt_2d(&mut comp_data, width, height)?
             };
 
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("COMPONENT {}: After DWT, first 10 coeffs: {:?}", 
+                         comp_idx, &coeffs[..coeffs.len().min(10)]);
+            }
+
             // Encode component into packets
             // ...
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("COMPONENT {}: Encoding packets with {} coefficients", comp_idx, coeffs.len());
+                eprintln!("COMPONENT {}: First 10 coeffs: {:?}", comp_idx, &coeffs[..coeffs.len().min(10)]);
+            }
             let comp_packets = self.encode_component_packets(
                 &coeffs,
                 width,
@@ -361,6 +401,9 @@ impl J2kEncoder {
                 guard_bits,
                 comp_idx as u8,
             )?;
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("COMPONENT {}: Generated {} packets", comp_idx, comp_packets.len());
+            }
             packets.extend(comp_packets);
         }
         
@@ -408,6 +451,10 @@ impl J2kEncoder {
         width: usize,
         height: usize,
     ) -> Result<Vec<i32>, JpeglsError> {
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("apply_forward_dwt_2d: width={} height={} data_len={} first_4={:?}", 
+                     width, height, data.len(), &data[..data.len().min(4)]);
+        }
         let mut result = data.to_vec();
         let mut current_w = width;
         let mut current_h = height;
@@ -478,6 +525,11 @@ impl J2kEncoder {
         let mut packets = Vec::new();
         let num_resolutions = (num_levels + 1) as usize;
 
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("encode_component_packets: comp={} width={} height={} levels={} resolutions={}", 
+                     comp_idx, width, height, num_levels, num_resolutions);
+        }
+
         // Iterate through resolutions (lowest to highest)
         for res in 0..num_resolutions {
             let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
@@ -491,6 +543,10 @@ impl J2kEncoder {
             let mut subband_grids = Vec::with_capacity(num_bands);
 
             let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
+            
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("  RES {}: LL size {}x{}, {} bands", res, ll_w, ll_h, num_bands);
+            }
             
             for band in 0..num_bands {
                  let (sb_w, sb_h) = if res == 0 {
@@ -535,6 +591,11 @@ impl J2kEncoder {
                     res,
                     sb_idx,
                 );
+
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("    BAND {}: Extracted {}x{} subband, {} coeffs, first 10: {:?}", 
+                             band, sb_w, sb_h, sb_coeffs.len(), &sb_coeffs[..sb_coeffs.len().min(10)]);
+                }
 
                 // Calculate epsilon for this subband (matches write_qcd / OpenJPEG)
                 // LL=depth, HL/LH=depth+1, HH=depth+2 (same for all levels)
@@ -644,15 +705,15 @@ impl J2kEncoder {
                                 );
                             }
 
-                            // zero_bp calculation
-                            // M_b = G + epsilon - 1
-                            let mb = (guard_bits + epsilon).saturating_sub(1);
+                        // zero_bp calculation
+                        // M_b = G + epsilon - 1 (per JPEG 2000 standard)
+                        let mb = (guard_bits + epsilon).saturating_sub(1);
 
-                            // zero_bp is the number of zero bit planes starting from the MSB
-                            // M_b bit planes available: M_b-1 ... 0
-                            // max_bp is the index of the most significant non-zero bit plane
-                            // So zero planes are: (M_b - 1) - max_bp
-                            let zero_bp = if max_bp < mb { mb - max_bp - 1 } else { 0 };
+                        // zero_bp is the number of zero bit planes starting from the MSB
+                        // M_b bit planes available: M_b-1 ... 0
+                        // max_bp is the index of the most significant non-zero bit plane
+                        // So zero planes are: (M_b - 1) - max_bp
+                        let zero_bp = if max_bp < mb { mb - max_bp - 1 } else { 0 };
 
                             if std::env::var("J2K_DEBUG").is_ok() {
                                 eprintln!("    -> zero_bp={}", zero_bp);
