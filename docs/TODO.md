@@ -2,6 +2,24 @@
 
 This document tracks the backlog of planned features, improvements, and known issues for `jpegexp-rs`.
 
+## 🧩 Compliance & Interoperability Gaps
+
+### JPEG 2000 Standard (ISO 15444-1)
+- [ ] **Markers**: Support writing `TLM` (Tile-Part Length) and `PLT` (Packet Length) markers for faster random access decoding.
+- [ ] **Profiles**: Add specific profile constraints (Cinema, Broadcast) to encoder configuration.
+- [ ] **Metadata**: Correctly map Color Space (sRGB, ICC) and Pixel Representation (Signed/Unsigned) to `COLR` and `SIZ` markers.
+
+### DICOM Compliance
+- [ ] **Encapsulation**: Implement DICOM fragment encapsulation (`Item Tag` wrapping) for raw codestreams.
+- [ ] **Basic Offset Table**: Generate BOT for multi-frame support.
+- [ ] **Photometric Interpretation**: Support `MONOCHROME1` (Inverse Grayscale) encoding path.
+
+### JPEG 1 Extended
+- [ ] **12-bit Support**: Implement "Extended Sequential" process for 12-bit medical X-ray/CT support.
+
+### HTJ2K Extensions
+- [ ] **RPC Mode**: Support Reduced Resolution (RPC) Transfer Syntax (.202).
+
 ## 🛑 High Priority (Immediate)
 
 ### 1. JPEG 2000 Lossy Quantization Fix
