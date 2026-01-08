@@ -16,7 +16,7 @@
 | [**Project Status**](docs/STATUS.md) | Current readiness, roadmap, and known issues. |
 | [**Comparisons**](docs/COMPARISON.md) | Benchmarks vs OpenJPEG/CharLS. Feature matrix. |
 | [**Test Results**](docs/TEST_RESULTS.md) | Validation data, interoperability reports. |
-| [**Compliance**](docs/compliance/general.md) | Standard compliance details. |
+| [**Compliance**](docs/compliance/jpeg_standard.md) | Standard compliance details. |
 | [**DICOM**](docs/compliance/dicom.md) | Specific medical imaging requirements. |
 
 ### API Reference
