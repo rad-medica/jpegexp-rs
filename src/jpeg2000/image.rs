@@ -161,6 +161,29 @@ impl J2kImage {
                 let hl = get_subband_coeffs(res, SubbandOrientation::HL);
                 let lh = get_subband_coeffs(res, SubbandOrientation::LH);
                 let hh = get_subband_coeffs(res, SubbandOrientation::HH);
+                
+                // DEBUG: Log subband statistics
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    let check_subband = |name: &str, data: &[i32]| {
+                        if data.len() > 0 {
+                            let min = data.iter().min().unwrap();
+                            let max = data.iter().max().unwrap();
+                            let unique = {
+                                let mut v = data.to_vec();
+                                v.sort_unstable();
+                                v.dedup();
+                                v.len()
+                            };
+                            eprintln!("RECON res={} {}: len={} range=[{},{}] unique={} first_few={:?}", 
+                                     r, name, data.len(), min, max, unique, &data[..data.len().min(5)]);
+                        }
+                    };
+                    check_subband("LL", &current_ll);
+                    check_subband("HL", &hl);
+                    check_subband("LH", &lh);
+                    check_subband("HH", &hh);
+                }
+                
                 let mut output = vec![0i32; (res.width * res.height) as usize];
                 
                 if is_reversible {

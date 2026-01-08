@@ -533,4 +533,164 @@ mod tests {
         let res = dec.decode_codeblock(&buf, 3, passes, 0).unwrap();
         assert_eq!(res, [0, 1, 2, 3, 4, 5, 6, 7]);
     }
+    
+    #[test]
+    fn test_small_constant_block() {
+        // Test small constant block first - just 8 pixels all = 7
+        let data = [7, 7, 7, 7, 7, 7, 7, 7];
+        let mut bpc = BitPlaneCoder::new(8, 1, &data);
+        let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
+        println!("Encoding constant 7s with max_bp={}", max_bp);
+        let passes = bpc.encode_codeblock(max_bp, 0);
+        bpc.mq.flush();
+        let buf = bpc.mq.get_buffer().to_vec();
+        println!("Encoded to {} bytes, {} passes", buf.len(), passes);
+        
+        let mut dec = BitPlaneCoder::new(8, 1, &[]);
+        let res = dec.decode_codeblock(&buf, max_bp, passes, 0).unwrap();
+        
+        println!("Small constant: {:?} -> {:?}", data, res);
+        assert_eq!(res, data.to_vec(), "Small constant block should roundtrip");
+    }
+    
+    #[test]
+    fn test_medium_constant_block() {
+        // Test medium constant block - 64 pixels (8x8) all = 255
+        let width = 8;
+        let height = 8;
+        let data = vec![255i32; (width * height) as usize];
+        
+        let mut bpc = BitPlaneCoder::new(width as u32, height as u32, &data);
+        let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
+        println!("Encoding 8x8 constant 255s with max_bp={}", max_bp);
+        let passes = bpc.encode_codeblock(max_bp, 0);
+        bpc.mq.flush();
+        let buf = bpc.mq.get_buffer().to_vec();
+        println!("Encoded to {} bytes, {} passes", buf.len(), passes);
+        
+        let mut dec = BitPlaneCoder::new(width as u32, height as u32, &[]);
+        let res = dec.decode_codeblock(&buf, max_bp, passes, 0).unwrap();
+        
+        let mut errors = 0;
+        for (i, (&orig, &dec_val)) in data.iter().zip(res.iter()).enumerate() {
+            if orig != dec_val {
+                if errors < 5 {
+                    println!("Mismatch at [{}]: {} -> {}", i, orig, dec_val);
+                }
+                errors += 1;
+            }
+        }
+        
+        assert_eq!(errors, 0, "Medium constant block (8x8) should roundtrip");
+    }
+    
+    #[test]
+    fn test_large_16x16_constant_block() {
+        // Test 16x16 constant block
+        let width = 16;
+        let height = 16;
+        let data = vec![255i32; (width * height) as usize];
+        
+        let mut bpc = BitPlaneCoder::new(width as u32, height as u32, &data);
+        let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
+        println!("Encoding 16x16 constant 255s with max_bp={}", max_bp);
+        let passes = bpc.encode_codeblock(max_bp, 0);
+        bpc.mq.flush();
+        let buf = bpc.mq.get_buffer().to_vec();
+        println!("Encoded to {} bytes, {} passes", buf.len(), passes);
+        
+        let mut dec = BitPlaneCoder::new(width as u32, height as u32, &[]);
+        let res = dec.decode_codeblock(&buf, max_bp, passes, 0).unwrap();
+        
+        let mut errors = 0;
+        for (i, (&orig, &dec_val)) in data.iter().zip(res.iter()).enumerate() {
+            if orig != dec_val {
+                if errors < 5 {
+                    println!("Mismatch at [{}]: {} -> {}", i, orig, dec_val);
+                }
+                errors += 1;
+            }
+        }
+        
+        println!("16x16 test: {} errors out of {}", errors, data.len());
+        assert_eq!(errors, 0, "16x16 constant block should roundtrip");
+    }
+    
+    #[test]
+    fn test_constant_block_roundtrip() {
+        // Test various sizes to find where it breaks
+        for &size in &[4, 8, 16, 32, 64] {
+            let width = size;
+            let height = size;
+            let test_value = 255i32;
+            let data = vec![test_value; (width * height) as usize];
+            
+            let mut bpc = BitPlaneCoder::new(width as u32, height as u32, &data);
+            let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
+            let passes = bpc.encode_codeblock(max_bp, 0);
+            bpc.mq.flush();
+            let buf = bpc.mq.get_buffer().to_vec();
+            
+            let mut dec = BitPlaneCoder::new(width as u32, height as u32, &[]);
+            let res = dec.decode_codeblock(&buf, max_bp, passes, 0).unwrap();
+            
+            let mut errors = 0;
+            for (i, (&orig, &dec_val)) in data.iter().zip(res.iter()).enumerate() {
+                if orig != dec_val {
+                    if errors < 3 {
+                        println!("{}x{}: Mismatch at [{}]: {} -> {}", size, size, i, orig, dec_val);
+                    }
+                    errors += 1;
+                }
+            }
+            
+            if errors > 0 {
+                println!("❌ {}x{} FAILED: {} errors", size, size, errors);
+            } else {
+                println!("✅ {}x{} passed", size, size);
+            }
+            
+            assert_eq!(errors, 0, "{}x{} constant block should roundtrip", size, size);
+        }
+    }
+    
+    #[test]
+    fn test_constant_8190_block_roundtrip() {
+        // Test the specific value 8190 that appears in 12-bit checkerboards
+        let width = 32;
+        let height = 32;
+        let data = vec![8190i32; (width * height) as usize];
+        
+        let mut bpc = BitPlaneCoder::new(width, height, &data);
+        let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp for 8190");
+        println!("max_bp for 8190: {}", max_bp);
+        
+        let passes = bpc.encode_codeblock(max_bp, 3);
+        bpc.mq.flush();
+        let encoded = bpc.mq.get_buffer().to_vec();
+        println!("Encoded {} values into {} bytes with {} passes", data.len(), encoded.len(), passes);
+        
+        // Decode
+        let mut bpc_dec = BitPlaneCoder::new(width, height, &[]);
+        let decoded = bpc_dec.decode_codeblock(&encoded, max_bp, passes, 3).unwrap();
+        
+        // Check
+        let mut errors = 0;
+        for (i, (&orig, &dec)) in data.iter().zip(decoded.iter()).enumerate() {
+            if orig != dec {
+                if errors < 10 {
+                    println!("Mismatch at [{}]: {} -> {}", i, orig, dec);
+                }
+                errors += 1;
+            }
+        }
+        
+        if errors == 0 {
+            println!("✅ Perfect roundtrip for 8190!");
+        } else {
+            println!("❌ {} mismatches out of {}", errors, data.len());
+        }
+        
+        assert_eq!(errors, 0, "Should have perfect roundtrip for constant 8190 block");
+    }
 }

@@ -380,4 +380,158 @@ mod tests {
             assert!(diff < 1e-4);
         }
     }
+
+    #[test]
+    fn test_dwt_53_2d_with_constant_hh() {
+        // This tests the exact scenario from 12-bit checkerboard:
+        // LL=0, HL=0, LH=0, HH=constant (8190)
+        // This is what happens after DWT of a perfect checkerboard
+        
+        // Start with 8x8 for simplicity
+        let width = 8u32;
+        let height = 8u32;
+        
+        // After one level of DWT, we have 4x4 subbands
+        let ll_size = 4 * 4;
+        let hl_size = 4 * 4;
+        let lh_size = 4 * 4;
+        let hh_size = 4 * 4;
+        
+        let ll = vec![0i32; ll_size];  // All zero
+        let hl = vec![0i32; hl_size];  // All zero
+        let lh = vec![0i32; lh_size];  // All zero
+        let hh = vec![8190i32; hh_size]; // Constant 8190
+        
+        let mut output = vec![0i32; (width * height) as usize];
+        
+        // Run IDWT
+        Dwt53::inverse_2d(&ll, &hl, &lh, &hh, width, height, &mut output);
+        
+        // Check what we get
+        let mut unique_vals: Vec<i32> = output.clone();
+        unique_vals.sort_unstable();
+        unique_vals.dedup();
+        
+        println!("IDWT with LL=0, HL=0, LH=0, HH=8190:");
+        println!("Output size: {}", output.len());
+        println!("Unique values: {:?}", unique_vals);
+        println!("First 16 values: {:?}", &output[..16]);
+        
+        // Check if output is constant (which would be wrong)
+        let is_constant = unique_vals.len() == 1;
+        let min_val = output.iter().min().unwrap();
+        let max_val = output.iter().max().unwrap();
+        
+        println!("Min: {}, Max: {}, Is constant: {}", min_val, max_val, is_constant);
+        
+        // IDWT should produce varying output, not constant!
+        // With HH=8190 (high frequency), we expect significant variation
+        assert!(!is_constant, "IDWT output should not be constant when HH has data");
+        
+        // The range should be significant (at least 1000)
+        let range = max_val - min_val;
+        assert!(range > 1000, "IDWT should produce significant variation, got range={}", range);
+    }
+
+    #[test]
+    fn test_dwt_53_checkerboard_roundtrip() {
+        // Test a full checkerboard roundtrip to understand what's happening
+        // 8x8 checkerboard after level shift: -2048, 2047, -2048, 2047...
+        let width = 8;
+        let height = 8;
+        let mut input = vec![0i32; width * height];
+        
+        for y in 0..height {
+            for x in 0..width {
+                let val = if (x + y) % 2 == 0 { -2048 } else { 2047 };
+                input[y * width + x] = val;
+            }
+        }
+        
+        println!("Input checkerboard (8x8, after level shift):");
+        for y in 0..4 {
+            println!("  {:?}", &input[y*width..(y*width + 8)]);
+        }
+        
+        // Apply forward DWT 2D
+        let mut coeffs = input.clone();
+        
+        // Apply 1D DWT to rows
+        for y in 0..height {
+            let row: Vec<i32> = coeffs[y * width..(y + 1) * width].to_vec();
+            let l_len = (width + 1) / 2;
+            let h_len = width / 2;
+            let mut l = vec![0i32; l_len];
+            let mut h = vec![0i32; h_len];
+            Dwt53::forward(&row, &mut l, &mut h);
+            for (i, &v) in l.iter().enumerate() {
+                coeffs[y * width + i] = v;
+            }
+            for (i, &v) in h.iter().enumerate() {
+                coeffs[y * width + l_len + i] = v;
+            }
+        }
+        
+        // Apply 1D DWT to columns
+        for x in 0..width {
+            let col: Vec<i32> = (0..height).map(|y| coeffs[y * width + x]).collect();
+            let l_len = (height + 1) / 2;
+            let h_len = height / 2;
+            let mut l = vec![0i32; l_len];
+            let mut h = vec![0i32; h_len];
+            Dwt53::forward(&col, &mut l, &mut h);
+            for (i, &v) in l.iter().enumerate() {
+                coeffs[i * width + x] = v;
+            }
+            for (i, &v) in h.iter().enumerate() {
+                coeffs[(l_len + i) * width + x] = v;
+            }
+        }
+        
+        println!("\nAfter forward DWT (coefficients):");
+        for y in 0..4 {
+            println!("  {:?}", &coeffs[y*width..(y*width + 8)]);
+        }
+        
+        // Extract subbands
+        let ll_w = 4;
+        let ll_h = 4;
+        let mut ll = vec![0i32; ll_w * ll_h];
+        let mut hl = vec![0i32; ll_w * ll_h];
+        let mut lh = vec![0i32; ll_w * ll_h];
+        let mut hh = vec![0i32; ll_w * ll_h];
+        
+        for y in 0..ll_h {
+            for x in 0..ll_w {
+                ll[y * ll_w + x] = coeffs[y * width + x];
+                hl[y * ll_w + x] = coeffs[y * width + ll_w + x];
+                lh[y * ll_w + x] = coeffs[(ll_h + y) * width + x];
+                hh[y * ll_w + x] = coeffs[(ll_h + y) * width + ll_w + x];
+            }
+        }
+        
+        println!("\nLL subband (4x4): {:?}", ll);
+        println!("HL subband (4x4): {:?}", hl);
+        println!("LH subband (4x4): {:?}", lh);
+        println!("HH subband (4x4): {:?}", hh);
+        
+        // Now apply inverse DWT
+        let mut reconstructed = vec![0i32; width * height];
+        Dwt53::inverse_2d(&ll, &hl, &lh, &hh, width as u32, height as u32, &mut reconstructed);
+        
+        println!("\nAfter inverse DWT (reconstructed):");
+        for y in 0..4 {
+            println!("  {:?}", &reconstructed[y*width..(y*width + 8)]);
+        }
+        
+        // Check reconstruction error
+        let mut max_error = 0i32;
+        for i in 0..input.len() {
+            let error = (input[i] - reconstructed[i]).abs();
+            max_error = max_error.max(error);
+        }
+        
+        println!("\nMax reconstruction error: {}", max_error);
+        assert_eq!(max_error, 0, "DWT should be perfectly reversible");
+    }
 }

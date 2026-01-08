@@ -581,8 +581,38 @@ impl J2kEncoder {
                             }
                         }
 
+                        // Check if block has any non-zero coefficients
+                        // This is critical for near-constant subbands (e.g., LL after DWT of checkerboard)
+                        // where all values might be -1 or similar, leading to max_bp calculation issues
+                        let has_nonzero = block_data.iter().any(|&v| v != 0);
+                        
+                        // DEBUG: Check what's in the block
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            let min_val = block_data.iter().min().unwrap_or(&0);
+                            let max_val = block_data.iter().max().unwrap_or(&0);
+                            let unique_count = {
+                                let mut vals = block_data.clone();
+                                vals.sort_unstable();
+                                vals.dedup();
+                                vals.len()
+                            };
+                            if unique_count <= 3 {
+                                eprintln!("BLOCK[{},{}] res={} band={} range=[{},{}] unique={} nonzero={} first_few={:?}",
+                                         cbx, cby, res, band, min_val, max_val, unique_count, has_nonzero,
+                                         &block_data[..block_data.len().min(10)]);
+                            }
+                        }
+                        
                         let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
-                        if let Some(max_bp) = bpc.calculate_max_bit_plane() {
+                        let max_bp_opt = bpc.calculate_max_bit_plane();
+                        
+                        // Encode if either:
+                        // 1. There's actual bit-plane variation (max_bp exists), OR
+                        // 2. The subband has non-zero coefficients (even if all identical)
+                        // This ensures subbands with constant non-zero values (like LL=-1) are encoded
+                        if max_bp_opt.is_some() || has_nonzero {
+                            let max_bp = max_bp_opt.unwrap_or(0);
+                            
                             // Map band 0..2 to orientation 1..3?
                             // encoder.rs loop: band 0..num_bands.
                             // if res=0, band=0 (LL -> orient 0).
@@ -593,8 +623,8 @@ impl J2kEncoder {
                             if std::env::var("J2K_DEBUG").is_ok() {
                                 let max_val = block_data.iter().map(|v| v.abs()).max().unwrap_or(0);
                                 eprintln!(
-                                    "ENC: CB[{},{}] res={} band={} orient={} max_val={} max_bp={}",
-                                    cbx, cby, res, band, orientation, max_val, max_bp
+                                    "ENC: CB[{},{}] res={} band={} orient={} max_val={} max_bp={} has_nonzero={}",
+                                    cbx, cby, res, band, orientation, max_val, max_bp, has_nonzero
                                 );
                             }
 

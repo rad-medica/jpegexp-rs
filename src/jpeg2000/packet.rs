@@ -153,8 +153,8 @@ impl PacketHeader {
 
                         if std::env::var("J2K_DEBUG").is_ok() {
                             eprintln!(
-                                "  CB[{},{}] subband={}: zero_bp={}, passes={}, lblock={}, lbits={}, len={}",
-                                x, y, s, zero_bp, num_passes, lblock, lbits, data_len
+                                "  DEC CB[{},{}] subband={}: zero_bp={}, passes={}, lblock_inc={}, lblock={}, log2_passes={}, lbits={}, len={}",
+                                x, y, s, zero_bp, num_passes, lblock_inc, lblock, log2_passes, lbits, data_len
                             );
                         }
 
@@ -219,6 +219,7 @@ impl PacketHeader {
                 writer.write_bit(1);
                 writer.write_bits(3, 2);
                 writer.write_bits(31, 5);
+                writer.write_bits((passes - 37) as u32, 5);
             }
         }
     }
@@ -324,6 +325,11 @@ impl PacketHeader {
                         let lblock = numlenbits + increment;
                         let lbits = lblock + log2_passes;
 
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            eprintln!("  ENC CB[{},{}] s={}: passes={} len={} bits_needed={} log2_passes={} numlenbits={} increment={} lblock={} lbits={}", 
+                                      x, y, s, cb.num_passes, cb.data_len, bits_needed, log2_passes, numlenbits, increment, lblock, lbits);
+                        }
+                        
                         Self::write_comma_code(writer, increment);
                         writer.write_bits(cb.data_len, lbits as u8);
                     } else {
