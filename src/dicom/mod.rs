@@ -1,26 +1,26 @@
 /// DICOM Encapsulation for JPEG 2000
-/// 
+///
 /// Implements DICOM PS3.5 Section 8.2.4 and Annex A.4 for encapsulating
 /// JPEG 2000 codestreams in DICOM format.
-/// 
+///
 /// # DICOM Fragment Encapsulation Format
-/// 
+///
 /// ```text
 /// Item Tag         (FFFE,E000)  4 bytes
 /// Item Length                    4 bytes (JPEG 2000 codestream length)
 /// JPEG 2000 Data                 N bytes
 /// ```
-/// 
+///
 /// # Basic Offset Table Format
-/// 
+///
 /// ```text
 /// Item Tag         (FFFE,E000)  4 bytes
 /// Item Length                    4 bytes (table length, 0 or 4*num_frames)
 /// Frame Offsets                  4*num_frames bytes
 /// ```
-/// 
+///
 /// # Multi-Frame Encapsulation
-/// 
+///
 /// ```text
 /// Basic Offset Table (optional)
 /// Frame 1 Fragment (Item Tag + Length + Data)
@@ -28,7 +28,6 @@
 /// ...
 /// Sequence Delimiter (FFFE,E0DD) + Length(0)
 /// ```
-
 use std::io::{self, Write};
 
 /// DICOM Item Tag for encapsulated data fragments
@@ -81,7 +80,7 @@ impl DicomEncapsulator {
     }
 
     /// Set whether to include the Basic Offset Table
-    /// 
+    ///
     /// The Basic Offset Table is optional but recommended for multi-frame images.
     /// It allows random access to frames without parsing the entire encapsulated data.
     pub fn set_include_offset_table(&mut self, include: bool) {
@@ -89,7 +88,7 @@ impl DicomEncapsulator {
     }
 
     /// Add a frame (JPEG 2000 codestream) to the encapsulation
-    /// 
+    ///
     /// # Arguments
     /// * `codestream` - Complete JPEG 2000 codestream (SOC...EOC)
     pub fn add_frame(&mut self, codestream: Vec<u8>) -> Result<(), DicomError> {
@@ -106,7 +105,7 @@ impl DicomEncapsulator {
     }
 
     /// Calculate the Basic Offset Table
-    /// 
+    ///
     /// Returns a vector of byte offsets for each frame, relative to the first
     /// byte following the Basic Offset Table.
     fn calculate_offsets(&self) -> Vec<u32> {
@@ -123,16 +122,16 @@ impl DicomEncapsulator {
     }
 
     /// Write the encapsulated data to a writer
-    /// 
+    ///
     /// # Format
-    /// 
+    ///
     /// For single-frame images:
     /// ```text
     /// Empty Basic Offset Table (8 bytes)
     /// Frame Fragment
     /// Sequence Delimiter (8 bytes)
     /// ```
-    /// 
+    ///
     /// For multi-frame images with offset table:
     /// ```text
     /// Basic Offset Table with frame offsets
@@ -227,7 +226,7 @@ impl DicomEncapsulator {
     }
 
     /// Calculate the total size of the encapsulated data
-    /// 
+    ///
     /// Useful for pre-allocating buffers.
     pub fn calculate_size(&self) -> usize {
         if self.frames.is_empty() {
@@ -276,7 +275,7 @@ impl<'a> DicomParser<'a> {
     }
 
     /// Parse and extract all frames
-    /// 
+    ///
     /// Returns a vector of JPEG 2000 codestreams (one per frame)
     pub fn parse_frames(&mut self) -> Result<Vec<Vec<u8>>, DicomError> {
         let mut frames = Vec::new();
@@ -354,7 +353,8 @@ impl<'a> DicomParser<'a> {
         }
 
         let tag = u16::from_le_bytes([self.data[self.position], self.data[self.position + 1]]);
-        let element = u16::from_le_bytes([self.data[self.position + 2], self.data[self.position + 3]]);
+        let element =
+            u16::from_le_bytes([self.data[self.position + 2], self.data[self.position + 3]]);
 
         if tag == SEQ_DELIMITER_TAG && element == SEQ_DELIMITER_ELEMENT {
             self.position += 8; // Skip delimiter tag + length
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn test_single_frame_encapsulation() {
         let mut encapsulator = DicomEncapsulator::new();
-        
+
         // Create a minimal JPEG 2000 codestream
         let frame = vec![0xFF, 0x4F, 0x00, 0x01, 0x02, 0x03, 0xFF, 0xD9]; // SOC ... EOC
         encapsulator.add_frame(frame.clone()).unwrap();
@@ -426,10 +426,10 @@ mod tests {
     #[test]
     fn test_multi_frame_encapsulation() {
         let mut encapsulator = DicomEncapsulator::new();
-        
+
         let frame1 = vec![0xFF, 0x4F, 0x00, 0x01, 0xFF, 0xD9];
         let frame2 = vec![0xFF, 0x4F, 0x00, 0x02, 0x03, 0xFF, 0xD9];
-        
+
         encapsulator.add_frame(frame1.clone()).unwrap();
         encapsulator.add_frame(frame2.clone()).unwrap();
 
@@ -444,10 +444,10 @@ mod tests {
     #[test]
     fn test_roundtrip() {
         let mut encapsulator = DicomEncapsulator::new();
-        
+
         let frame1 = vec![0xFF, 0x4F, 0x01, 0x02, 0x03, 0xFF, 0xD9];
         let frame2 = vec![0xFF, 0x4F, 0x04, 0x05, 0x06, 0x07, 0xFF, 0xD9];
-        
+
         encapsulator.add_frame(frame1.clone()).unwrap();
         encapsulator.add_frame(frame2.clone()).unwrap();
 
@@ -466,12 +466,12 @@ mod tests {
     #[test]
     fn test_size_calculation() {
         let mut encapsulator = DicomEncapsulator::new();
-        
+
         let frame = vec![0xFF; 100];
         encapsulator.add_frame(frame.clone()).unwrap();
 
         let calculated_size = encapsulator.calculate_size();
-        
+
         let mut output = Vec::new();
         encapsulator.write(&mut output).unwrap();
 

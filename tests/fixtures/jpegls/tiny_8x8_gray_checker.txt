@@ -1,0 +1,9 @@
+Name: tiny_8x8_gray_checker
+Shape: (8, 8)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.50
+JLS size: 90 bytes
+Raw size: 64 bytes
+Compression ratio: 0.71x

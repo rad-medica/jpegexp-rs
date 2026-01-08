@@ -1,8 +1,8 @@
-use crate::JpeglsError;
+use super::mag_sgn::MagSgnDecoder;
 use super::mel::MelDecoder;
 use super::vlc;
-use super::mag_sgn::MagSgnDecoder;
 use crate::jpeg2000::image::J2kCodeBlock;
+use crate::JpeglsError;
 
 pub struct HTBlockCoder<'a> {
     mel_decoder: MelDecoder<'a>,
@@ -29,10 +29,14 @@ impl<'a> HTBlockCoder<'a> {
         // 2. Decode passes: Cleanup (HT Clean)
         // Note: HTJ2K replaces the standard 3 passes with a single "HT Clean" pass
         // that handles everything via MEL/VLC/MagSgn.
-        
-        if block.width == 0 { block.width = self.width as u32; }
-        if block.height == 0 { block.height = self.height as u32; }
-        
+
+        if block.width == 0 {
+            block.width = self.width as u32;
+        }
+        if block.height == 0 {
+            block.height = self.height as u32;
+        }
+
         // Initialize coefficients
         if block.coefficients.len() != (block.width * block.height) as usize {
             block.coefficients = vec![0; (block.width * block.height) as usize];
@@ -47,7 +51,7 @@ impl<'a> HTBlockCoder<'a> {
                 if y >= self.height {
                     break;
                 }
-                
+
                 // Iterate quads horizontally
                 for x in (0..self.width).step_by(2) {
                     // Decode quad at (x, y)
@@ -59,7 +63,12 @@ impl<'a> HTBlockCoder<'a> {
         Ok(())
     }
 
-    fn decode_quad(&mut self, x: usize, y_base: usize, block: &mut J2kCodeBlock) -> Result<(), JpeglsError> {
+    fn decode_quad(
+        &mut self,
+        x: usize,
+        y_base: usize,
+        block: &mut J2kCodeBlock,
+    ) -> Result<(), JpeglsError> {
         // Calculate context for MEL
         // Context depends on significance of neighbors (sigma)
         let context = self.calculate_context(x, y_base, block);
@@ -70,20 +79,24 @@ impl<'a> HTBlockCoder<'a> {
         // If symbol is 1 -> Significant quad.
 
         let is_significant = self.mel_decoder.decode();
-        
+
         if std::env::var("HTJ2K_DEBUG").is_ok() {
-            eprintln!("[HTJ2K] Quad ({:2},{:2}): ctx={}, is_sig={}", 
-                     x, y_base, context, is_significant);
+            eprintln!(
+                "[HTJ2K] Quad ({:2},{:2}): ctx={}, is_sig={}",
+                x, y_base, context, is_significant
+            );
         }
 
         if is_significant {
             // 3. VLC Decoding
             let peek = self.mel_decoder.peek_bits(16);
             let (rho, _u_off, _e_k, bits_consumed) = vlc::decode_vlc(peek, context);
-            
+
             if std::env::var("HTJ2K_DEBUG").is_ok() {
-                eprintln!("       VLC: peek={:016b}, rho={:04b}, bits={}", 
-                         peek, rho, bits_consumed);
+                eprintln!(
+                    "       VLC: peek={:016b}, rho={:04b}, bits={}",
+                    peek, rho, bits_consumed
+                );
             }
 
             // Consume the VLC bits
@@ -110,7 +123,7 @@ impl<'a> HTBlockCoder<'a> {
     fn apply_rho(&self, x: usize, y: usize, rho: u8, block: &mut J2kCodeBlock) {
         // rho is 4 bits: (0,0), (1,0), (0,1), (1,1)
         // LSB corresponds to first in scan
-        
+
         let w = block.width as usize;
         let h = block.height as usize;
         let coeffs = &mut block.coefficients;
@@ -133,7 +146,13 @@ impl<'a> HTBlockCoder<'a> {
         }
     }
 
-    fn process_magsgn(&mut self, x: usize, y: usize, rho: u8, block: &mut J2kCodeBlock) -> Result<(), JpeglsError> {
+    fn process_magsgn(
+        &mut self,
+        x: usize,
+        y: usize,
+        rho: u8,
+        block: &mut J2kCodeBlock,
+    ) -> Result<(), JpeglsError> {
         let w = block.width as usize;
         let h = block.height as usize;
         let coeffs = &mut block.coefficients;
@@ -145,22 +164,25 @@ impl<'a> HTBlockCoder<'a> {
                 if (rho & (1 << bit_idx)) != 0 {
                     let px = x + qx;
                     let py = y + qy;
-                    
+
                     if px < w && py < h {
                         // Read Sign
-                        let sign = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
-                        
+                        let sign = self
+                            .magsgn_decoder
+                            .read_bit()
+                            .ok_or(JpeglsError::InvalidData)?;
+
                         // Read Magnitude Refinement
                         // Placeholder: value is 1 (from apply_rho)
                         let mut val = 1;
-                        
+
                         // If we need to read more bits (refinement), we do it here.
                         // For now, apply sign.
-                        
+
                         if sign == 1 {
                             val = -val;
                         }
-                        
+
                         coeffs[py * w + px] = val;
                     }
                 }

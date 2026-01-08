@@ -1,0 +1,9 @@
+Name: large_256x256_gray_gradient
+Shape: (256, 256)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.00
+JLS size: 8838 bytes
+Raw size: 65536 bytes
+Compression ratio: 7.42x

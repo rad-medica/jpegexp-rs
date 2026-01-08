@@ -21,7 +21,7 @@ pub struct J2kBitReader<'a, 'b> {
 
 impl<'a, 'b> J2kBitReader<'a, 'b> {
     pub fn new(reader: &'a mut crate::jpeg_stream_reader::JpegStreamReader<'b>) -> Self {
-        Self { 
+        Self {
             reader,
             bit_buffer: 0,
             bits_count: 0,
@@ -32,12 +32,12 @@ impl<'a, 'b> J2kBitReader<'a, 'b> {
     pub fn read_bit(&mut self) -> Result<u8, BitIoError> {
         if self.bits_count == 0 {
             let b = self.reader.read_u8().map_err(|_| BitIoError)?;
-            
+
             if self.last_byte == 0xFF {
                 // Stuffed byte: MSB is stuffed 0, bits 6..0 are data
                 // We verify MSB is 0? Standard says "next byte shall be < 0x90".
                 // We consume 7 bits.
-                self.bit_buffer = b; 
+                self.bit_buffer = b;
                 self.bits_count = 7;
                 // Note: bit_buffer still has b7 at top.
                 // If bits_count=7, we read from bit index 6 (0-based) down to 0?
@@ -54,10 +54,10 @@ impl<'a, 'b> J2kBitReader<'a, 'b> {
             }
             self.last_byte = b;
         }
-        
+
         let bit = (self.bit_buffer >> (self.bits_count - 1)) & 1;
         self.bits_count -= 1;
-        
+
         Ok(bit)
     }
 
@@ -77,7 +77,6 @@ impl<'a, 'b> J2kBitReader<'a, 'b> {
         Ok(bits)
     }
 }
-
 
 pub struct J2kBitWriter {
     data: Vec<u8>,
@@ -105,9 +104,9 @@ impl J2kBitWriter {
     pub fn write_bit(&mut self, bit: u8) {
         self.bit_buffer = (self.bit_buffer << 1) | (bit & 1);
         self.bits_count += 1;
-        
+
         let limit = if self.last_byte_ff { 7 } else { 8 };
-        
+
         if self.bits_count == limit {
             self.flush_byte();
         }

@@ -1,0 +1,9 @@
+Name: tiny_8x8_rgb_gradient
+Shape: (8, 8, 3)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.02
+JLS size: 163 bytes
+Raw size: 192 bytes
+Compression ratio: 1.18x

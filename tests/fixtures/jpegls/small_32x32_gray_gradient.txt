@@ -1,0 +1,9 @@
+Name: small_32x32_gray_gradient
+Shape: (32, 32)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.00
+JLS size: 227 bytes
+Raw size: 1024 bytes
+Compression ratio: 4.51x

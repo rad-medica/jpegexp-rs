@@ -63,18 +63,27 @@ jpegexp-rs/
 │   │   └── dwt.rs          # DWT implementation
 │   └── lib.rs              # Library root
 ├── libs/               # External libraries
-│   ├── bin/            # Binaries (OpenJPEG, OpenHTJ2K, CharLS)
-│   ├── openjpeg/       # OpenJPEG source/libs
-│   ├── openhtj2k/      # OpenHTJ2K source
-│   └── charls/         # CharLS placeholder
+│   ├── bin/            # Centralized binaries (OpenJPEG, OpenHTJ2K, CharLS, libjpeg-turbo)
+│   ├── openjpeg_src/   # OpenJPEG source
+│   ├── openhtj2k_src/  # OpenHTJ2K source
+│   ├── charls_src/     # CharLS source
+│   └── libjpeg-turbo_src/ # libjpeg-turbo source
 ├── examples/           # Example code and usage scripts
 ├── scripts/            # Utility and maintenance scripts
 ├── tests/
-│   ├── fixtures/       # Test images and input data
-│   └── comprehensive_test.py  # Codec comparison tests
-├── CODEC_TEST_RESULTS.md   # Detailed test results
-├── SUMMARY.md              # Project summary
-└── README.md               # Main documentation
+│   ├── fixtures/       # Standardized test images and reference data
+│   ├── unit/           # Unit tests
+│   ├── integration/    # Feature-level integration tests
+│   ├── regression/     # Bug regression tests
+│   ├── interop/        # Interoperability tests with reference codecs
+│   ├── scripts/        # Python utility scripts
+│   └── notebooks/      # Jupyter analysis notebooks
+├── docs/               # Detailed documentation
+│   ├── status.md       # Project status and roadmap
+│   ├── todo.md         # Pending tasks
+│   └── test-results.md # Validation results
+├── Cargo.toml          # Rust package manifest
+└── README.md           # Main documentation
 ```
 
 ## Building and Testing
@@ -95,18 +104,20 @@ cargo watch -x build
 ### Testing
 
 ```bash
-# Run Rust unit tests
-cargo test
+# Run all tests
+cargo test --release
 
-# Run integration tests
-cargo test --test '*'
+# Run tests by category
+cargo test --test 'test_unit_*'
+cargo test --test 'test_integration_*'
+
+# Run specific interop test (requires binaries in libs/bin)
+cargo test --test final_interop
 
 # Run comprehensive codec tests (Python)
-python3 tests/comprehensive_test.py
-
-# Run specific test
-cargo test test_name
+python3 tests/scripts/test_suite.py
 ```
+
 
 ### Linting and Formatting
 

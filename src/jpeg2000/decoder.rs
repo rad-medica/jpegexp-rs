@@ -103,8 +103,12 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             let is_htj2k = if let Some(cap) = &self.parser.image.cap {
                 let htj2k_flag = (cap.pcap & 0x00020000) != 0;
                 if std::env::var("HTJ2K_DEBUG").is_ok() {
-                    eprintln!("[HTJ2K] CAP detected: Pcap=0x{:08X}, bit14_check=0x{:08X}, is_htj2k={}",
-                             cap.pcap, cap.pcap & 0x00020000, htj2k_flag);
+                    eprintln!(
+                        "[HTJ2K] CAP detected: Pcap=0x{:08X}, bit14_check=0x{:08X}, is_htj2k={}",
+                        cap.pcap,
+                        cap.pcap & 0x00020000,
+                        htj2k_flag
+                    );
                 }
                 htj2k_flag
             } else {
@@ -195,11 +199,14 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         tile_states: &mut Vec<TileState>,
     ) -> Result<(), JpeglsError> {
         let ht_enabled = is_ht_mode; // Capture argument locally
-        
+
         if std::env::var("HTJ2K_DEBUG").is_ok() {
-            eprintln!("[HTJ2K] decode_tile_data called for tile {}. is_htj2k={}", isot, ht_enabled);
+            eprintln!(
+                "[HTJ2K] decode_tile_data called for tile {}. is_htj2k={}",
+                isot, ht_enabled
+            );
         }
-        
+
         let tile_idx = isot as usize;
         if parser.image.tiles.len() <= tile_idx {
             parser
@@ -472,7 +479,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 // Calculate precinct dimensions in codeblocks
                                 // NOTE: The PacketHeader expects grid dimensions in SUBBAND codeblocks.
                                 // We must calculate exact dimensions for each subband type (HL, LH, HH)
-                                
+
                                 let nom_w = 1 << (cod.codeblock_width_exp + 2);
                                 let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
@@ -481,9 +488,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 let p_y_start = py * ppy;
                                 let p_x_end = (p_x_start + ppx).min(res_w);
                                 let p_y_end = (p_y_start + ppy).min(res_h);
-                                
+
                                 let mut subband_grids = Vec::with_capacity(num_subbands);
-                                
+
                                 for s in 0..num_subbands {
                                     let (gw, gh) = if r == 0 {
                                         // LL band: 1-to-1 mapping with resolution
@@ -495,17 +502,27 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                         // HL: High X, Low Y
                                         // LH: Low X, High Y
                                         // HH: High X, High Y
-                                        
+
                                         // Helper: count samples in range [start, end)
                                         // Low pass (even indices): ceil(end/2) - ceil(start/2)
                                         // High pass (odd indices): floor(end/2) - floor(start/2)
-                                        let count_low = |start: u32, end: u32| (end + 1) / 2 - (start + 1) / 2;
+                                        let count_low =
+                                            |start: u32, end: u32| (end + 1) / 2 - (start + 1) / 2;
                                         let count_high = |start: u32, end: u32| end / 2 - start / 2;
-                                        
+
                                         let (w, h) = match s {
-                                            0 => (count_high(p_x_start, p_x_end), count_low(p_y_start, p_y_end)), // HL
-                                            1 => (count_low(p_x_start, p_x_end), count_high(p_y_start, p_y_end)), // LH
-                                            2 => (count_high(p_x_start, p_x_end), count_high(p_y_start, p_y_end)), // HH
+                                            0 => (
+                                                count_high(p_x_start, p_x_end),
+                                                count_low(p_y_start, p_y_end),
+                                            ), // HL
+                                            1 => (
+                                                count_low(p_x_start, p_x_end),
+                                                count_high(p_y_start, p_y_end),
+                                            ), // LH
+                                            2 => (
+                                                count_high(p_x_start, p_x_end),
+                                                count_high(p_y_start, p_y_end),
+                                            ), // HH
                                             _ => (0, 0),
                                         };
                                         (w.div_ceil(nom_w) as usize, h.div_ceil(nom_h) as usize)
@@ -689,8 +706,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 let is_ht_block = is_htj2k && ((cod.code_block_style & 0x40) != 0);
 
                 if std::env::var("HTJ2K_DEBUG").is_ok() {
-                    eprintln!("[HTJ2K] Block check: CAP={}, Style=0x{:02X}, UseHT={}, cb=({},{})", 
-                        is_htj2k, cod.code_block_style, is_ht_block, cb_info.x, cb_info.y);
+                    eprintln!(
+                        "[HTJ2K] Block check: CAP={}, Style=0x{:02X}, UseHT={}, cb=({},{})",
+                        is_htj2k, cod.code_block_style, is_ht_block, cb_info.x, cb_info.y
+                    );
                 }
 
                 if is_ht_block {
@@ -702,26 +721,36 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     block.height = cb_height as u32;
                     block.layer_data.push(data.clone());
                     block.layers_decoded = (layer + 1) as u8;
-                    
+
                     // HTJ2K uses the same packet data for MEL and MagSgn/VLC
                     // The splitting is implicit: MEL grows backward from end, MagSgn forward from start
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
-                        &data, &data, 
-                        block.width as usize, 
+                        &data,
+                        &data,
+                        block.width as usize,
                         block.height as usize,
                     );
-                    
+
                     if std::env::var("HTJ2K_DEBUG").is_ok() {
-                        eprintln!("[HTJ2K] Decoding block [{},{}] {}x{} len={}", 
-                            block.x, block.y, block.width, block.height, data.len());
+                        eprintln!(
+                            "[HTJ2K] Decoding block [{},{}] {}x{} len={}",
+                            block.x,
+                            block.y,
+                            block.width,
+                            block.height,
+                            data.len()
+                        );
                     }
 
                     match coder.decode_block(&mut block) {
                         Ok(_) => {
                             if std::env::var("HTJ2K_DEBUG").is_ok() {
-                                eprintln!("[HTJ2K] Decoded {} coefficients", block.coefficients.len());
+                                eprintln!(
+                                    "[HTJ2K] Decoded {} coefficients",
+                                    block.coefficients.len()
+                                );
                             }
-                        },
+                        }
                         Err(_) => {
                             if std::env::var("HTJ2K_DEBUG").is_ok() {
                                 eprintln!("[HTJ2K] Block decoding failed");
@@ -758,7 +787,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     let max_bit_plane = (m_b.saturating_sub(1)).saturating_sub(zero_bp);
 
                     if std::env::var("J2K_DEBUG").is_ok() {
-                        eprintln!("  Decoding CB[{},{}] subband={} zero_bp={} eps={} guard={} mb={} max_bp={}", 
+                        eprintln!("  Decoding CB[{},{}] subband={} zero_bp={} eps={} guard={} mb={} max_bp={}",
                             cb_info.x, cb_info.y, cb_info.subband_index, zero_bp, epsilon_b, guard_bits, m_b, max_bit_plane);
                     }
 

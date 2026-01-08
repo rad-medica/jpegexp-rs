@@ -1,0 +1,9 @@
+Name: medium_64x64_rgb_gradient
+Shape: (64, 64, 3)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.00
+JLS size: 1819 bytes
+Raw size: 12288 bytes
+Compression ratio: 6.76x

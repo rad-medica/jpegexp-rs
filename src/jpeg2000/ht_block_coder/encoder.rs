@@ -249,7 +249,8 @@ impl HTBlockEncoder {
         if is_significant {
             // Encode VLC codeword for rho pattern
             let context = self.calculate_context(x, y_base, block);
-            let vlc_codeword = vlc::encode_vlc(rho, context);
+            let u_off = 0; // TODO: Proper U_off calculation for magnitude prediction
+            let (vlc_codeword, _e_k, _e_1) = vlc::encode_vlc(rho, context, u_off);
 
             // Write VLC bits
             for i in (0..vlc_codeword.bits).rev() {

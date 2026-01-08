@@ -17,18 +17,18 @@ impl<'a> MelDecoder<'a> {
         while effective_len > 0 && data[effective_len - 1] == 0 {
             effective_len -= 1;
         }
-        
+
         // If buffer was all zeros, we might have trimmed valid zeros.
         // But for MEL, a stream of all zeros means "run of zeros", which matches behavior of 00 bytes.
         // So trimming is probably safe-ish for decoding logic, but let's keep at least 1 byte if meaningful?
         // Actually, if we trim all, effective_len=0. read_raw_bit returns None.
         // MEL decode should handle EOF as 0?
         if effective_len == 0 && !data.is_empty() {
-             // Revert to full length if it appears to be all zeros (e.g. black image)
-             // effective_len = data.len();
-             // Wait, for black image, we WANT 0s.
-             // If we trim to 0 length, read_bit returns None.
-             // We should handle None.
+            // Revert to full length if it appears to be all zeros (e.g. black image)
+            // effective_len = data.len();
+            // Wait, for black image, we WANT 0s.
+            // If we trim to 0 length, read_bit returns None.
+            // We should handle None.
         }
 
         Self {
@@ -89,17 +89,18 @@ impl<'a> MelDecoder<'a> {
                 if temp_pos == 0 {
                     break;
                 }
-                
+
                 // Read backward logic (match read_raw_bit)
                 let mut next_read_pos = temp_pos - 1;
                 temp_buffer = self.data[next_read_pos];
-                
+
                 // Stuffing check
-                if next_read_pos > 0 && temp_buffer == 0x00 && self.data[next_read_pos - 1] == 0xFF {
+                if next_read_pos > 0 && temp_buffer == 0x00 && self.data[next_read_pos - 1] == 0xFF
+                {
                     next_read_pos -= 1;
                     temp_buffer = 0xFF;
                 }
-                
+
                 temp_pos = next_read_pos;
                 temp_left = 8;
             }
@@ -120,47 +121,165 @@ impl<'a> MelDecoder<'a> {
         }
 
         let bit = self.read_bit().unwrap_or(0);
-        // 0 bit -> Run of length 2^k
-        // 1 bit -> End of run / Significant logic?
-
-        // HTJ2K MEL Logic:
-        // Read bit.
-        // If 0: It's a run of 'E' (exponent) zeros?
-        // Wait, standard state machine:
-        // If bit == 0:
-        //   Run of 2^k zeros.
-        //   k = min(12, k + 1)
-        //   Return 0 (and set run counter for subsequent calls)
-        // If bit == 1:
-        //   Run length was < 2^k.
-        //   Need to read more bits to determine actual length?
-        //   Or simply "One 1" and adapt k?
-
-        // Correct logic from standard:
-        // When decoding a symbol:
-        // 1. If run > 0, return 0, decrement run. (Handled at start)
-        // 2. Read 'u' (next bit).
-        // 3. If u == 0:
-        //    We have a run of 2^k '0's.
-        //    self.run = (1 << k) - 1; // Current symbol is 0, plus (2^k - 1) more.
-        //    k = min(12, k+1)
-        //    return 0
-        // 4. If u == 1:
-        //    Run broken.
-        //    run = 0;
-        //    k = max(0, k-1)
-        //    return 1 (Significant)
 
         if bit == 0 {
+            // Full run of 2^k zeros
             let run_len = 1 << self.k;
             self.run = run_len - 1; // Current one is 0, so remaining is len-1
             self.k = (self.k + 1).min(12);
             false
         } else {
-            self.run = 0;
+            // Partial run (or immediate 1)
+            // Read k bits to determine how many zeros preceded this 1
+            let partial_run = if self.k > 0 {
+                // Read k bits
+                let mut val = 0;
+                for _ in 0..self.k {
+                    val = (val << 1) | self.read_bit().unwrap_or(0) as i32;
+                }
+                val
+            } else {
+                0
+            };
+
+            self.run = partial_run; // These are zeros to return in subsequent calls
             self.k = (self.k - 1).max(0);
-            true
+
+            if self.run > 0 {
+                self.run -= 1;
+                false // Return 0 (first of the partial run)
+            } else {
+                true // No zeros, immediate 1
+            }
         }
+    }
+}
+
+/// MEL Encoder
+pub struct MelEncoder {
+    buffer: Vec<u8>,
+    bit_buffer: u8,
+    bits_count: u8,
+    k: i32,
+    run_accum: i32,
+}
+
+impl MelEncoder {
+    pub fn new() -> Self {
+        Self {
+            buffer: Vec::new(),
+            bit_buffer: 0,
+            bits_count: 0,
+            k: 0,
+            run_accum: 0,
+        }
+    }
+
+    fn write_bit(&mut self, bit: u8) {
+        // Bits are packed LSB to MSB?
+        // No, HTJ2K bitstream grows backwards, but within byte?
+        // MelDecoder reads: (self.bits_buffer >> (self.bits_left - 1)) & 1.
+        // This is MSB first within the byte.
+        // But the BYTES are read backwards.
+        // So we should pack MSB first, and push bytes.
+        // Wait, MelDecoder::read_raw_bit reads bytes from END of buffer.
+
+        self.bit_buffer = (self.bit_buffer << 1) | (bit & 1);
+        self.bits_count += 1;
+        if self.bits_count == 8 {
+            // Handle stuffing: if byte is 0xFF, next must be < 0x80.
+            // But HTJ2K writes backward.
+            // Encoder writes bytes normally, then we reverse them?
+            // Or we just append, and the decoder reads from end.
+
+            // Standard J2K stuffing: 0xFF followed by 0x00 is 0xFF data.
+            // HTJ2K MEL is raw bits.
+            // If we produce 0xFF, we must stuff 0x00?
+            // MelDecoder handles 0xFF, 0x00 sequence as 0xFF data.
+
+            self.buffer.push(self.bit_buffer);
+            if self.bit_buffer == 0xFF {
+                self.buffer.push(0x00); // Stuffing
+            }
+            self.bit_buffer = 0;
+            self.bits_count = 0;
+        }
+    }
+
+    fn write_bits(&mut self, val: i32, count: i32) {
+        for i in (0..count).rev() {
+            self.write_bit(((val >> i) & 1) as u8);
+        }
+    }
+
+    pub fn encode(&mut self, val: bool) {
+        if !val {
+            // Symbol is 0 (insignificant)
+            self.run_accum += 1;
+            if self.run_accum == (1 << self.k) {
+                // Full run reached
+                self.write_bit(0); // '0' indicates full run
+                self.k = (self.k + 1).min(12);
+                self.run_accum = 0;
+            }
+        } else {
+            // Symbol is 1 (significant)
+            self.write_bit(1); // '1' indicates run break
+
+            // Encode partial run length (run_accum) using k bits
+            self.write_bits(self.run_accum, self.k);
+
+            self.k = (self.k - 1).max(0);
+            self.run_accum = 0;
+        }
+    }
+
+    pub fn flush(&mut self) {
+        // If we have accumulated zeros at the end of the stream, we must output them?
+        // HTJ2K: "The MEL bitstream is terminated by a '1' bit if the last symbol was 0?"
+        // No, typically we just pad.
+        // But if `run_accum > 0`, these are real 0s that haven't been encoded yet.
+        // We can treat it as a break with a 1? No, that would add a 1.
+        // Standard says we can pad with 1s? Or we assume remaining are 0?
+        // Actually, if we just stop, the decoder might wait for more bits.
+        // Usually we flush by treating as a break?
+        // Let's assume we treat it as a break (write 1 and partial run).
+        // This effectively encodes the trailing zeros and a phantom 1.
+        // If the decoder knows the number of quads, it stops.
+        // If it doesn't, it might read an extra 1.
+
+        if self.run_accum > 0 {
+            self.write_bit(1);
+            self.write_bits(self.run_accum, self.k);
+            self.k = (self.k - 1).max(0);
+            self.run_accum = 0;
+        }
+
+        if self.bits_count > 0 {
+            // Pad remaining bits in byte.
+            // Usually pad with 0 or 1?
+            // MelDecoder reads MSB first.
+            // If we have 3 bits: [b0 b1 b2 . . . . .]
+            // We want them at top: [b0 b1 b2 0 0 0 0 0] ?
+            // self.bit_buffer contains the bits in lower part.
+            // e.g. bits=3, val=0x07 (111).
+            // We want byte: 11100000.
+            self.bit_buffer <<= 8 - self.bits_count;
+            self.buffer.push(self.bit_buffer);
+            if self.bit_buffer == 0xFF {
+                self.buffer.push(0x00);
+            }
+        }
+    }
+
+    pub fn get_buffer(&self) -> &[u8] {
+        &self.buffer
+    }
+}
+
+impl Default for MelEncoder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

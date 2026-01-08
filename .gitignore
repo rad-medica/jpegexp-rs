@@ -1,9 +1,10 @@
 # External Libraries
-/libs/bin/*
+/libs/bin/
 /libs/openhtj2k_src/*
 /libs/openjpeg_src/*
+/libs/libjpeg-turbo_src/*
+/libs/charls_src/*
 !/libs/README.md
-!/libs/charls_src/README.md
 
 # Rust
 /target/
@@ -49,24 +50,16 @@ dmypy.json
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb_checkpoints/
-tests/out/
+
+# Test Artifacts
+tests/fixtures/out/*
+!tests/fixtures/out/.gitkeep
 
 # OS
 Thumbs.db
 desktop.ini
-tests/jpegls_test_images/*.raw
-tests/jpegls_test_images/*.jls
-tests/jpegls_test_images/*.txt
-
 
 .ruff_cache/
 
-*.raw
-*.jls
-*.jpg
-*.jpeg
-*.j2k
-*.zip
-*.pgm
 *.pdb
 *.exe

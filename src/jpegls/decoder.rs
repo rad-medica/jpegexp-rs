@@ -39,6 +39,16 @@ impl<'a> JpeglsDecoder<'a> {
 
     pub fn decode(&mut self, destination: &mut [u8]) -> Result<(), JpeglsError> {
         self.reader.read_start_of_scan_segment_jpegls()?;
+
+        #[cfg(debug_assertions)]
+        if std::env::var("JPEGLS_DEBUG").is_ok() {
+            println!(
+                "After SOS: reader position = {}, remaining = {} bytes",
+                self.reader.position(),
+                self.reader.remaining_data().len()
+            );
+        }
+
         let frame_info = self.frame_info();
 
         let preset = self.reader.preset_coding_parameters();

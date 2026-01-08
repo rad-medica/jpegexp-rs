@@ -1,0 +1,9 @@
+Name: edge_1x1_gray
+Shape: (1, 1)
+Dtype: uint8
+Min: 127
+Max: 127
+Mean: 127.00
+JLS size: 75 bytes
+Raw size: 1 bytes
+Compression ratio: 0.01x

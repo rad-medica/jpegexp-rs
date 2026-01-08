@@ -12,6 +12,186 @@ categories = ["multimedia::images", "encoding"]
 name = "jpegexp"
 path = "src/bin/jpegexp.rs"
 
+[[test]]
+name = "j2k_roundtrip_test"
+path = "tests/integration/j2k_roundtrip_test.rs"
+
+[[test]]
+name = "large_image_test"
+path = "tests/integration/large_image_test.rs"
+
+[[test]]
+name = "test_12bit_support"
+path = "tests/integration/test_12bit_support.rs"
+
+[[test]]
+name = "test_16bit_support"
+path = "tests/integration/test_16bit_support.rs"
+
+[[test]]
+name = "test_color"
+path = "tests/integration/test_color.rs"
+
+[[test]]
+name = "test_dicom_j2k_encapsulation"
+path = "tests/integration/test_dicom_j2k_encapsulation.rs"
+
+[[test]]
+name = "test_htj2k"
+path = "tests/integration/test_htj2k.rs"
+
+[[test]]
+name = "test_htj2k_compliance"
+path = "tests/integration/test_htj2k_compliance.rs"
+
+[[test]]
+name = "test_htj2k_comprehensive"
+path = "tests/integration/test_htj2k_comprehensive.rs"
+
+[[test]]
+name = "test_htj2k_encode"
+path = "tests/integration/test_htj2k_encode.rs"
+
+[[test]]
+name = "test_htj2k_minimal"
+path = "tests/integration/test_htj2k_minimal.rs"
+
+[[test]]
+name = "test_larger_images"
+path = "tests/integration/test_larger_images.rs"
+
+[[test]]
+name = "test_large_rgb_images"
+path = "tests/integration/test_large_rgb_images.rs"
+
+[[test]]
+name = "test_monochrome1_support"
+path = "tests/integration/test_monochrome1_support.rs"
+
+[[test]]
+name = "test_rgb_comprehensive"
+path = "tests/integration/test_rgb_comprehensive.rs"
+
+[[test]]
+name = "test_signed_pixel_support"
+path = "tests/integration/test_signed_pixel_support.rs"
+
+[[test]]
+name = "test_various_sizes"
+path = "tests/integration/test_various_sizes.rs"
+
+[[test]]
+name = "compare_with_openjpeg_encoder"
+path = "tests/interop/compare_with_openjpeg_encoder.rs"
+
+[[test]]
+name = "final_interop"
+path = "tests/interop/final_interop.rs"
+
+[[test]]
+name = "gradient_interop"
+path = "tests/interop/gradient_interop.rs"
+
+[[test]]
+name = "jpegls_charls_validation"
+path = "tests/interop/jpegls_charls_validation.rs"
+
+[[test]]
+name = "openjpeg_compat_test"
+path = "tests/interop/openjpeg_compat_test.rs"
+
+[[test]]
+name = "test_comprehensive_comparison"
+path = "tests/interop/test_comprehensive_comparison.rs"
+
+[[test]]
+name = "test_large_images_interop"
+path = "tests/interop/test_large_images_interop.rs"
+
+[[test]]
+name = "test_large_rgb_interop"
+path = "tests/interop/test_large_rgb_interop.rs"
+
+[[test]]
+name = "test_openjpeg_interop_detailed"
+path = "tests/interop/test_openjpeg_interop_detailed.rs"
+
+[[test]]
+name = "debug_charls_rgb"
+path = "tests/regression/debug_charls_rgb.rs"
+
+[[test]]
+name = "debug_edge_1x8"
+path = "tests/regression/debug_edge_1x8.rs"
+
+[[test]]
+name = "repro_j2k_lossy"
+path = "tests/regression/repro_j2k_lossy.rs"
+
+[[test]]
+name = "test_2x2_inverted_g"
+path = "tests/regression/test_2x2_inverted_g.rs"
+
+[[test]]
+name = "test_j2k_lossy"
+path = "tests/regression/test_j2k_lossy.rs"
+
+[[test]]
+name = "test_minimum_failing_size"
+path = "tests/regression/test_minimum_failing_size.rs"
+
+[[test]]
+name = "test_12bit"
+path = "tests/unit/test_12bit.rs"
+
+[[test]]
+name = "test_1level_mae"
+path = "tests/unit/test_1level_mae.rs"
+
+[[test]]
+name = "test_dwt_exact"
+path = "tests/unit/test_dwt_exact.rs"
+
+[[test]]
+name = "test_j2k_1level"
+path = "tests/unit/test_j2k_1level.rs"
+
+[[test]]
+name = "test_j2k_levelshift"
+path = "tests/unit/test_j2k_levelshift.rs"
+
+[[test]]
+name = "test_j2k_nodwt"
+path = "tests/unit/test_j2k_nodwt.rs"
+
+[[test]]
+name = "test_mb_formula_diagnostic"
+path = "tests/unit/test_mb_formula_diagnostic.rs"
+
+[[test]]
+name = "test_rgb_blocksize_dwt"
+path = "tests/unit/test_rgb_blocksize_dwt.rs"
+
+[[test]]
+name = "test_rgb_component_isolation"
+path = "tests/unit/test_rgb_component_isolation.rs"
+
+[[test]]
+name = "test_rgb_different_channels"
+path = "tests/unit/test_rgb_different_channels.rs"
+
+[[test]]
+name = "test_rgb_dwt_investigation"
+path = "tests/unit/test_rgb_dwt_investigation.rs"
+
+[[test]]
+name = "test_simple_j2k"
+path = "tests/unit/test_simple_j2k.rs"
+
+[[test]]
+name = "master_interop"
+path = "tests/interop/master_interop.rs"
+
 [[bench]]
 name = "j2k_compression"
 path = "benches/j2k_compression.rs"

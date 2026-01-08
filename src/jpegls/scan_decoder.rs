@@ -30,11 +30,11 @@ pub struct ScanDecoder<'a> {
     read_cache: usize,
 
     // Contexts
-    regular_mode_contexts: Vec<RegularModeContext>,
-    run_mode_contexts: Vec<RunModeContext>,
+    regular_mode_contexts: Vec<Vec<RegularModeContext>>,
+    run_mode_contexts: Vec<Vec<RunModeContext>>,
 
     // Scan state
-    run_index: usize,
+    run_index: Vec<usize>,
 
     // LUTs and Constants
     t1: i32,
@@ -59,6 +59,15 @@ impl<'a> ScanDecoder<'a> {
         coding_parameters: CodingParameters,
         source: &'a [u8],
     ) -> Result<Self, JpeglsError> {
+        debug_log!("=== ScanDecoder::new ===");
+        debug_log!("  Source slice length: {} bytes", source.len());
+        if source.len() >= 20 {
+            debug_log!("  First 20 bytes: {:02X?}", &source[0..20]);
+        }
+        if source.len() >= 10 {
+            debug_log!("  Last 10 bytes: {:02X?}", &source[source.len() - 10..]);
+        }
+
         let (t1, t2, t3, reset) = (
             pc_parameters.threshold1,
             pc_parameters.threshold2,
@@ -67,8 +76,28 @@ impl<'a> ScanDecoder<'a> {
         );
 
         let range = pc_parameters.maximum_sample_value + 1;
-        let regular_mode_contexts = vec![RegularModeContext::new(range); 365];
-        let run_mode_contexts = vec![RunModeContext::new(0, range), RunModeContext::new(1, range)];
+
+        let num_components = if coding_parameters.interleave_mode == InterleaveMode::None {
+            1
+        } else {
+            frame_info.component_count as usize
+        };
+
+        let mut regular_mode_contexts = Vec::with_capacity(num_components);
+        let mut run_mode_contexts = Vec::with_capacity(num_components);
+        let mut run_index = Vec::with_capacity(num_components);
+
+        for _ in 0..num_components {
+            regular_mode_contexts.push(vec![RegularModeContext::new(range); 365]);
+            // Per JPEG-LS spec section 4.5.2:
+            // Context 0 (Rb != Ra): RIType = 0
+            // Context 1 (Rb == Ra): RIType = 1
+            run_mode_contexts.push(vec![
+                RunModeContext::new(0, range), // context 0: different
+                RunModeContext::new(1, range), // context 1: similar
+            ]);
+            run_index.push(0);
+        }
 
         let mut decoder = Self {
             frame_info,
@@ -80,7 +109,7 @@ impl<'a> ScanDecoder<'a> {
             read_cache: 0,
             regular_mode_contexts,
             run_mode_contexts,
-            run_index: 0,
+            run_index,
             t1,
             t2,
             t3,
@@ -146,12 +175,14 @@ impl<'a> ScanDecoder<'a> {
     ) -> Result<(), JpeglsError> {
         let width = self.frame_info.width as usize;
         let height = self.frame_info.height as usize;
-        let pixel_stride = width + 2;
-        let components = if self.coding_parameters.interleave_mode == InterleaveMode::Line {
-            self.frame_info.component_count as usize
-        } else {
+        let components = if self.coding_parameters.interleave_mode == InterleaveMode::None {
             1
+        } else {
+            self.frame_info.component_count as usize
         };
+
+        // Use width + 2 logic for padding (Left and Right boundary)
+        let pixel_stride = (width + 2) * components;
 
         debug_log!("=== Starting decode_lines ===");
         debug_log!(
@@ -163,11 +194,8 @@ impl<'a> ScanDecoder<'a> {
         );
 
         // Initialize line buffer with 2 lines
-        // Per ITU-T T.87 specification, boundary pixels (outside the image) are
-        // initialized to ZERO for unsigned samples. This is required for proper
-        // synchronization between encoder and decoder.
         let init_value = T::from_i32(0);
-        let mut line_buffer: Vec<T> = vec![init_value; components * pixel_stride * 2];
+        let mut line_buffer: Vec<T> = vec![init_value; pixel_stride * 2];
 
         for line in 0..height {
             #[cfg(debug_assertions)]
@@ -175,8 +203,7 @@ impl<'a> ScanDecoder<'a> {
             #[cfg(debug_assertions)]
             let line_start_bits = self.bits_consumed;
 
-            let (prev_line_slice, curr_line_slice) =
-                line_buffer.split_at_mut(components * pixel_stride);
+            let (prev_line_slice, curr_line_slice) = line_buffer.split_at_mut(pixel_stride);
             let (prev, curr) = if (line & 1) == 1 {
                 (curr_line_slice, prev_line_slice)
             } else {
@@ -187,54 +214,58 @@ impl<'a> ScanDecoder<'a> {
             let curr_line = &mut curr[0..pixel_stride];
 
             // Initialize edge pixels per CharLS/ITU-T.87
-            // Left edge: current_line[0] = previous_line[1]
-            // Right edge: previous_line[width+1] = previous_line[width]
-            curr_line[0] = prev_line[1];
-            prev_line[width + 1] = prev_line[width]; // Right edge extension
-            self.decode_sample_line::<T>(prev_line, curr_line, width, line == 0)?;
+            // Left edge: current[0..comp] = previous[comp..2*comp]
+            for c in 0..components {
+                curr_line[c] = prev_line[components + c];
+            }
+
+            // Right edge extension
+            for c in 0..components {
+                prev_line[(width + 1) * components + c] = prev_line[width * components + c];
+            }
+
+            self.decode_sample_line::<T>(prev_line, curr_line, width, components, line == 0)?;
 
             #[cfg(debug_assertions)]
             {
                 self.pixels_decoded += width;
                 let bits_for_line = self.bits_consumed - line_start_bits;
-                if line % 8 == 0 || line == height - 1 {
-                    debug_log!("  Line {}/{}: pos {} → {}, {} bits consumed (total: {}), {} pixels decoded", 
-                              line, height, line_start_pos, self.position, 
-                              bits_for_line, self.bits_consumed, self.pixels_decoded);
-                }
+                debug_log!(
+                    "  Line {}/{} complete: pos {} → {}, {} bits for line, {} pixels total",
+                    line,
+                    height,
+                    line_start_pos,
+                    self.position,
+                    bits_for_line,
+                    self.pixels_decoded
+                );
+                debug_log!(
+                    "    After decode: curr_line[0..12] = {:?}",
+                    &curr_line[0..12.min(curr_line.len())]
+                        .iter()
+                        .map(|&x| x.to_i32())
+                        .collect::<Vec<_>>()
+                );
             }
 
             // Copy decoded samples from curr_line to destination
-            // curr_line has decoded samples at indices 1..=width
-            // TODO: This implementation needs review for multi-component/interleaved modes
-            // Currently assumes components=1 (grayscale/planar mode)
-            // Verify this assumption
-            if components != 1 {
-                // Multi-component handling not fully implemented in this code path
-                // For now, only single component (grayscale) is properly supported
-                // Multi-component images should use InterleaveMode::Line or be split into planar scans
-                return Err(JpeglsError::InvalidOperation);
-            }
+            // curr_line has decoded samples at indices components..(width+1)*components
 
             let dest_start = line * stride;
             let dest_end = dest_start + width * components * std::mem::size_of::<T>();
-            let destination_row = &mut destination[dest_start..dest_end];
-
-            // Convert T samples to bytes and write to destination
-            // For grayscale: pixel_stride = width + 2, so curr_line[1..=width] accesses indices 1 through width
-            // The slice has exactly 'width' elements starting at index 1
-            // We need curr_line.len() >= width + 1 to access curr_line[width]
-            if curr_line.len() < width + 1 {
+            if dest_end > destination.len() {
                 return Err(JpeglsError::InvalidData);
             }
-            let samples_slice = &curr_line[1..=width];
+            let destination_row = &mut destination[dest_start..dest_end];
+
+            if curr_line.len() < (width + 1) * components {
+                return Err(JpeglsError::InvalidData);
+            }
+
+            let samples_slice = &curr_line[components..(width + 1) * components];
             let bytes_ptr = samples_slice.as_ptr() as *const u8;
-            let bytes_len = width * std::mem::size_of::<T>();
-            // SAFETY: We're converting T samples to bytes. This assumes T is a simple type (u8/u16)
-            // as guaranteed by the JpeglsSample trait which is only implemented for u8 and u16.
-            // These types have no padding and can be safely reinterpreted as bytes.
-            // The destination buffer is pre-allocated with sufficient size.
-            // For grayscale (components=1), we copy exactly width*sizeof(T) bytes.
+            let bytes_len = width * components * std::mem::size_of::<T>();
+
             unsafe {
                 std::ptr::copy_nonoverlapping(bytes_ptr, destination_row.as_mut_ptr(), bytes_len);
             }
@@ -247,42 +278,125 @@ impl<'a> ScanDecoder<'a> {
         prev_line: &mut [T],
         curr_line: &mut [T],
         width: usize,
+        components: usize,
         _is_first_line: bool,
     ) -> Result<(), JpeglsError> {
-        let mut index = 1;
-        let mut rb = prev_line[0].to_i32();
-        let mut rd = prev_line[1].to_i32();
+        let mut pixel_idx = 0;
+        let mut current_buf_idx = components;
 
-        while index <= width {
-            let ra = curr_line[index - 1].to_i32();
-            let rc = rb;
-            rb = rd;
-            rd = prev_line[index + 1].to_i32();
+        let mut rb = vec![0i32; components];
+        let mut rd = vec![0i32; components];
 
-            let d1 = rd - rb;
-            let d2 = rb - rc;
-            let d3 = rc - ra;
+        debug_log!(
+            "    Line decode: width={}, components={}, prev_line[0..12] = {:?}",
+            width,
+            components,
+            &prev_line[0..12.min(prev_line.len())]
+                .iter()
+                .map(|&x| x.to_i32())
+                .collect::<Vec<_>>()
+        );
 
-            let q1 = self.quantize_gradient(d1);
-            let q2 = self.quantize_gradient(d2);
-            let q3 = self.quantize_gradient(d3);
+        // Initialize rb and rd from the previous line
+        // For single-component: rb = padding (prev_line[0]), rd = first pixel (prev_line[1])
+        // For multi-component: rb = padding for each component, rd = first pixel for each component
+        // Note: The padding at prev_line[0..components] was set by line 220 in previous iteration
+        for c in 0..components {
+            rb[c] = prev_line[c].to_i32(); // Padding (updated by previous iteration)
+            rd[c] = prev_line[components + c].to_i32(); // First pixel of prev line
+            debug_log!(
+                "    Line start: comp={}, rb={} (padding), rd={} (prev px0)",
+                c,
+                rb[c],
+                rd[c]
+            );
+        }
 
-            let qs = self.compute_context_id(q1, q2, q3);
+        while pixel_idx < width {
+            let mut all_qs_zero = true;
+            let mut component_qs = vec![0; components];
+            let mut component_pred = vec![0; components];
 
-            // Per CharLS: use run mode when qs == 0, regular mode otherwise.
-            // No special case for first pixel - CharLS always uses run mode when qs=0.
-            if qs != 0 {
-                debug_log!("    Regular mode: index={}, qs={}", index, qs);
-                let predicted = self.compute_predicted_value(ra, rb, rc);
-                let error_value = self.decode_regular::<T>(qs, predicted)?;
-                curr_line[index] = T::from_i32(error_value);
-                index += 1;
+            let is_last_pixel = pixel_idx == width - 1;
+
+            for c in 0..components {
+                let idx = current_buf_idx + c;
+                let ra = curr_line[idx - components].to_i32();
+                let rc = rb[c];
+                rb[c] = rd[c];
+
+                if is_last_pixel {
+                    rd[c] = rb[c];
+                } else {
+                    rd[c] = prev_line[idx + components].to_i32();
+                }
+
+                let d1 = rd[c] - rb[c];
+                let d2 = rb[c] - rc;
+                let d3 = rc - ra;
+
+                let q1 = self.quantize_gradient(d1);
+                let q2 = self.quantize_gradient(d2);
+                let q3 = self.quantize_gradient(d3);
+
+                let qs = self.compute_context_id(q1, q2, q3);
+                component_qs[c] = qs;
+                if qs != 0 {
+                    all_qs_zero = false;
+                }
+
+                component_pred[c] = self.compute_predicted_value(ra, rb[c], rc);
+            }
+
+            // Per CharLS: use run mode when all contexts are zero.
+            let use_run_mode = all_qs_zero;
+
+            if !use_run_mode {
+                for c in 0..components {
+                    let idx = current_buf_idx + c;
+                    debug_log!(
+                        "    Regular mode: pixel_idx={}, comp={}, qs={}",
+                        pixel_idx,
+                        c,
+                        component_qs[c]
+                    );
+                    let error_value =
+                        self.decode_regular::<T>(component_qs[c], component_pred[c], c)?;
+                    debug_log!(
+                        "      Writing pixel {} comp {} to curr_line[{}] = {}",
+                        pixel_idx,
+                        c,
+                        idx,
+                        error_value
+                    );
+                    curr_line[idx] = T::from_i32(error_value);
+                }
+                pixel_idx += 1;
+                current_buf_idx += components;
             } else {
-                debug_log!("    Run mode: index={}", index);
-                index += self.decode_run_mode::<T>(index, prev_line, curr_line, width)?;
-                if index <= width {
-                    rb = prev_line[index - 1].to_i32();
-                    rd = prev_line[index].to_i32();
+                debug_log!("    Run mode: pixel_idx={}", pixel_idx);
+                let run_len = self.decode_run_mode_interleaved::<T>(
+                    pixel_idx, prev_line, curr_line, width, components, &mut rb, &mut rd,
+                )?;
+
+                pixel_idx += run_len;
+                current_buf_idx += run_len * components;
+
+                // Re-sync Rb/Rd after run
+                // After run ending at pixel_idx, we need to update rb/rd to match regular mode indexing
+                // Regular mode uses: current_buf_idx = (pixel_idx + 1) * components
+                // rb reads from prev_line[current_buf_idx + c]
+                // rd reads from prev_line[current_buf_idx + components + c]
+                if pixel_idx < width {
+                    let is_last = pixel_idx == width - 1;
+                    for c in 0..components {
+                        rb[c] = prev_line[(pixel_idx + 1) * components + c].to_i32();
+                        if is_last {
+                            rd[c] = rb[c];
+                        } else {
+                            rd[c] = prev_line[(pixel_idx + 2) * components + c].to_i32();
+                        }
+                    }
                 }
             }
         }
@@ -293,7 +407,11 @@ impl<'a> ScanDecoder<'a> {
         &mut self,
         qs: i32,
         predicted: i32,
+        component_index: usize,
     ) -> Result<i32, JpeglsError> {
+        let pos_before = self.position;
+        let valid_bits_before = self.valid_bits;
+
         let sign = Self::bit_wise_sign(qs);
         let ctx_index = Self::apply_sign_for_index(qs, sign);
 
@@ -302,21 +420,28 @@ impl<'a> ScanDecoder<'a> {
         let near_lossless = self.coding_parameters.near_lossless;
 
         {
-            let context = &self.regular_mode_contexts[ctx_index];
+            let context = &self.regular_mode_contexts[component_index][ctx_index];
             k = context.compute_golomb_coding_parameter(31)?;
             context_c = context.c();
         }
 
-        // Apply context bias C to prediction (per CharLS/ITU-T.87)
-        // corrected_prediction = correct_prediction(predicted + apply_sign(C, sign))
+        // Apply context bias C to prediction
         let corrected_prediction =
             T::correct_prediction(predicted + Self::apply_sign(context_c, sign));
 
         let map_val = self.decode_mapped_error_value(k)?;
         let mut error_value = self.unmap_error_value(map_val);
 
+        let bytes_consumed = pos_before.saturating_sub(self.position);
+        let bits_from_bytes = (bytes_consumed * 8) as i32;
+        let bits_from_cache = valid_bits_before - self.valid_bits;
+        #[allow(unused_variables)]
+        let bits_consumed = bits_from_bytes + bits_from_cache;
+        debug_log!("      decode_regular: comp={}, qs={}, ctx_idx={}, k={}, map_val={}, error={}, pos {}→{}, vb {}→{}, bits={}",
+                   component_index, qs, ctx_index, k, map_val, error_value, pos_before, self.position, valid_bits_before, self.valid_bits, bits_consumed);
+
         {
-            let context = &mut self.regular_mode_contexts[ctx_index];
+            let context = &mut self.regular_mode_contexts[component_index][ctx_index];
             if k == 0 {
                 error_value ^= context.get_error_correction(near_lossless);
             }
@@ -352,7 +477,7 @@ impl<'a> ScanDecoder<'a> {
         let qbpp = self._quantized_bits_per_sample;
         let limit_threshold = limit - qbpp - 1;
 
-        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}, limit_threshold={}", 
+        debug_log!("      decode_mapped_error_value: k={}, cache=0x{:016X}, valid_bits={}, pos={}, limit_threshold={}",
                   k, self.read_cache, self.valid_bits, self.position, limit_threshold);
 
         // Read unary code (count zeros until we hit a 1)
@@ -436,8 +561,9 @@ impl<'a> ScanDecoder<'a> {
     }
 
     fn fill_read_cache(&mut self) -> Result<(), JpeglsError> {
-        // CharLS-compatible fill_read_cache
-        // max_readable_cache_bits = cache_bits - 8 = 56 (for 64-bit cache)
+        // JPEG-LS bit stuffing (ITU-T T.87 Section 4.3):
+        // After FF, if next byte has MSB=0, a stuffed 0-bit is inserted
+        // So FF followed by 7F means: 8 bits from FF + 7 bits from 7F (MSB is stuffed 0)
         let cache_bits = std::mem::size_of::<usize>() * 8;
         let max_readable_cache_bits = (cache_bits - 8) as i32;
 
@@ -449,7 +575,7 @@ impl<'a> ScanDecoder<'a> {
 
             let byte = self.source[self.position] as usize;
 
-            // Check for marker detection: FF followed by byte with high bit set
+            // Check for marker: FF followed by byte with MSB=1
             if byte == JPEG_MARKER_START_BYTE as usize {
                 if self.position + 1 < self.source.len() {
                     let next_byte = self.source[self.position + 1];
@@ -469,19 +595,17 @@ impl<'a> ScanDecoder<'a> {
                 }
             }
 
-            // Add byte to cache at the MSB side (CharLS compatible)
-            // The new byte goes at position (max_readable_cache_bits - valid_bits), counting from right
+            // Add byte to cache at the MSB side
             self.read_cache |= byte << (max_readable_cache_bits - self.valid_bits) as usize;
             self.valid_bits += 8;
             self.position += 1;
 
-            // JPEG-LS bit stuffing: after 0xFF, the next byte only provides 7 valid bits
-            // (the high bit is always 0 to distinguish from markers)
+            // Bit stuffing: after 0xFF, the next byte only provides 7 valid bits
+            // (the MSB of next byte is a stuffed 0)
             if byte == JPEG_MARKER_START_BYTE as usize {
-                // Subtract 1 bit because the next byte's high bit is stuffing
                 self.valid_bits -= 1;
                 debug_log!(
-                    "    After FF: valid_bits decremented to {}",
+                    "    After FF: next byte will have stuffed MSB, valid_bits now {}",
                     self.valid_bits
                 );
             }
@@ -604,104 +728,160 @@ impl<'a> ScanDecoder<'a> {
         crate::jpegls::traits::apply_sign_for_index(val, sign)
     }
 
-    fn decode_run_mode<T: crate::jpegls::traits::JpeglsSample>(
+    fn decode_run_mode_interleaved<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         start_index: usize,
         prev_line: &[T],
         curr_line: &mut [T],
         width: usize,
+        components: usize,
+        _rb: &mut [i32],
+        _rd: &mut [i32],
     ) -> Result<usize, JpeglsError> {
         let mut run_length = 0;
-        // pixel_count is the number of remaining pixels to potentially fill with the run
-        // This is from start_index to width (inclusive), so width - start_index + 1
-        let pixel_count = width - start_index + 1;
-        debug_log!(
-            "    decode_run_mode: start_index={}, width={}, pixel_count={}",
-            start_index,
-            width,
-            pixel_count
-        );
+        let pixel_count = width - start_index;
+        let base_offset = components;
 
-        // Decode run pixels (CharLS-compatible algorithm)
+        // Use Component 0 run index for shared run state
+        let comp0_idx = 0;
+
+        debug_log!("      decode_run_mode_interleaved: start_index={}, width={}, pixel_count={}, run_index={}",
+                   start_index, width, pixel_count, self.run_index[comp0_idx]);
+
         loop {
-            let run_index_val = crate::constants::J[self.run_index];
-            #[cfg(debug_assertions)]
-            let bits_before = self.bits_consumed;
+            let run_index_val = crate::constants::J[self.run_index[comp0_idx]];
             let bit = self.read_bits(1)?;
-            #[cfg(debug_assertions)]
+
             debug_log!(
-                "      [bit {}] run_index={}, J={}, bit={}, run_length={}",
-                bits_before,
-                self.run_index,
+                "        Loop: run_length={}, run_index_val={}, bit={}",
+                run_length,
                 run_index_val,
-                bit,
-                run_length
+                bit
             );
 
             if bit == 1 {
-                // Full run segment
                 let max_run = 1usize << run_index_val;
                 let count = std::cmp::min(max_run, pixel_count - run_length);
-                debug_log!("      → Full run segment: max={}, count={}", max_run, count);
 
-                // Fill pixels
+                // Copy Ra to all components for run pixels
                 for i in 0..count {
-                    curr_line[start_index + run_length + i] = curr_line[start_index - 1];
+                    let px_offset = base_offset + (start_index + run_length + i) * components;
+                    for c in 0..components {
+                        // Ra is the pixel immediately to the left
+                        let ra_val = if start_index + run_length + i > 0 {
+                            curr_line[px_offset - components + c]
+                        } else {
+                            // First pixel: uses boundary values
+                            curr_line[c]
+                        };
+                        curr_line[px_offset + c] = ra_val;
+                    }
                 }
+
                 run_length += count;
 
-                // Only increment run_index if we used the full run length
-                if count == max_run && self.run_index < 31 {
-                    self.run_index += 1;
+                if count == max_run && self.run_index[comp0_idx] < 31 {
+                    self.run_index[comp0_idx] += 1;
                 }
 
-                // Break if we've filled all remaining pixels
                 if run_length == pixel_count {
                     break;
                 }
             } else {
-                // Incomplete run - read remainder bits
                 let remainder = if run_index_val > 0 {
                     self.read_bits(run_index_val)? as usize
                 } else {
                     0
                 };
-                debug_log!("      → Partial run of {} pixels", remainder);
 
-                // Fill pixels
                 let count = std::cmp::min(remainder, pixel_count - run_length);
                 for i in 0..count {
-                    curr_line[start_index + run_length + i] = curr_line[start_index - 1];
+                    let px_offset = base_offset + (start_index + run_length + i) * components;
+                    for c in 0..components {
+                        // Ra is the pixel immediately to the left
+                        let ra_val = if start_index + run_length + i > 0 {
+                            curr_line[px_offset - components + c]
+                        } else {
+                            curr_line[c]
+                        };
+                        curr_line[px_offset + c] = ra_val;
+                    }
                 }
                 run_length += count;
-
-                // Don't decrement run_index here - will be done after interruption
                 break;
             }
         }
 
-        debug_log!("    Run length decoded: {}", run_length);
+        debug_log!(
+            "        End of loop: run_length={}, pixel_count={}",
+            run_length,
+            pixel_count
+        );
 
-        // Only decode interruption if run didn't consume all remaining pixels
         if run_length < pixel_count {
-            let rb = prev_line[start_index + run_length].to_i32();
-            let ra = curr_line[start_index + run_length - 1].to_i32();
+            // Run Interruption
             debug_log!(
-                "    Run interruption pixel at index {}, ra={}, rb={}",
-                start_index + run_length,
-                ra,
-                rb
+                "        Decoding run interruption at pixel {}",
+                start_index + run_length
             );
-            let x = self.decode_run_interruption_pixel::<T>(ra, rb)?;
-            curr_line[start_index + run_length] = T::from_i32(x);
-            run_length += 1;
+            let px_offset = base_offset + (start_index + run_length) * components;
+            let mut _interruption_found = false;
 
-            // Decrement run_index after run interruption (per CharLS)
-            if self.run_index > 0 {
-                self.run_index -= 1;
+            // Loop through components to find the one that interrupted (or decode until mismatch)
+            for c in 0..components {
+                let idx = px_offset + c;
+                let ra = curr_line[idx - components].to_i32();
+
+                let rb_val = prev_line[idx].to_i32();
+
+                let val = self.decode_run_interruption_pixel::<T>(ra, rb_val, c)?;
+                curr_line[idx] = T::from_i32(val);
+
+                if !T::is_near(val, ra, self.coding_parameters.near_lossless) {
+                    _interruption_found = true;
+
+                    // Decrement run index (shared)
+                    if self.run_index[comp0_idx] > 0 {
+                        self.run_index[comp0_idx] -= 1;
+                    }
+
+                    // Decode remaining components of this pixel using Regular Mode
+                    for next_c in (c + 1)..components {
+                        let next_idx = px_offset + next_c;
+
+                        let r_a = curr_line[next_idx - components].to_i32();
+                        let r_up = prev_line[next_idx].to_i32();
+                        let r_up_left = prev_line[next_idx - components].to_i32();
+
+                        let r_up_right = if start_index + run_length == width - 1 {
+                            r_up
+                        } else {
+                            prev_line[next_idx + components].to_i32()
+                        };
+
+                        let d1 = r_up_right - r_up;
+                        let d2 = r_up - r_up_left;
+                        let d3 = r_up_left - r_a;
+
+                        let q1 = self.quantize_gradient(d1);
+                        let q2 = self.quantize_gradient(d2);
+                        let q3 = self.quantize_gradient(d3);
+
+                        let qs = self.compute_context_id(q1, q2, q3);
+                        let predicted = self.compute_predicted_value(r_a, r_up, r_up_left);
+
+                        let decoded_val = self.decode_regular::<T>(qs, predicted, next_c)?;
+                        curr_line[next_idx] = T::from_i32(decoded_val);
+                    }
+
+                    break;
+                }
             }
+
+            run_length += 1;
         }
 
+        debug_log!("        Returning run_length={}", run_length);
         Ok(run_length)
     }
 
@@ -709,6 +889,7 @@ impl<'a> ScanDecoder<'a> {
         &mut self,
         ra: i32,
         rb: i32,
+        comp: usize,
     ) -> Result<i32, JpeglsError> {
         let near_lossless = self.coding_parameters.near_lossless;
         let (context_index, sign) = if (ra - rb).abs() <= near_lossless {
@@ -717,31 +898,29 @@ impl<'a> ScanDecoder<'a> {
             (0, Self::bit_wise_sign(rb - ra))
         };
 
-        debug_log!(
-            "    Run interruption context[{}]: a={}, n={}, nn={}",
-            context_index,
-            self.run_mode_contexts[context_index].a(),
-            self.run_mode_contexts[context_index].n(),
-            self.run_mode_contexts[context_index].nn()
-        );
+        let k: i32;
+        let ri_type: i32;
+        {
+            let context = &self.run_mode_contexts[comp][context_index];
+            k = context.compute_golomb_coding_parameter();
+            ri_type = context.run_interruption_type();
+        }
 
-        let k = self.run_mode_contexts[context_index].compute_golomb_coding_parameter();
         // For run mode, limit is adjusted by J[run_index]
-        let run_limit = self._limit - crate::constants::J[self.run_index] - 1;
+        // Use comp 0 run index for shared state
+        let run_limit = self._limit - crate::constants::J[self.run_index[0]] - 1;
+
         let e_mapped_error = self.decode_mapped_error_value_with_limit(k, run_limit)?;
 
-        // Per CharLS: add run_interruption_type to e_mapped before decoding error_value
-        let ri_type = self.run_mode_contexts[context_index].run_interruption_type();
         let temp = e_mapped_error + ri_type;
 
-        let error_value = self.run_mode_contexts[context_index].decode_error_value(temp, k);
-        let reset_threshold = self.reset_threshold;
-        // Update with e_mapped_error (NOT temp) per CharLS
-        self.run_mode_contexts[context_index].update_variables(
-            error_value,
-            e_mapped_error,
-            reset_threshold,
-        );
+        let error_value: i32;
+        {
+            let context = &mut self.run_mode_contexts[comp][context_index];
+            error_value = context.decode_error_value(temp, k);
+            let reset_threshold = self.reset_threshold;
+            context.update_variables(error_value, e_mapped_error, reset_threshold);
+        }
 
         let reconstructed = if context_index == 1 {
             T::compute_reconstructed_sample(ra, error_value)
@@ -749,15 +928,8 @@ impl<'a> ScanDecoder<'a> {
             T::compute_reconstructed_sample(rb, error_value * sign)
         };
 
-        debug_log!(
-            "    Run interruption: ra={}, rb={}, ctx={}, sign={}, error={}, reconstructed={}",
-            ra,
-            rb,
-            context_index,
-            sign,
-            error_value,
-            reconstructed
-        );
+        debug_log!("      Run interruption: comp={}, ra={}, rb={}, e_mapped={}, temp={}, error={}, reconstructed={}",
+                   comp, ra, rb, e_mapped_error, temp, error_value, reconstructed);
 
         Ok(reconstructed)
     }

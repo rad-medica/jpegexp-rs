@@ -97,7 +97,7 @@ impl PacketHeader {
             } else {
                 (0, 0)
             };
-            
+
             if state.subbands.len() <= s {
                 state
                     .subbands
@@ -321,7 +321,7 @@ impl PacketHeader {
                         // Calculate lblock using OpenJPEG formula
                         // increment = floor(log2(len)) + 1 - (numlenbits + floor(log2(nump)))
                         // Where numlenbits starts at 3 for first inclusion
-                        
+
                         // floor(log2(n)) = 31 - leading_zeros(n) for n > 0
                         let bits_needed = if cb.data_len > 0 {
                             // floor(log2(data_len)) + 1
@@ -329,14 +329,14 @@ impl PacketHeader {
                         } else {
                             1 // log2(0) is undefined, but we need at least 1 bit
                         };
-                        
+
                         let log2_passes = if cb.num_passes > 0 {
                             // floor(log2(num_passes))
                             (31 - (cb.num_passes as u32).leading_zeros()) as i32
                         } else {
                             0
                         };
-                        
+
                         // Start with numlenbits = 3 (OpenJPEG default for first inclusion)
                         let numlenbits = 3;
                         let increment = (bits_needed - numlenbits - log2_passes).max(0);
@@ -368,13 +368,31 @@ mod tests {
             included_cblks: Vec::new(),
         };
         header.included_cblks.push(CodeBlockInfo {
-            x: 0, y: 0, subband_index: 0, included: true, num_passes: 3, data_len: 15, zero_bp: 3,
+            x: 0,
+            y: 0,
+            subband_index: 0,
+            included: true,
+            num_passes: 3,
+            data_len: 15,
+            zero_bp: 3,
         });
         header.included_cblks.push(CodeBlockInfo {
-            x: 0, y: 0, subband_index: 1, included: true, num_passes: 1, data_len: 31, zero_bp: 0,
+            x: 0,
+            y: 0,
+            subband_index: 1,
+            included: true,
+            num_passes: 1,
+            data_len: 31,
+            zero_bp: 0,
         });
         header.included_cblks.push(CodeBlockInfo {
-            x: 0, y: 0, subband_index: 2, included: true, num_passes: 1, data_len: 7, zero_bp: 0,
+            x: 0,
+            y: 0,
+            subband_index: 2,
+            included: true,
+            num_passes: 1,
+            data_len: 7,
+            zero_bp: 0,
         });
         let mut writer = crate::jpeg2000::bit_io::J2kBitWriter::new();
         let mut state_enc = PrecinctState::new(1, 1);

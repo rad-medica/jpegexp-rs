@@ -1,0 +1,9 @@
+Name: medium_128x128_gray_gradient
+Shape: (128, 128)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.00
+JLS size: 2305 bytes
+Raw size: 16384 bytes
+Compression ratio: 7.11x

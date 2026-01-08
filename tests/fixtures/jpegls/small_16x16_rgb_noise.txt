@@ -1,0 +1,9 @@
+Name: small_16x16_rgb_noise
+Shape: (16, 16, 3)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 128.66
+JLS size: 1111 bytes
+Raw size: 768 bytes
+Compression ratio: 0.69x

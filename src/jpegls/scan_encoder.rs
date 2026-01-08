@@ -562,67 +562,62 @@ impl<'a> ScanEncoder<'a> {
         // Interruption
         let interruption_pixel_idx = start_pixel_idx + run_length;
 
-        let mut interruption_comp = 0;
-        let mut found_break = false;
-
         for c in 0..components {
-            let val = curr_line[base_offset + interruption_pixel_idx * components + c];
-            if !T::is_near(
+            let idx = base_offset + interruption_pixel_idx * components + c;
+            let val = curr_line[idx];
+            let ra_val = ra[c];
+            let up_val = prev_line[idx]; // Rb
+
+            // Encode this component using run interruption context
+            let encoded_val = self.encode_run_interruption_pixel::<T>(
                 val.to_i32(),
-                ra[c].to_i32(),
+                ra_val.to_i32(),
+                up_val.to_i32(),
+                c,
+            );
+            curr_line[idx] = T::from_i32(encoded_val);
+
+            // Check if this component caused the interruption
+            if !T::is_near(
+                encoded_val,
+                ra_val.to_i32(),
                 self.coding_parameters.near_lossless,
             ) {
-                interruption_comp = c;
-                found_break = true;
+                // Interruption found at component c
+
+                // Decrement shared run index
+                self.decrement_run_index(0);
+
+                // Encode remaining components using regular mode
+                for next_c in (c + 1)..components {
+                    let next_idx = base_offset + interruption_pixel_idx * components + next_c;
+
+                    let r_a = curr_line[next_idx - components].to_i32();
+                    let r_up = prev_line[next_idx].to_i32(); // Rb
+                    let r_up_left = prev_line[next_idx - components].to_i32(); // Rc
+
+                    let r_up_right = if interruption_pixel_idx == width - 1 {
+                        r_up // Rd = Rb at end of line
+                    } else {
+                        prev_line[next_idx + components].to_i32() // Rd
+                    };
+
+                    let d1 = r_up_right - r_up;
+                    let d2 = r_up - r_up_left;
+                    let d3 = r_up_left - r_a;
+
+                    let q1 = self.quantize_gradient(d1);
+                    let q2 = self.quantize_gradient(d2);
+                    let q3 = self.quantize_gradient(d3);
+
+                    let qs = self.compute_context_id(q1, q2, q3);
+                    let predicted = self.compute_predicted_value(r_a, r_up, r_up_left);
+
+                    self.encode_regular::<T>(qs, curr_line[next_idx].to_i32(), predicted, next_c)?;
+                }
+
                 break;
             }
-        }
-
-        if !found_break {
-            return Ok(run_length);
-        }
-
-        // Handle interruption component
-        let c = interruption_comp;
-        let up_val = prev_line[base_offset + interruption_pixel_idx * components + c];
-        let val = curr_line[base_offset + interruption_pixel_idx * components + c];
-
-        let interruption_val = self.encode_run_interruption_pixel::<T>(
-            val.to_i32(),
-            ra[c].to_i32(),
-            up_val.to_i32(),
-            c, // Use component c context
-        );
-        curr_line[base_offset + interruption_pixel_idx * components + c] =
-            T::from_i32(interruption_val);
-
-        self.decrement_run_index(0);
-
-        for next_c in (c + 1)..components {
-            let idx = base_offset + interruption_pixel_idx * components + next_c;
-
-            let r_a = curr_line[idx - components].to_i32();
-            let r_up = prev_line[idx].to_i32(); // Rb
-            let r_up_left = prev_line[idx - components].to_i32(); // Rc
-
-            let r_up_right = if interruption_pixel_idx == width - 1 {
-                r_up // Rd = Rb at end of line
-            } else {
-                prev_line[idx + components].to_i32() // Rd
-            };
-
-            let d1 = r_up_right - r_up;
-            let d2 = r_up - r_up_left;
-            let d3 = r_up_left - r_a;
-
-            let q1 = self.quantize_gradient(d1);
-            let q2 = self.quantize_gradient(d2);
-            let q3 = self.quantize_gradient(d3);
-
-            let qs = self.compute_context_id(q1, q2, q3);
-            let predicted = self.compute_predicted_value(r_a, r_up, r_up_left);
-
-            self.encode_regular::<T>(qs, curr_line[idx].to_i32(), predicted, next_c)?;
         }
 
         Ok(run_length + 1)

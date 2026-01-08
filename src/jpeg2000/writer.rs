@@ -35,11 +35,11 @@ impl<'a> J2kWriter<'a> {
     /// component_count: number of image components (needed for Ccap array)
     pub fn write_cap(&mut self, use_htj2k: bool, component_count: u16) -> Result<(), JpeglsError> {
         self.writer.write_marker(JpegMarkerCode::Capability)?;
-        
+
         // Length: 2 (length field) + 4 (Pcap) + 2 * component_count (Ccap array)
         let length = 2 + 4 + 2 * component_count;
         self.writer.write_u16(length)?;
-        
+
         // Pcap: bit 14 = HTJ2K support (MSB-first bit numbering)
         // Bit 14 (MSB-first in 32-bit word) = 0x00020000
         // This is equivalent to bit 17 in LSB-first notation
@@ -48,15 +48,15 @@ impl<'a> J2kWriter<'a> {
         } else {
             0
         };
-        
+
         self.writer.write_u32(pcap)?;
-        
+
         // Ccap: component capabilities (one u16 per component)
         // For basic HTJ2K, set all Ccap values to 0
         for _ in 0..component_count {
             self.writer.write_u16(0)?;
         }
-        
+
         Ok(())
     }
 

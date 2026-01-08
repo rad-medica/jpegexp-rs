@@ -1,0 +1,9 @@
+Name: rect_16x32_gray_gradient
+Shape: (32, 16)
+Dtype: uint8
+Min: 0
+Max: 255
+Mean: 127.00
+JLS size: 153 bytes
+Raw size: 512 bytes
+Compression ratio: 3.35x

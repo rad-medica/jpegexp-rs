@@ -1,0 +1,9 @@
+Name: tiny_8x8_gray_noise
+Shape: (8, 8)
+Dtype: uint8
+Min: 1
+Max: 254
+Mean: 136.42
+JLS size: 188 bytes
+Raw size: 64 bytes
+Compression ratio: 0.34x

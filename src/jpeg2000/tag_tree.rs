@@ -216,9 +216,12 @@ impl TagTree {
             if node.low < parent_low {
                 node.low = parent_low;
             }
-            
+
             if std::env::var("J2K_DEBUG").is_ok() {
-               eprintln!("    TT Decode[{}]: parent_low={} low={} thresh={}", curr_idx, parent_low, node.low, threshold);
+                eprintln!(
+                    "    TT Decode[{}]: parent_low={} low={} thresh={}",
+                    curr_idx, parent_low, node.low, threshold
+                );
             }
 
             while node.low < threshold {

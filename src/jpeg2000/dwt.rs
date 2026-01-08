@@ -52,7 +52,9 @@ impl Dwt53 {
     /// Inverse 5/3 Reversible Transform (1D)
     pub fn inverse(in_l: &[i32], in_h: &[i32], output: &mut [i32]) {
         let len = output.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         if len == 1 {
             if !in_l.is_empty() {
                 output[0] = in_l[0];
@@ -105,7 +107,9 @@ impl Dwt53 {
     ) {
         let w = width as usize;
         let h = height as usize;
-        if w == 0 || h == 0 { return; }
+        if w == 0 || h == 0 {
+            return;
+        }
 
         let ll_w = (w + 1) / 2;
         let hl_w = w / 2;
@@ -120,15 +124,21 @@ impl Dwt53 {
             let mut col_h = vec![0i32; lh_h];
             for y in 0..ll_h {
                 let idx = y * ll_w + x;
-                if idx < ll.len() { col_l[y] = ll[idx]; }
+                if idx < ll.len() {
+                    col_l[y] = ll[idx];
+                }
             }
             for y in 0..lh_h {
                 let idx = y * ll_w + x; // Fixed indexing: LH has same width as LL
-                if idx < lh.len() { col_h[y] = lh[idx]; }
+                if idx < lh.len() {
+                    col_h[y] = lh[idx];
+                }
             }
             let mut col_output = vec![0i32; h];
             Self::inverse(&col_l, &col_h, &mut col_output);
-            for y in 0..h { temp[y * w + x] = col_output[y]; }
+            for y in 0..h {
+                temp[y * w + x] = col_output[y];
+            }
         }
 
         for x in 0..hl_w {
@@ -136,26 +146,38 @@ impl Dwt53 {
             let mut col_h = vec![0i32; lh_h];
             for y in 0..ll_h {
                 let idx = y * hl_w + x;
-                if idx < hl.len() { col_l[y] = hl[idx]; }
+                if idx < hl.len() {
+                    col_l[y] = hl[idx];
+                }
             }
             for y in 0..lh_h {
                 let idx = y * hl_w + x;
-                if idx < hh.len() { col_h[y] = hh[idx]; }
+                if idx < hh.len() {
+                    col_h[y] = hh[idx];
+                }
             }
             let mut col_output = vec![0i32; h];
             Self::inverse(&col_l, &col_h, &mut col_output);
-            for y in 0..h { temp[y * w + (ll_w + x)] = col_output[y]; }
+            for y in 0..h {
+                temp[y * w + (ll_w + x)] = col_output[y];
+            }
         }
 
         // Step 2: Horizontal inverse DWT on each row
         for y in 0..h {
             let mut row_l = vec![0i32; ll_w];
             let mut row_h = vec![0i32; hl_w];
-            for x in 0..ll_w { row_l[x] = temp[y * w + x]; }
-            for x in 0..hl_w { row_h[x] = temp[y * w + ll_w + x]; }
+            for x in 0..ll_w {
+                row_l[x] = temp[y * w + x];
+            }
+            for x in 0..hl_w {
+                row_h[x] = temp[y * w + ll_w + x];
+            }
             let mut row_output = vec![0i32; w];
             Self::inverse(&row_l, &row_h, &mut row_output);
-            for x in 0..w { output[y * w + x] = row_output[x]; }
+            for x in 0..w {
+                output[y * w + x] = row_output[x];
+            }
         }
     }
 }
@@ -173,9 +195,13 @@ impl Dwt97 {
 
     pub fn forward(signal: &[f32], out_l: &mut [f32], out_h: &mut [f32]) {
         let len = signal.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         if len == 1 {
-            if !out_l.is_empty() { out_l[0] = signal[0]; }
+            if !out_l.is_empty() {
+                out_l[0] = signal[0];
+            }
             return;
         }
         let mut x = signal.to_vec();
@@ -202,8 +228,11 @@ impl Dwt97 {
         }
 
         for i in 0..len {
-            if i % 2 == 0 { x[i] *= Self::INV_K; }
-            else { x[i] *= Self::K; }
+            if i % 2 == 0 {
+                x[i] *= Self::INV_K;
+            } else {
+                x[i] *= Self::K;
+            }
         }
 
         let mut l_idx = 0;
@@ -223,9 +252,13 @@ impl Dwt97 {
 
     pub fn inverse(in_l: &[f32], in_h: &[f32], output: &mut [f32]) {
         let len = output.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         if len == 1 {
-            if !in_l.is_empty() { output[0] = in_l[0]; }
+            if !in_l.is_empty() {
+                output[0] = in_l[0];
+            }
             return;
         }
         let mut x = vec![0.0f32; len];
@@ -233,15 +266,24 @@ impl Dwt97 {
         let mut h_idx = 0;
         for i in 0..len {
             if i % 2 == 0 {
-                if l_idx < in_l.len() { x[i] = in_l[l_idx]; l_idx += 1; }
+                if l_idx < in_l.len() {
+                    x[i] = in_l[l_idx];
+                    l_idx += 1;
+                }
             } else {
-                if h_idx < in_h.len() { x[i] = in_h[h_idx]; h_idx += 1; }
+                if h_idx < in_h.len() {
+                    x[i] = in_h[h_idx];
+                    h_idx += 1;
+                }
             }
         }
 
         for i in 0..len {
-            if i % 2 == 0 { x[i] *= Self::K; }
-            else { x[i] *= Self::INV_K; }
+            if i % 2 == 0 {
+                x[i] *= Self::K;
+            } else {
+                x[i] *= Self::INV_K;
+            }
         }
 
         for i in (0..len).step_by(2) {
@@ -279,7 +321,9 @@ impl Dwt97 {
     ) {
         let w = width as usize;
         let h = height as usize;
-        if w == 0 || h == 0 { return; }
+        if w == 0 || h == 0 {
+            return;
+        }
 
         let ll_w = (w + 1) / 2;
         let hl_w = w / 2;
@@ -293,15 +337,21 @@ impl Dwt97 {
             let mut col_h = vec![0.0f32; lh_h];
             for y in 0..ll_h {
                 let idx = y * ll_w + x;
-                if idx < ll.len() { col_l[y] = ll[idx]; }
+                if idx < ll.len() {
+                    col_l[y] = ll[idx];
+                }
             }
             for y in 0..lh_h {
                 let idx = y * ll_w + x;
-                if idx < lh.len() { col_h[y] = lh[idx]; }
+                if idx < lh.len() {
+                    col_h[y] = lh[idx];
+                }
             }
             let mut col_output = vec![0.0f32; h];
             Self::inverse(&col_l, &col_h, &mut col_output);
-            for y in 0..h { temp[y * w + x] = col_output[y]; }
+            for y in 0..h {
+                temp[y * w + x] = col_output[y];
+            }
         }
 
         for x in 0..hl_w {
@@ -309,25 +359,37 @@ impl Dwt97 {
             let mut col_h = vec![0.0f32; lh_h];
             for y in 0..ll_h {
                 let idx = y * hl_w + x;
-                if idx < hl.len() { col_l[y] = hl[idx]; }
+                if idx < hl.len() {
+                    col_l[y] = hl[idx];
+                }
             }
             for y in 0..lh_h {
                 let idx = y * hl_w + x;
-                if idx < hh.len() { col_h[y] = hh[idx]; }
+                if idx < hh.len() {
+                    col_h[y] = hh[idx];
+                }
             }
             let mut col_output = vec![0.0f32; h];
             Self::inverse(&col_l, &col_h, &mut col_output);
-            for y in 0..h { temp[y * w + (ll_w + x)] = col_output[y]; }
+            for y in 0..h {
+                temp[y * w + (ll_w + x)] = col_output[y];
+            }
         }
 
         for y in 0..h {
             let mut row_l = vec![0.0f32; ll_w];
             let mut row_h = vec![0.0f32; hl_w];
-            for x in 0..ll_w { row_l[x] = temp[y * w + x]; }
-            for x in 0..hl_w { row_h[x] = temp[y * w + ll_w + x]; }
+            for x in 0..ll_w {
+                row_l[x] = temp[y * w + x];
+            }
+            for x in 0..hl_w {
+                row_h[x] = temp[y * w + ll_w + x];
+            }
             let mut row_output = vec![0.0f32; w];
             Self::inverse(&row_l, &row_h, &mut row_output);
-            for x in 0..w { output[y * w + x] = row_output[x]; }
+            for x in 0..w {
+                output[y * w + x] = row_output[x];
+            }
         }
     }
 }
@@ -386,51 +448,61 @@ mod tests {
         // This tests the exact scenario from 12-bit checkerboard:
         // LL=0, HL=0, LH=0, HH=constant (8190)
         // This is what happens after DWT of a perfect checkerboard
-        
+
         // Start with 8x8 for simplicity
         let width = 8u32;
         let height = 8u32;
-        
+
         // After one level of DWT, we have 4x4 subbands
         let ll_size = 4 * 4;
         let hl_size = 4 * 4;
         let lh_size = 4 * 4;
         let hh_size = 4 * 4;
-        
-        let ll = vec![0i32; ll_size];  // All zero
-        let hl = vec![0i32; hl_size];  // All zero
-        let lh = vec![0i32; lh_size];  // All zero
+
+        let ll = vec![0i32; ll_size]; // All zero
+        let hl = vec![0i32; hl_size]; // All zero
+        let lh = vec![0i32; lh_size]; // All zero
         let hh = vec![8190i32; hh_size]; // Constant 8190
-        
+
         let mut output = vec![0i32; (width * height) as usize];
-        
+
         // Run IDWT
         Dwt53::inverse_2d(&ll, &hl, &lh, &hh, width, height, &mut output);
-        
+
         // Check what we get
         let mut unique_vals: Vec<i32> = output.clone();
         unique_vals.sort_unstable();
         unique_vals.dedup();
-        
+
         println!("IDWT with LL=0, HL=0, LH=0, HH=8190:");
         println!("Output size: {}", output.len());
         println!("Unique values: {:?}", unique_vals);
         println!("First 16 values: {:?}", &output[..16]);
-        
+
         // Check if output is constant (which would be wrong)
         let is_constant = unique_vals.len() == 1;
         let min_val = output.iter().min().unwrap();
         let max_val = output.iter().max().unwrap();
-        
-        println!("Min: {}, Max: {}, Is constant: {}", min_val, max_val, is_constant);
-        
+
+        println!(
+            "Min: {}, Max: {}, Is constant: {}",
+            min_val, max_val, is_constant
+        );
+
         // IDWT should produce varying output, not constant!
         // With HH=8190 (high frequency), we expect significant variation
-        assert!(!is_constant, "IDWT output should not be constant when HH has data");
-        
+        assert!(
+            !is_constant,
+            "IDWT output should not be constant when HH has data"
+        );
+
         // The range should be significant (at least 1000)
         let range = max_val - min_val;
-        assert!(range > 1000, "IDWT should produce significant variation, got range={}", range);
+        assert!(
+            range > 1000,
+            "IDWT should produce significant variation, got range={}",
+            range
+        );
     }
 
     #[test]
@@ -440,22 +512,22 @@ mod tests {
         let width = 8;
         let height = 8;
         let mut input = vec![0i32; width * height];
-        
+
         for y in 0..height {
             for x in 0..width {
                 let val = if (x + y) % 2 == 0 { -2048 } else { 2047 };
                 input[y * width + x] = val;
             }
         }
-        
+
         println!("Input checkerboard (8x8, after level shift):");
         for y in 0..4 {
-            println!("  {:?}", &input[y*width..(y*width + 8)]);
+            println!("  {:?}", &input[y * width..(y * width + 8)]);
         }
-        
+
         // Apply forward DWT 2D
         let mut coeffs = input.clone();
-        
+
         // Apply 1D DWT to rows
         for y in 0..height {
             let row: Vec<i32> = coeffs[y * width..(y + 1) * width].to_vec();
@@ -471,7 +543,7 @@ mod tests {
                 coeffs[y * width + l_len + i] = v;
             }
         }
-        
+
         // Apply 1D DWT to columns
         for x in 0..width {
             let col: Vec<i32> = (0..height).map(|y| coeffs[y * width + x]).collect();
@@ -487,12 +559,12 @@ mod tests {
                 coeffs[(l_len + i) * width + x] = v;
             }
         }
-        
+
         println!("\nAfter forward DWT (coefficients):");
         for y in 0..4 {
-            println!("  {:?}", &coeffs[y*width..(y*width + 8)]);
+            println!("  {:?}", &coeffs[y * width..(y * width + 8)]);
         }
-        
+
         // Extract subbands
         let ll_w = 4;
         let ll_h = 4;
@@ -500,7 +572,7 @@ mod tests {
         let mut hl = vec![0i32; ll_w * ll_h];
         let mut lh = vec![0i32; ll_w * ll_h];
         let mut hh = vec![0i32; ll_w * ll_h];
-        
+
         for y in 0..ll_h {
             for x in 0..ll_w {
                 ll[y * ll_w + x] = coeffs[y * width + x];
@@ -509,28 +581,36 @@ mod tests {
                 hh[y * ll_w + x] = coeffs[(ll_h + y) * width + ll_w + x];
             }
         }
-        
+
         println!("\nLL subband (4x4): {:?}", ll);
         println!("HL subband (4x4): {:?}", hl);
         println!("LH subband (4x4): {:?}", lh);
         println!("HH subband (4x4): {:?}", hh);
-        
+
         // Now apply inverse DWT
         let mut reconstructed = vec![0i32; width * height];
-        Dwt53::inverse_2d(&ll, &hl, &lh, &hh, width as u32, height as u32, &mut reconstructed);
-        
+        Dwt53::inverse_2d(
+            &ll,
+            &hl,
+            &lh,
+            &hh,
+            width as u32,
+            height as u32,
+            &mut reconstructed,
+        );
+
         println!("\nAfter inverse DWT (reconstructed):");
         for y in 0..4 {
-            println!("  {:?}", &reconstructed[y*width..(y*width + 8)]);
+            println!("  {:?}", &reconstructed[y * width..(y * width + 8)]);
         }
-        
+
         // Check reconstruction error
         let mut max_error = 0i32;
         for i in 0..input.len() {
             let error = (input[i] - reconstructed[i]).abs();
             max_error = max_error.max(error);
         }
-        
+
         println!("\nMax reconstruction error: {}", max_error);
         assert_eq!(max_error, 0, "DWT should be perfectly reversible");
     }

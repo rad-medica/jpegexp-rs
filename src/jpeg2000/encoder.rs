@@ -44,7 +44,7 @@ impl J2kEncoder {
             use_irreversible: false, // Default to reversible for lossless
             codeblock_exp: 4,        // 64x64 codeblocks
             quality: 100,
-            use_htj2k: false,        // Default to standard JPEG 2000
+            use_htj2k: false, // Default to standard JPEG 2000
         }
     }
 
@@ -157,38 +157,38 @@ impl J2kEncoder {
             // Base step for 9-7 is usually around 1.0 / 2^depth?
             // OpenJPEG calculates: step = (1.0 + mantissa/2048) * 2^(-exponent).
             // We need to output u16 = (exponent << 11) | mantissa.
-            
+
             // Simplified rate control: Map quality 1-100 to a base step size.
             // Quality 100 -> step ~ 0 (or very small).
             // Quality 50 -> step larger.
-            
+
             // Reference: OpenJPEG uses `disto_alloc`.
             // Let's use a simple heuristic for now.
             // Base delta = 1.0 / 128.0 (approx).
             // Scale by (100 - quality) / 10.0?
             // If quality=100, step should be minimal.
             // Let's assume step = 1.0 for quality 100? No, 9-7 coefficients are small.
-            
+
             // Revert to OpenJPEG default-like behavior for now?
             // OpenJPEG default for 9-7 is derived from range.
             // We use `Scalar Expounded` (style 0x02).
             // Values are (Exponent << 11) | Mantissa.
             // step = (1 + m/2048) * 2^((dynamic_range) - e).
             // Wait, Eq E-4: Delta_b = 2^{R_b - \epsilon_b} * (1 + \mu_b / 2^{11}).
-            
+
             // For now, let's fix the Lossless mode first, then come back to complex quantization logic.
             // But I must implement *something*.
-            
+
             // Note: quant_style is overwritten below, this line is for documentation
             let _quant_style_expounded = (guard_bits << 5) | 0x02; // Scalar Expounded
-            
+
             // Quality-based rate control for 9-7 irreversible transform
             // Map quality 1-100 to compression ratio (larger step = more compression)
             // Quality 100: near-lossless (very small step)
             // Quality 75-90: visually lossless range
             // Quality 50: medium compression
             // Quality 1: maximum compression
-            
+
             let base_step = if self.quality >= 95 {
                 // Near-lossless range (quality 95-100)
                 // IMPORTANT: Step must be large enough to limit bit planes to avoid exceeding
@@ -207,17 +207,17 @@ impl J2kEncoder {
                 // High compression range (quality 1-49)
                 0.01 + (49 - self.quality) as f32 * 0.001
             };
-            
+
             // Use Scalar Expounded (0x02) for per-subband quantization control
             // This provides better rate-distortion performance than Scalar Derived
             quant_style = (guard_bits << 5) | 0x02;
-            
+
             // Calculate step sizes for each subband
             // IMPORTANT: Like the lossless encoder, epsilon must include the implicit subband gain
             // The decoder uses: Δ = (1 + μ/2048) * 2^(depth + guard_bits - ε)
             // Where ε already includes the gain for the subband type:
             //   - LL subband: gain = 0
-            //   - HL/LH subbands: gain = 1  
+            //   - HL/LH subbands: gain = 1
             //   - HH subband: gain = 2
             //
             // For a desired step size Δ_target:
@@ -226,7 +226,7 @@ impl J2kEncoder {
             // Two-step calculation:
             //   1. Calculate ε assuming μ ≈ 0
             //   2. Refine μ to match Δ_target exactly
-            
+
             step_sizes = (0..num_subbands)
                 .map(|i| {
                     // Determine subband gain (matches lossless encoder lines 257-270)
@@ -237,10 +237,10 @@ impl J2kEncoder {
                         let band_type = subband_in_decomp % 3;  // 0=HL, 1=LH, 2=HH
                         if band_type < 2 { 1 } else { 2 }  // HL/LH: gain=1, HH: gain=2
                     };
-                    
+
                     // Calculate rb = depth + guard_bits + gain (implicit in epsilon)
                     let rb = depth as i32 + guard_bits as i32 + gain;
-                    
+
                     // Calculate perceptually-weighted step size
                     let subband_step = if i == 0 {
                         // LL subband (most important) - use base step
@@ -249,20 +249,20 @@ impl J2kEncoder {
                         let subband_in_decomp = i - 1;
                         let decomp_level = subband_in_decomp / 3;
                         let band_type = subband_in_decomp % 3;
-                        
+
                         // Perceptual weighting factors
                         let band_factor = match band_type {
                             0 | 1 => 1.0,   // HL and LH
                             2 => 1.05,      // HH can be quantized slightly more
                             _ => 1.0,
                         };
-                        
+
                         // Coarser resolution levels are more important
                         let level_factor = 1.0 + (decomp_level as f32) * 0.05;
-                        
+
                         base_step * band_factor * level_factor
                     };
-                    
+
                     // Calculate epsilon to match decoder formula
                     // Δ = (1 + μ/2048) * 2^((depth + guard_bits) - ε)
                     // But ε already includes gain, so: ε = rb - log2(Δ / (1 + μ/2048))
@@ -270,31 +270,31 @@ impl J2kEncoder {
                     let log_delta = subband_step.log2();
                     let epsilon_float = rb as f32 - log_delta;
                     let epsilon = epsilon_float.round().max(0.0).min(31.0) as i32;
-                    
+
                     // Refine μ to match target step size exactly:
-                    // (1 + μ/2048) = Δ / 2^((depth + guard_bits) - ε)
-                    // Note: The gain is in ε, so we use (depth + guard_bits) here
-                    let scale = 2.0f32.powi(depth as i32 + guard_bits as i32 - epsilon);
+                    // (1 + μ/2048) = Δ / 2^((depth + guard_bits + gain) - ε)
+                    // Note: The gain is in ε, so we use (depth + guard_bits + gain) here
+                    let scale = 2.0f32.powi(depth as i32 + guard_bits as i32 + gain - epsilon);
                     let mu_float = (subband_step / scale - 1.0) * 2048.0;
                     let mu = mu_float.round().max(0.0).min(2047.0) as i32;
-                    
+
                     // Pack epsilon (5 bits) and mu (11 bits) into u16
                     let packed = ((epsilon as u16) << 11) | (mu as u16);
-                    
+
                     if std::env::var("J2K_DEBUG").is_ok() {
                         eprintln!(
                             "Subband {}: gain={}, rb={}, step={:.6}, eps={}, mu={}, packed=0x{:04X}",
                             i, gain, rb, subband_step, epsilon, mu, packed
                         );
                     }
-                    
+
                     packed
                 })
                 .collect();
         } else {
             // Reversible 5-3 (No Quantization - Style 0x00)
             quant_style = guard_bits << 5;
-            
+
             step_sizes = (0..num_subbands)
                 .map(|i| {
                     let epsilon = if i == 0 {
@@ -304,7 +304,7 @@ impl J2kEncoder {
                         // Higher resolution subbands
                         let subband_in_decomp = i - 1;
                         let band_type = subband_in_decomp % 3; // 0=HL, 1=LH, 2=HH
-                        
+
                         if band_type < 2 {
                             depth + 1
                         } else {
@@ -323,7 +323,7 @@ impl J2kEncoder {
         writer.write_qcd(&qcd)?;
 
         // ... rest of the function ...
-        
+
         // Calculate codeblock size
         let cb_size = 1usize << (self.codeblock_exp + 2);
 
@@ -355,8 +355,10 @@ impl J2kEncoder {
         if components == 3 && !self.use_irreversible {
             if std::env::var("J2K_DEBUG").is_ok() {
                 eprintln!("RCT: Applying RCT to {}x{} image", width, height);
-                eprintln!("RCT BEFORE: R[0]={}, G[0]={}, B[0]={}", 
-                         component_data[0][0], component_data[1][0], component_data[2][0]);
+                eprintln!(
+                    "RCT BEFORE: R[0]={}, G[0]={}, B[0]={}",
+                    component_data[0][0], component_data[1][0], component_data[2][0]
+                );
             }
             for i in 0..width * height {
                 let r = component_data[0][i];
@@ -372,21 +374,34 @@ impl J2kEncoder {
                 component_data[2][i] = v;
             }
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("RCT AFTER: Y[0]={}, U[0]={}, V[0]={}", 
-                         component_data[0][0], component_data[1][0], component_data[2][0]);
-                eprintln!("RCT AFTER: Y[1]={}, U[1]={}, V[1]={}", 
-                         component_data[0][1], component_data[1][1], component_data[2][1]);
+                eprintln!(
+                    "RCT AFTER: Y[0]={}, U[0]={}, V[0]={}",
+                    component_data[0][0], component_data[1][0], component_data[2][0]
+                );
+                eprintln!(
+                    "RCT AFTER: Y[1]={}, U[1]={}, V[1]={}",
+                    component_data[0][1], component_data[1][1], component_data[2][1]
+                );
                 let mid = width * height / 2;
-                eprintln!("RCT AFTER: Y[{}]={}, U[{}]={}, V[{}]={}", 
-                         mid, component_data[0][mid], mid, component_data[1][mid], mid, component_data[2][mid]);
+                eprintln!(
+                    "RCT AFTER: Y[{}]={}, U[{}]={}, V[{}]={}",
+                    mid,
+                    component_data[0][mid],
+                    mid,
+                    component_data[1][mid],
+                    mid,
+                    component_data[2][mid]
+                );
             }
         }
         // Apply ICT (Irreversible Color Transform) if 3 components and using irreversible transform
         else if components == 3 && self.use_irreversible {
             if std::env::var("J2K_DEBUG").is_ok() {
                 eprintln!("ICT: Applying ICT to {}x{} image", width, height);
-                eprintln!("ICT BEFORE: R[0]={}, G[0]={}, B[0]={}", 
-                         component_data[0][0], component_data[1][0], component_data[2][0]);
+                eprintln!(
+                    "ICT BEFORE: R[0]={}, G[0]={}, B[0]={}",
+                    component_data[0][0], component_data[1][0], component_data[2][0]
+                );
             }
             for i in 0..width * height {
                 let r = component_data[0][i] as f32;
@@ -403,69 +418,101 @@ impl J2kEncoder {
                 component_data[2][i] = cr as i32;
             }
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("ICT AFTER: Y[0]={}, Cb[0]={}, Cr[0]={}", 
-                         component_data[0][0], component_data[1][0], component_data[2][0]);
-                eprintln!("ICT AFTER: Y[1]={}, Cb[1]={}, Cr[1]={}", 
-                         component_data[0][1], component_data[1][1], component_data[2][1]);
+                eprintln!(
+                    "ICT AFTER: Y[0]={}, Cb[0]={}, Cr[0]={}",
+                    component_data[0][0], component_data[1][0], component_data[2][0]
+                );
+                eprintln!(
+                    "ICT AFTER: Y[1]={}, Cb[1]={}, Cr[1]={}",
+                    component_data[0][1], component_data[1][1], component_data[2][1]
+                );
                 let mid = width * height / 2;
-                eprintln!("ICT AFTER: Y[{}]={}, Cb[{}]={}, Cr[{}]={}", 
-                         mid, component_data[0][mid], mid, component_data[1][mid], mid, component_data[2][mid]);
+                eprintln!(
+                    "ICT AFTER: Y[{}]={}, Cb[{}]={}, Cr[{}]={}",
+                    mid,
+                    component_data[0][mid],
+                    mid,
+                    component_data[1][mid],
+                    mid,
+                    component_data[2][mid]
+                );
             }
         }
 
         for (comp_idx, mut comp_data) in component_data.into_iter().enumerate() {
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("COMPONENT {}: Processing {} pixels, first 4: {:?}", 
-                         comp_idx, comp_data.len(), &comp_data[..comp_data.len().min(4)]);
+                eprintln!(
+                    "COMPONENT {}: Processing {} pixels, first 4: {:?}",
+                    comp_idx,
+                    comp_data.len(),
+                    &comp_data[..comp_data.len().min(4)]
+                );
                 let mid = comp_data.len() / 2;
-                eprintln!("COMPONENT {}: Mid 4: {:?}", 
-                         comp_idx, &comp_data[mid..comp_data.len().min(mid+4)]);
-                eprintln!("COMPONENT {}: Last 4: {:?}", 
-                         comp_idx, &comp_data[comp_data.len().saturating_sub(4)..]);
+                eprintln!(
+                    "COMPONENT {}: Mid 4: {:?}",
+                    comp_idx,
+                    &comp_data[mid..comp_data.len().min(mid + 4)]
+                );
+                eprintln!(
+                    "COMPONENT {}: Last 4: {:?}",
+                    comp_idx,
+                    &comp_data[comp_data.len().saturating_sub(4)..]
+                );
             }
             // Apply forward 2D DWT
             let coeffs = if self.use_irreversible {
                 // Convert to float
                 let mut data_f32: Vec<f32> = comp_data.iter().map(|&v| v as f32).collect();
-                
+
                 // Apply 9-7 DWT (levels)
                 let mut current_w = width;
                 let mut current_h = height;
-                
+
                 for _ in 0..decomposition_levels {
-                    if current_w < 2 || current_h < 2 { break; }
-                    
+                    if current_w < 2 || current_h < 2 {
+                        break;
+                    }
+
                     // Rows
                     for y in 0..current_h {
                         let row_start = y * width;
                         let row_data = &data_f32[row_start..row_start + current_w].to_vec();
-                        
+
                         let l_len = (current_w + 1) / 2;
                         let h_len = current_w / 2;
                         let mut l = vec![0.0; l_len];
                         let mut h = vec![0.0; h_len];
-                        
+
                         super::dwt::Dwt97::forward(row_data, &mut l, &mut h);
-                        
-                        for (i, &v) in l.iter().enumerate() { data_f32[row_start + i] = v; }
-                        for (i, &v) in h.iter().enumerate() { data_f32[row_start + l_len + i] = v; }
+
+                        for (i, &v) in l.iter().enumerate() {
+                            data_f32[row_start + i] = v;
+                        }
+                        for (i, &v) in h.iter().enumerate() {
+                            data_f32[row_start + l_len + i] = v;
+                        }
                     }
-                    
+
                     // Cols
                     for x in 0..current_w {
-                        let col_data: Vec<f32> = (0..current_h).map(|y| data_f32[y * width + x]).collect();
-                        
+                        let col_data: Vec<f32> =
+                            (0..current_h).map(|y| data_f32[y * width + x]).collect();
+
                         let l_len = (current_h + 1) / 2;
                         let h_len = current_h / 2;
                         let mut l = vec![0.0; l_len];
                         let mut h = vec![0.0; h_len];
-                        
+
                         super::dwt::Dwt97::forward(&col_data, &mut l, &mut h);
-                        
-                        for (i, &v) in l.iter().enumerate() { data_f32[i * width + x] = v; }
-                        for (i, &v) in h.iter().enumerate() { data_f32[(l_len + i) * width + x] = v; }
+
+                        for (i, &v) in l.iter().enumerate() {
+                            data_f32[i * width + x] = v;
+                        }
+                        for (i, &v) in h.iter().enumerate() {
+                            data_f32[(l_len + i) * width + x] = v;
+                        }
                     }
-                    
+
                     current_w = (current_w + 1) / 2;
                     current_h = (current_h + 1) / 2;
                 }
@@ -480,29 +527,48 @@ impl J2kEncoder {
                 // So here we just return float coeffs?
                 // But encode_component_packets expects &[i32].
                 // We need to refactor encode_component_packets to take f32 or handle quantization here.
-                
-                // Let's handle quantization here by iterating subbands again (duplicating some logic) or 
+
+                // Let's handle quantization here by iterating subbands again (duplicating some logic) or
                 // casting to i32 after quantization.
-                
+
                 // We need `step_sizes` vector calculated earlier.
                 // We'll reconstruct the step size from the `qcd` logic.
-                
+
                 // Let's create a helper `quantize_97`
-                self.quantize_97(&mut data_f32, width, height, decomposition_levels, &step_sizes, guard_bits, depth)
+                self.quantize_97(
+                    &mut data_f32,
+                    width,
+                    height,
+                    decomposition_levels,
+                    &step_sizes,
+                    guard_bits,
+                    depth,
+                )
             } else {
                 self.apply_forward_dwt_2d(&mut comp_data, width, height)?
             };
 
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("COMPONENT {}: After DWT, first 10 coeffs: {:?}", 
-                         comp_idx, &coeffs[..coeffs.len().min(10)]);
+                eprintln!(
+                    "COMPONENT {}: After DWT, first 10 coeffs: {:?}",
+                    comp_idx,
+                    &coeffs[..coeffs.len().min(10)]
+                );
             }
 
             // Encode component into packets
             // ...
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("COMPONENT {}: Encoding packets with {} coefficients", comp_idx, coeffs.len());
-                eprintln!("COMPONENT {}: First 10 coeffs: {:?}", comp_idx, &coeffs[..coeffs.len().min(10)]);
+                eprintln!(
+                    "COMPONENT {}: Encoding packets with {} coefficients",
+                    comp_idx,
+                    coeffs.len()
+                );
+                eprintln!(
+                    "COMPONENT {}: First 10 coeffs: {:?}",
+                    comp_idx,
+                    &coeffs[..coeffs.len().min(10)]
+                );
             }
             let comp_packets = self.encode_component_packets(
                 &coeffs,
@@ -516,11 +582,15 @@ impl J2kEncoder {
                 &step_sizes,
             )?;
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("COMPONENT {}: Generated {} packets", comp_idx, comp_packets.len());
+                eprintln!(
+                    "COMPONENT {}: Generated {} packets",
+                    comp_idx,
+                    comp_packets.len()
+                );
             }
             packets.extend(comp_packets);
         }
-        
+
         // ... sort and write ...
         // Sort packets by LRCP (Layer, Resolution, Component, Precinct)
         // Currently only 1 layer, 1 precinct.
@@ -557,7 +627,6 @@ impl J2kEncoder {
         Ok(writer.len())
     }
 
-
     /// Apply forward 2D DWT using 5-3 reversible transform
     fn apply_forward_dwt_2d(
         &self,
@@ -566,8 +635,13 @@ impl J2kEncoder {
         height: usize,
     ) -> Result<Vec<i32>, JpeglsError> {
         if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!("apply_forward_dwt_2d: width={} height={} data_len={} first_4={:?}", 
-                     width, height, data.len(), &data[..data.len().min(4)]);
+            eprintln!(
+                "apply_forward_dwt_2d: width={} height={} data_len={} first_4={:?}",
+                width,
+                height,
+                data.len(),
+                &data[..data.len().min(4)]
+            );
         }
         let mut result = data.to_vec();
         let mut current_w = width;
@@ -641,8 +715,10 @@ impl J2kEncoder {
         let num_resolutions = (num_levels + 1) as usize;
 
         if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!("encode_component_packets: comp={} width={} height={} levels={} resolutions={}", 
-                     comp_idx, width, height, num_levels, num_resolutions);
+            eprintln!(
+                "encode_component_packets: comp={} width={} height={} levels={} resolutions={}",
+                comp_idx, width, height, num_levels, num_resolutions
+            );
         }
 
         // Iterate through resolutions (lowest to highest)
@@ -656,22 +732,25 @@ impl J2kEncoder {
             let mut subband_grids = Vec::with_capacity(num_bands);
 
             let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
-            
+
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("  RES {}: LL size {}x{}, {} bands", res, ll_w, ll_h, num_bands);
+                eprintln!(
+                    "  RES {}: LL size {}x{}, {} bands",
+                    res, ll_w, ll_h, num_bands
+                );
             }
-            
+
             for band in 0..num_bands {
-                 let (sb_w, sb_h) = if res == 0 {
+                let (sb_w, sb_h) = if res == 0 {
                     (ll_w, ll_h)
                 } else {
                     let (prev_w, prev_h) =
                         self.get_ll_size(width, height, num_levels as usize, res - 1);
-                    
+
                     // Logic must match extract_subband_coeffs
                     match band {
-                        0 => (ll_w - prev_w, prev_h), // HL
-                        1 => (prev_w, ll_h - prev_h), // LH
+                        0 => (ll_w - prev_w, prev_h),        // HL
+                        1 => (prev_w, ll_h - prev_h),        // LH
                         2 => (ll_w - prev_w, ll_h - prev_h), // HH
                         _ => (0, 0),
                     }
@@ -706,8 +785,14 @@ impl J2kEncoder {
                 );
 
                 if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!("    BAND {}: Extracted {}x{} subband, {} coeffs, first 10: {:?}", 
-                             band, sb_w, sb_h, sb_coeffs.len(), &sb_coeffs[..sb_coeffs.len().min(10)]);
+                    eprintln!(
+                        "    BAND {}: Extracted {}x{} subband, {} coeffs, first 10: {:?}",
+                        band,
+                        sb_w,
+                        sb_h,
+                        sb_coeffs.len(),
+                        &sb_coeffs[..sb_coeffs.len().min(10)]
+                    );
                 }
 
                 // Calculate epsilon for this subband
@@ -718,7 +803,7 @@ impl J2kEncoder {
                 } else {
                     1 + (res - 1) * 3 + band
                 };
-                
+
                 let epsilon = if self.use_irreversible && qcd_idx < step_sizes.len() {
                     // Extract epsilon from the packed QCD step size
                     ((step_sizes[qcd_idx] >> 11) & 0x1F) as u8
@@ -763,125 +848,120 @@ impl J2kEncoder {
                         }
 
                         // Check if block has any non-zero coefficients
-                        // This is critical for near-constant subbands (e.g., LL after DWT of checkerboard)
-                        // where all values might be -1 or similar, leading to max_bp calculation issues
                         let has_nonzero = block_data.iter().any(|&v| v != 0);
-                        
-                        // DEBUG: Check what's in the block
-                        if std::env::var("J2K_DEBUG").is_ok() {
-                            let min_val = block_data.iter().min().unwrap_or(&0);
-                            let max_val = block_data.iter().max().unwrap_or(&0);
-                            let unique_count = {
-                                let mut vals = block_data.clone();
-                                vals.sort_unstable();
-                                vals.dedup();
-                                vals.len()
-                            };
-                            if unique_count <= 3 {
-                                eprintln!("BLOCK[{},{}] res={} band={} range=[{},{}] unique={} nonzero={} first_few={:?}",
-                                         cbx, cby, res, band, min_val, max_val, unique_count, has_nonzero,
-                                         &block_data[..block_data.len().min(10)]);
+
+                        if self.use_htj2k {
+                            // HTJ2K Encoding (Part 15)
+                            if has_nonzero {
+                                let mut ht_encoder =
+                                    super::ht_block_coder::encoder::HTBlockEncoder::new(bw, bh);
+
+                                // Create a mock J2kCodeBlock with the coefficients
+                                // HTBlockEncoder expects coefficients in the block structure
+                                let mock_block = super::image::J2kCodeBlock {
+                                    x: cbx as u32,
+                                    y: cby as u32,
+                                    width: bw as u32,
+                                    height: bh as u32,
+                                    zero_bit_planes: 0, // Not used by HT encoder this way?
+                                    coding_passes: 0,
+                                    coefficients: block_data,
+                                    layer_data: Vec::new(),
+                                    layers_decoded: 0,
+                                    state: Vec::new(),
+                                    mq_contexts: Vec::new(),
+                                    mq_a: 0,
+                                    mq_c: 0,
+                                    mq_ct: 0,
+                                };
+
+                                let encoded = ht_encoder
+                                    .encode_block(&mock_block)
+                                    .map_err(|_| JpeglsError::InvalidOperation)?;
+
+                                // HTJ2K doesn't use "passes" in the same way, but the packet header
+                                // needs some value. OpenHTJ2K uses:
+                                // "Number of zero bit planes" is stored in header?
+                                // "Number of passes" = 1?
+                                // Standard says:
+                                // For HT code-blocks:
+                                // Lblock = L_ht (length of HT codestream)
+                                // zero_bp = number of zero bit planes (M_b - 1 - P?)
+                                //
+                                // We need to calculate zero_bp correctly.
+                                // calculate_max_bit_plane logic is still useful.
+                                let max_val = mock_block
+                                    .coefficients
+                                    .iter()
+                                    .map(|v| v.abs())
+                                    .max()
+                                    .unwrap_or(0);
+                                let max_bp = if max_val > 0 {
+                                    32 - max_val.leading_zeros() - 1
+                                } else {
+                                    0
+                                };
+
+                                let mb = (guard_bits + epsilon).saturating_sub(1);
+                                let zero_bp = if max_bp as u8 <= mb.saturating_sub(1) {
+                                    mb.saturating_sub(1).saturating_sub(max_bp as u8)
+                                } else {
+                                    0
+                                };
+
+                                packet_header
+                                    .included_cblks
+                                    .push(super::packet::CodeBlockInfo {
+                                        x: cbx,
+                                        y: cby,
+                                        subband_index: band as u8,
+                                        included: true,
+                                        num_passes: 1, // HTJ2K uses 1 pass? Or 0?
+                                        // Usually 1 pass to indicate "cleanup pass" is present?
+                                        // Actually HTJ2K reuses legacy packet header syntax.
+                                        // Usually sets passes=1.
+                                        data_len: encoded.len() as u32,
+                                        zero_bp,
+                                    });
+
+                                packet_body.extend_from_slice(&encoded);
                             }
-                        }
-                        
-                        let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
-                        let max_bp_opt = bpc.calculate_max_bit_plane();
-                        
-                        // Encode if either:
-                        // 1. There's actual bit-plane variation (max_bp exists), OR
-                        // 2. The subband has non-zero coefficients (even if all identical)
-                        // This ensures subbands with constant non-zero values (like LL=-1) are encoded
-                        if max_bp_opt.is_some() || has_nonzero {
-                            let max_bp = max_bp_opt.unwrap_or(0);
-                            
-                            // Map band 0..2 to orientation 1..3?
-                            // encoder.rs loop: band 0..num_bands.
-                            // if res=0, band=0 (LL -> orient 0).
-                            // if res>0, band 0..2 (HL, LH, HH -> orient 1, 2, 3).
-                            let orientation = if res == 0 { 0 } else { band as u8 + 1 };
-
-                            // DEBUG:
-                            if std::env::var("J2K_DEBUG").is_ok() {
-                                let max_val = block_data.iter().map(|v| v.abs()).max().unwrap_or(0);
-                                eprintln!(
-                                    "ENC: CB[{},{}] res={} band={} orient={} max_val={} max_bp={} has_nonzero={}",
-                                    cbx, cby, res, band, orientation, max_val, max_bp, has_nonzero
-                                );
-                            }
-
-                            let passes = bpc.encode_codeblock(max_bp, orientation);
-                            bpc.mq.flush();
-                            let encoded = bpc.mq.get_buffer();
-
-                            if std::env::var("J2K_DEBUG").is_ok() {
-                                eprintln!(
-                                    "Enc CB[{},{}] band={} len={} max_bp={} passes={}",
-                                    cbx,
-                                    cby,
-                                    band,
-                                    encoded.len(),
-                                    max_bp,
-                                    passes
-                                );
-                            }
-
-                        // zero_bp calculation
-                        // For irreversible (9-7) DWT, epsilon includes the gain and step size adjustments,
-                        // so M_b = G + epsilon - 1 doesn't apply directly.
-                        // Instead, we calculate zero_bp based on the actual coefficient range.
-                        //
-                        // The quantized coefficients are integers, and their maximum magnitude
-                        // determines max_bp. The total available bit-planes depend on the
-                        // integer representation (typically 32 bits for i32).
-                        //
-                        // For consistency with the decoder, we use:
-                        // M_b = depth + guard_bits + gain - 1
-                        // (where gain is implicit in epsilon for lossless, but explicit here)
-                        //
-                        // Actually, for 9-7, we should use a fixed M_b based on the expected
-                        // dynamic range of quantized coefficients. Since we're using i32,
-                        // and coefficients can be quite large after quantization with small delta,
-                        // we'll use M_b = 30 (leaving room for sign bit in i32).
-                        //
-                        // NO WAIT - the decoder calculates max_bit_plane = (m_b - 1) - zero_bp
-                        // And m_b in the decoder is calculated from epsilon.
-                        // So we need mb here to match what the decoder will calculate!
-                        
-                        let mb = (guard_bits + epsilon).saturating_sub(1);
-                        
-                        // But here's the key: max_bp is the actual MSB of our coefficients.
-                        // zero_bp is how many high-order bit-planes are all zero.
-                        // The relationship is: zero_bp = mb - 1 - max_bp
-                        // Or: max_bp = mb - 1 - zero_bp
-                        //
-                        // The decoder will calculate: max_bit_plane = (mb - 1) - zero_bp
-                        // So if we send zero_bp, the decoder gets max_bit_plane = max_bp. Good!
-                        
-                        let zero_bp = if max_bp <= mb.saturating_sub(1) {
-                            mb.saturating_sub(1).saturating_sub(max_bp as u8)
                         } else {
-                            0
-                        };
+                            // Standard JPEG 2000 (Part 1) Encoding
+                            let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
+                            let max_bp_opt = bpc.calculate_max_bit_plane();
 
-                            if std::env::var("J2K_DEBUG").is_ok() {
-                                eprintln!("    zero_bp calc: mb={}, max_bp={}, mb-1={}, zero_bp={}",
-                                    mb, max_bp, mb.saturating_sub(1), zero_bp);
-                                eprintln!("    -> zero_bp={}", zero_bp);
+                            if max_bp_opt.is_some() || has_nonzero {
+                                let max_bp = max_bp_opt.unwrap_or(0);
+
+                                // Map band 0..2 to orientation 1..3?
+                                let orientation = if res == 0 { 0 } else { band as u8 + 1 };
+
+                                let passes = bpc.encode_codeblock(max_bp, orientation);
+                                bpc.mq.flush();
+                                let encoded = bpc.mq.get_buffer();
+
+                                let mb = (guard_bits + epsilon).saturating_sub(1);
+                                let zero_bp = if max_bp <= mb.saturating_sub(1) {
+                                    mb.saturating_sub(1).saturating_sub(max_bp as u8)
+                                } else {
+                                    0
+                                };
+
+                                packet_header
+                                    .included_cblks
+                                    .push(super::packet::CodeBlockInfo {
+                                        x: cbx,
+                                        y: cby,
+                                        subband_index: band as u8,
+                                        included: true,
+                                        num_passes: passes,
+                                        data_len: encoded.len() as u32,
+                                        zero_bp,
+                                    });
+
+                                packet_body.extend_from_slice(encoded);
                             }
-
-                            packet_header
-                                .included_cblks
-                                .push(super::packet::CodeBlockInfo {
-                                    x: cbx,
-                                    y: cby,
-                                    subband_index: band as u8,
-                                    included: true,
-                                    num_passes: passes,
-                                    data_len: encoded.len() as u32,
-                                    zero_bp,
-                                });
-
-                            packet_body.extend_from_slice(encoded);
                         }
                     }
                 }
@@ -911,8 +991,14 @@ impl J2kEncoder {
 
             if std::env::var("J2K_DEBUG").is_ok() {
                 let p = packets.last().unwrap();
-                eprintln!("ENC: Created packet for res={} comp={} header_len={} body_len={} cblks={}", 
-                           res, comp_idx, p.header_data.len(), p.body_data.len(), packet_header.included_cblks.len());
+                eprintln!(
+                    "ENC: Created packet for res={} comp={} header_len={} body_len={} cblks={}",
+                    res,
+                    comp_idx,
+                    p.header_data.len(),
+                    p.body_data.len(),
+                    packet_header.included_cblks.len()
+                );
             }
         }
 
@@ -937,15 +1023,15 @@ impl J2kEncoder {
             let num_bands = if res == 0 { 1 } else { 3 };
             for band in 0..num_bands {
                 let sb_idx = if res == 0 { 0 } else { band };
-                
+
                 // Calculate subband dimensions and offset
                 // We need to find where this subband is in the `coeffs` array.
                 // Reuse `extract_subband_coeffs` logic logic but adapted for in-place index calculation.
-                // Or better, just iterate all pixels and check which subband they belong to? 
+                // Or better, just iterate all pixels and check which subband they belong to?
                 // That's O(N*levels). Slow.
                 // Better: Iterate subbands and fill `int_coeffs`.
-                
-            let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
+
+                let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
                 let (prev_ll_w, prev_ll_h) = if res > 0 {
                     self.get_ll_size(width, height, num_levels as usize, res - 1)
                 } else {
@@ -953,7 +1039,7 @@ impl J2kEncoder {
                 };
 
                 let (sb_w, sb_h, start_x, start_y) = match sb_idx {
-                    0 if res == 0 => (ll_w, ll_h, 0, 0), // LL
+                    0 if res == 0 => (ll_w, ll_h, 0, 0),              // LL
                     0 => (ll_w - prev_ll_w, prev_ll_h, prev_ll_w, 0), // HL
                     1 => (prev_ll_w, ll_h - prev_ll_h, 0, prev_ll_h), // LH
                     2 => (ll_w - prev_ll_w, ll_h - prev_ll_h, prev_ll_w, prev_ll_h), // HH
@@ -961,9 +1047,13 @@ impl J2kEncoder {
                 };
 
                 // Get Step Size for this band
-                let qcd_idx = if res == 0 { 0 } else { 1 + (res - 1) * 3 + band };
+                let qcd_idx = if res == 0 {
+                    0
+                } else {
+                    1 + (res - 1) * 3 + band
+                };
                 let step_encoded = step_sizes[qcd_idx];
-                
+
                 // Decode step size from (Exp << 11) | Mant
                 // Delta = 2^(Rb - E) * (1 + M/2048)
                 // Wait, in `encode`, we generated `step_sizes`?
@@ -972,31 +1062,42 @@ impl J2kEncoder {
                 // In `encode` loop:
                 // if irreversible -> `step_sizes = vec![0x0800]` (dummy).
                 // So we need to calculate actual deltas HERE or pass correct vector.
-                
+
                 // Let's implement full calculation in `encode` instead of dummy.
                 // But assuming `step_sizes` has correct values for all bands (Scalar Expounded) OR
                 // we implement derived logic here.
-                
+
                 // For now, let's assume `step_sizes` contains valid entries for all bands.
                 // If not (derived), we need to derive.
                 // Let's stick to EXPOUNDED for now in `encode` to make it explicit.
-                
+
                 let epsilon = (step_encoded >> 11) as i32;
                 let mantissa = (step_encoded & 0x7FF) as i32;
-                
+
+                // Determine subband gain
+                let gain = if res == 0 {
+                    0 // LL
+                } else {
+                    let band_type = band; // 0=HL, 1=LH, 2=HH
+                    if band_type == 2 {
+                        2
+                    } else {
+                        1
+                    }
+                };
+
                 // The epsilon in QCD already includes the subband gain, so we use the decoder's formula:
-                // Δ = 2^(depth + guard_bits - epsilon) * (1 + mantissa/2048)
-                // This matches what the decoder does in image.rs line 209
-                let delta = (1.0 + (mantissa as f32) / 2048.0) 
-                    * 2.0f32.powi(_depth as i32 + _guard_bits as i32 - epsilon);
-                
+                // Δ = 2^(depth + guard_bits + gain - epsilon) * (1 + mantissa/2048)
+                let delta = (1.0 + (mantissa as f32) / 2048.0)
+                    * 2.0f32.powi(_depth as i32 + _guard_bits as i32 + gain - epsilon);
+
                 if std::env::var("J2K_DEBUG").is_ok() {
                     eprintln!(
-                        "Quantize97: res={}, band={}, qcd_idx={}, eps={}, mu={}, delta={:.6}",
-                        res, band, qcd_idx, epsilon, mantissa, delta
+                        "Quantize97: res={}, band={}, qcd_idx={}, eps={}, mu={}, gain={}, delta={:.6}",
+                        res, band, qcd_idx, epsilon, mantissa, gain, delta
                     );
                 }
-                
+
                 let inv_delta = 1.0 / delta;
 
                 for y in 0..sb_h {
@@ -1013,7 +1114,7 @@ impl J2kEncoder {
         }
         int_coeffs
     }
-    
+
     /// Get LL subband size at a given resolution level
     /// This matches the iterative ceiling division used in the forward DWT
     fn get_ll_size(
@@ -1085,7 +1186,10 @@ impl J2kEncoder {
         };
 
         if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!("EXTRACT: Res {} subband {} {}x{} at ({},{})", res, sb_idx, sb_w, sb_h, start_x, start_y);
+            eprintln!(
+                "EXTRACT: Res {} subband {} {}x{} at ({},{})",
+                res, sb_idx, sb_w, sb_h, start_x, start_y
+            );
         }
 
         let mut sb_coeffs = Vec::with_capacity(sb_w * sb_h);

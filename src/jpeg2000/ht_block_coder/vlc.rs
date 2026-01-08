@@ -12,7 +12,7 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
     while i < TABLE_SIZE {
         let cwd = (i as u16) & 0x7F;
         let c_q = (i as u8) >> 7;
-        
+
         let mut j = 0;
         let mut found = false;
         while j < src.len() {
@@ -31,7 +31,7 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
                     let e_k = entry.3 as u16;
                     let e_1 = entry.4 as u16;
                     let len = entry.6 as u16;
-                    
+
                     // Pack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
                     // e_k: bits 12-15
                     // e_1: bits 8-11
@@ -42,7 +42,9 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
                     found = true;
                 }
             }
-            if found { break; }
+            if found {
+                break;
+            }
             j += 1;
         }
         i += 1;
@@ -67,7 +69,7 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
 pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
     // peek is MSB aligned (bit 15 is first bit of stream).
     // The table index expects 7 bits lookahead in LSB-first order (bit-reversed).
-    // 
+    //
     // 1. Extract top 7 bits: (peek >> 9) & 0x7F
     //    Stream: b0 b1 b2 b3 b4 b5 b6 ...
     //    Result: 0..0 b0 b1 b2 b3 b4 b5 b6 (MSB b0 is at bit 6)
@@ -77,24 +79,24 @@ pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
     //
     let lookahead = (peek >> 9) & 0x7F;
     let lookahead_rev = (lookahead as u8).reverse_bits() >> 1; // shift down 1 because u8 is 8 bits
-    
+
     let idx = ((context as u16) << 7) | (lookahead_rev as u16);
-    
+
     let val = if context == 0 {
         VLC_TABLE_0[idx as usize]
     } else {
         VLC_TABLE_1[idx as usize]
     };
-    
+
     // Unpack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
     let rho = ((val >> 4) & 0xF) as u8;
     let u_off = ((val >> 3) & 0x1) as u8;
     let e_k = ((val >> 12) & 0xF) as u8;
     // We ignore e_1 for now in the return signature, or assume e_k covers what caller needs.
     // The caller asks for `e_k`. Standard says `emb_k` calculation uses `E_k`.
-    
+
     let bits_consumed = (val & 0x7) as u8;
-    
+
     (rho, u_off, e_k, bits_consumed)
 }
 
@@ -106,8 +108,46 @@ pub struct VlcCodeword {
 
 /// Encode a significance pattern (rho) to a VLC codeword
 /// This is the inverse of decode_vlc
-pub fn encode_vlc(_rho: u8, _context: u8) -> VlcCodeword {
-    // TODO: Implement using reverse lookup table if encoding is needed.
-    // For now, this is a placeholder.
-    VlcCodeword { value: 0, bits: 0 }
+pub fn encode_vlc(rho: u8, context: u8, u_off: u8) -> (VlcCodeword, u8, u8) {
+    let src = if context == 0 {
+        VLC_TBL0_SRC
+    } else {
+        VLC_TBL1_SRC
+    };
+
+    // Linear search for matching rho and u_off
+    // Note: c_q is implicit in table selection (0 or 1), but source tables include c_q column.
+    // We can ignore column 0 if we select the table correctly.
+    for &entry in src {
+        // Entry: (c_q, rho, u_off, e_k, e_1, cwd, cwd_len)
+        if entry.1 == rho && entry.2 == u_off {
+            let e_k = entry.3;
+            let e_1 = entry.4;
+            let cwd = entry.5;
+            let len = entry.6;
+
+            return (
+                VlcCodeword {
+                    value: cwd,
+                    bits: len,
+                },
+                e_k,
+                e_1,
+            );
+        }
+    }
+
+    // Should not happen for valid inputs (rho 0..15)
+    // If rho=0, we shouldn't be calling VLC encode (MEL handles it)
+    // But table has entry for rho=0? (0, 0x0, ...) No, starts with 0x1.
+    // Wait, Table 1 has (2, 0x0...)?
+    // The source table format is:
+    // (c_q, rho, u_off, e_k, e_1, cwd, len)
+    // Looking at TBL0_SRC:
+    // (0, 0x1, ...) -> rho=1
+    // Does it handle rho=0? No.
+    // If rho=0, quad is insignificant, handled by MEL '0'.
+    // If rho!=0, quad is significant, handled by MEL '1' + VLC.
+
+    (VlcCodeword { value: 0, bits: 0 }, 0, 0)
 }

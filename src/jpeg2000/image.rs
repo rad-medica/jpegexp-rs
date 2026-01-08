@@ -116,38 +116,42 @@ pub struct J2kQcd {
 
 impl J2kImage {
     pub fn reconstruct_pixels(&self) -> Result<Vec<u8>, String> {
-        if self.tiles.is_empty() { return Err("No tiles".to_string()); }
+        if self.tiles.is_empty() {
+            return Err("No tiles".to_string());
+        }
         let tile = &self.tiles[0];
         let cod = self.cod.as_ref().ok_or("No COD")?;
         let nom_w = 1 << (cod.codeblock_width_exp + 2);
         let nom_h = 1 << (cod.codeblock_height_exp + 2);
         let is_reversible = cod.transformation == 1;
 
-        let get_subband_coeffs = |res: &J2kResolution, orientation: SubbandOrientation| -> Vec<i32> {
-            for sb in &res.subbands {
-                if sb.orientation == orientation {
-                    let mut sb_data = vec![0i32; (sb.width * sb.height) as usize];
-                    for cb in &sb.codeblocks {
-                        let start_x = cb.x * nom_w;
-                        let start_y = cb.y * nom_h;
-                        for cy in 0..cb.height {
-                            for cx in 0..cb.width {
-                                let src_idx = (cy * cb.width + cx) as usize;
-                                if src_idx < cb.coefficients.len() {
-                                    let dest_x = start_x + cx;
-                                    let dest_y = start_y + cy;
-                                    if dest_x < sb.width && dest_y < sb.height {
-                                        sb_data[(dest_y * sb.width + dest_x) as usize] = cb.coefficients[src_idx];
+        let get_subband_coeffs =
+            |res: &J2kResolution, orientation: SubbandOrientation| -> Vec<i32> {
+                for sb in &res.subbands {
+                    if sb.orientation == orientation {
+                        let mut sb_data = vec![0i32; (sb.width * sb.height) as usize];
+                        for cb in &sb.codeblocks {
+                            let start_x = cb.x * nom_w;
+                            let start_y = cb.y * nom_h;
+                            for cy in 0..cb.height {
+                                for cx in 0..cb.width {
+                                    let src_idx = (cy * cb.width + cx) as usize;
+                                    if src_idx < cb.coefficients.len() {
+                                        let dest_x = start_x + cx;
+                                        let dest_y = start_y + cy;
+                                        if dest_x < sb.width && dest_y < sb.height {
+                                            sb_data[(dest_y * sb.width + dest_x) as usize] =
+                                                cb.coefficients[src_idx];
+                                        }
                                     }
                                 }
                             }
                         }
+                        return sb_data;
                     }
-                    return sb_data;
                 }
-            }
-            vec![0; (res.width * res.height) as usize]
-        };
+                vec![0; (res.width * res.height) as usize]
+            };
 
         let mut component_buffers: Vec<Vec<i32>> = Vec::new();
         for (comp_idx, component) in tile.components.iter().enumerate() {
@@ -155,13 +159,18 @@ impl J2kImage {
                 component_buffers.push(vec![0; (self.width * self.height) as usize]);
                 continue;
             }
-            let mut current_ll = get_subband_coeffs(&component.resolutions[0], SubbandOrientation::LL);
+            let mut current_ll =
+                get_subband_coeffs(&component.resolutions[0], SubbandOrientation::LL);
 
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("COMP {} RES 0 LL: len={} first_few={:?}", 
-                         comp_idx, current_ll.len(), &current_ll[..current_ll.len().min(10)]);
+                eprintln!(
+                    "COMP {} RES 0 LL: len={} first_few={:?}",
+                    comp_idx,
+                    current_ll.len(),
+                    &current_ll[..current_ll.len().min(10)]
+                );
             }
-            
+
             // For irreversible transform, dequantize the LL subband ONCE before IDWT loop
             if !is_reversible {
                 let qcd = self.qcd.as_ref().unwrap();
@@ -170,20 +179,29 @@ impl J2kImage {
                 let val = qcd.step_sizes[0];
                 let eps = ((val >> 11) & 0x1F) as i32;
                 let mu = (val & 0x7FF) as i32;
-                let s_ll = (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - eps);
-                
+                let s_ll =
+                    (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - eps);
+
                 if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!("DEC step[0] (LL ONCE): eps={}, mu={}, depth={}, guard={}, delta={:.6}", 
-                        eps, mu, depth, guard_bits, s_ll);
-                    eprintln!("DEC: Before dequant LL once, coeffs (first 10): {:?}", &current_ll[..current_ll.len().min(10)]);
+                    eprintln!(
+                        "DEC step[0] (LL ONCE): eps={}, mu={}, depth={}, guard={}, delta={:.6}",
+                        eps, mu, depth, guard_bits, s_ll
+                    );
+                    eprintln!(
+                        "DEC: Before dequant LL once, coeffs (first 10): {:?}",
+                        &current_ll[..current_ll.len().min(10)]
+                    );
                 }
-                
+
                 for v in &mut current_ll {
                     *v = (*v as f32 * s_ll).round() as i32;
                 }
-                
+
                 if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!("DEC: After dequant LL once, coeffs (first 10): {:?}", &current_ll[..current_ll.len().min(10)]);
+                    eprintln!(
+                        "DEC: After dequant LL once, coeffs (first 10): {:?}",
+                        &current_ll[..current_ll.len().min(10)]
+                    );
                 }
             }
 
@@ -192,7 +210,7 @@ impl J2kImage {
                 let hl = get_subband_coeffs(res, SubbandOrientation::HL);
                 let lh = get_subband_coeffs(res, SubbandOrientation::LH);
                 let hh = get_subband_coeffs(res, SubbandOrientation::HH);
-                
+
                 // DEBUG: Log subband statistics
                 if std::env::var("J2K_DEBUG").is_ok() {
                     let check_subband = |name: &str, data: &[i32]| {
@@ -205,8 +223,16 @@ impl J2kImage {
                                 v.dedup();
                                 v.len()
                             };
-                            eprintln!("RECON res={} {}: len={} range=[{},{}] unique={} first_few={:?}", 
-                                     r, name, data.len(), min, max, unique, &data[..data.len().min(5)]);
+                            eprintln!(
+                                "RECON res={} {}: len={} range=[{},{}] unique={} first_few={:?}",
+                                r,
+                                name,
+                                data.len(),
+                                min,
+                                max,
+                                unique,
+                                &data[..data.len().min(5)]
+                            );
                         }
                     };
                     check_subband("LL", &current_ll);
@@ -214,18 +240,26 @@ impl J2kImage {
                     check_subband("LH", &lh);
                     check_subband("HH", &hh);
                 }
-                
+
                 let mut output = vec![0i32; (res.width * res.height) as usize];
-                
+
                 if is_reversible {
-                    crate::jpeg2000::dwt::Dwt53::inverse_2d(&current_ll, &hl, &lh, &hh, res.width, res.height, &mut output);
+                    crate::jpeg2000::dwt::Dwt53::inverse_2d(
+                        &current_ll,
+                        &hl,
+                        &lh,
+                        &hh,
+                        res.width,
+                        res.height,
+                        &mut output,
+                    );
                 } else {
-                    // Irreversible: use float path  
+                    // Irreversible: use float path
                     let cur_ll_f32: Vec<f32> = current_ll.iter().map(|&v| v as f32).collect();
                     let hl_f32: Vec<f32> = hl.iter().map(|&v| v as f32).collect();
                     let lh_f32: Vec<f32> = lh.iter().map(|&v| v as f32).collect();
                     let hh_f32: Vec<f32> = hh.iter().map(|&v| v as f32).collect();
-                    
+
                     // Dequantize the high-pass subbands ONLY (LL already dequantized before loop)
                     let qcd = self.qcd.as_ref().unwrap();
                     let depth = self.components[comp_idx].depth;
@@ -234,32 +268,78 @@ impl J2kImage {
                         let val = qcd.step_sizes[idx];
                         let eps = ((val >> 11) & 0x1F) as i32;
                         let mu = (val & 0x7FF) as i32;
-                        let delta = (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - eps);
-                        
+
+                        // Determine gain based on subband index
+                        // Index 0 = LL (gain 0)
+                        // Index > 0: (idx-1)%3 gives band type (0=HL, 1=LH, 2=HH)
+                        // HL/LH = gain 1, HH = gain 2
+                        let gain = if idx == 0 {
+                            0
+                        } else {
+                            let band_type = (idx - 1) % 3;
+                            if band_type == 2 {
+                                2
+                            } else {
+                                1
+                            }
+                        };
+
+                        // Δ = 2^(depth + guard_bits + gain - epsilon) * (1 + mu/2048)
+                        let delta = (1.0 + mu as f32 / 2048.0)
+                            * 2.0f32.powi((depth + guard_bits) as i32 + gain - eps);
+
                         if std::env::var("J2K_DEBUG").is_ok() {
-                            eprintln!("DEC step[{}]: eps={}, mu={}, depth={}, guard={}, delta={:.6}", 
-                                idx, eps, mu, depth, guard_bits, delta);
+                            eprintln!("DEC step[{}]: eps={}, mu={}, depth={}, guard={}, gain={}, delta={:.6}",
+                                idx, eps, mu, depth, guard_bits, gain, delta);
                         }
                         delta
                     };
-                    
+
                     let idx_base = 1 + (r - 1) * 3;
                     let s_hl = step(idx_base);
                     let s_lh = step(idx_base + 1);
                     let s_hh = step(idx_base + 2);
-                    
+
                     if std::env::var("J2K_DEBUG").is_ok() {
-                        eprintln!("DEC: Before dequant, HL coeffs (first 10): {:?}", &hl_f32[..hl_f32.len().min(10)]);
-                        eprintln!("DEC: Before dequant, LH coeffs (first 10): {:?}", &lh_f32[..lh_f32.len().min(10)]);
-                        eprintln!("DEC: Before dequant, HH coeffs (first 10): {:?}", &hh_f32[..hh_f32.len().min(10)]);
+                        eprintln!(
+                            "DEC: Before dequant, HL coeffs (first 10): {:?}",
+                            &hl_f32[..hl_f32.len().min(10)]
+                        );
+                        eprintln!(
+                            "DEC: Before dequant, LH coeffs (first 10): {:?}",
+                            &lh_f32[..lh_f32.len().min(10)]
+                        );
+                        eprintln!(
+                            "DEC: Before dequant, HH coeffs (first 10): {:?}",
+                            &hh_f32[..hh_f32.len().min(10)]
+                        );
                     }
-                    let mut hl_f = hl_f32; for v in &mut hl_f { *v *= s_hl; }
-                    let mut lh_f = lh_f32; for v in &mut lh_f { *v *= s_lh; }
-                    let mut hh_f = hh_f32; for v in &mut hh_f { *v *= s_hh; }
+                    let mut hl_f = hl_f32;
+                    for v in &mut hl_f {
+                        *v *= s_hl;
+                    }
+                    let mut lh_f = lh_f32;
+                    for v in &mut lh_f {
+                        *v *= s_lh;
+                    }
+                    let mut hh_f = hh_f32;
+                    for v in &mut hh_f {
+                        *v *= s_hh;
+                    }
 
                     let mut out_f = vec![0.0f32; output.len()];
-                    crate::jpeg2000::dwt::Dwt97::inverse_2d(&cur_ll_f32, &hl_f, &lh_f, &hh_f, res.width, res.height, &mut out_f);
-                    for i in 0..output.len() { output[i] = out_f[i].round() as i32; }
+                    crate::jpeg2000::dwt::Dwt97::inverse_2d(
+                        &cur_ll_f32,
+                        &hl_f,
+                        &lh_f,
+                        &hh_f,
+                        res.width,
+                        res.height,
+                        &mut out_f,
+                    );
+                    for i in 0..output.len() {
+                        output[i] = out_f[i].round() as i32;
+                    }
                 }
                 current_ll = output;
             }
@@ -268,9 +348,14 @@ impl J2kImage {
 
         if cod.mct == 1 && component_buffers.len() >= 3 {
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("DEC RCT: Applying inverse RCT to {} pixels", component_buffers[0].len());
-                eprintln!("DEC RCT BEFORE: Y[0]={}, U[0]={}, V[0]={}", 
-                         component_buffers[0][0], component_buffers[1][0], component_buffers[2][0]);
+                eprintln!(
+                    "DEC RCT: Applying inverse RCT to {} pixels",
+                    component_buffers[0].len()
+                );
+                eprintln!(
+                    "DEC RCT BEFORE: Y[0]={}, U[0]={}, V[0]={}",
+                    component_buffers[0][0], component_buffers[1][0], component_buffers[2][0]
+                );
             }
             for i in 0..component_buffers[0].len() {
                 let y = component_buffers[0][i];
@@ -282,21 +367,29 @@ impl J2kImage {
                     component_buffers[1][i] = g;
                     component_buffers[2][i] = u + g;
                 } else {
-                    let yf = y as f32; let uf = u as f32; let vf = v as f32;
+                    let yf = y as f32;
+                    let uf = u as f32;
+                    let vf = v as f32;
                     component_buffers[0][i] = (yf + 1.402 * vf).round() as i32;
                     component_buffers[1][i] = (yf - 0.34413 * uf - 0.71414 * vf).round() as i32;
                     component_buffers[2][i] = (yf + 1.772 * uf).round() as i32;
                 }
             }
             if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("DEC RCT AFTER: R[0]={}, G[0]={}, B[0]={}", 
-                         component_buffers[0][0], component_buffers[1][0], component_buffers[2][0]);
+                eprintln!(
+                    "DEC RCT AFTER: R[0]={}, G[0]={}, B[0]={}",
+                    component_buffers[0][0], component_buffers[1][0], component_buffers[2][0]
+                );
             }
         }
 
         let max_depth = self.components.iter().map(|c| c.depth).max().unwrap_or(8);
         let bytes_per_sample = if max_depth > 8 { 2 } else { 1 };
-        let mut out = vec![0u8; (self.width * self.height * self.component_count) as usize * bytes_per_sample];
+        let mut out = vec![
+            0u8;
+            (self.width * self.height * self.component_count) as usize
+                * bytes_per_sample
+        ];
         for i in 0..(self.width * self.height) as usize {
             for c in 0..self.component_count as usize {
                 let depth = self.components.get(c).map_or(8, |info| info.depth);

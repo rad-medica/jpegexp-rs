@@ -1,0 +1,9 @@
+Name: small_16x16_gray16_gradient
+Shape: (16, 16)
+Dtype: uint16
+Min: 0
+Max: 65535
+Mean: 32767.50
+JLS size: 417 bytes
+Raw size: 512 bytes
+Compression ratio: 1.23x
