@@ -104,6 +104,7 @@ pub struct J2kCod {
     pub transformation: u8, // 1: 5-3, 0: 9-7
     pub codeblock_width_exp: u8,
     pub codeblock_height_exp: u8,
+    pub code_block_style: u8, // SPcod byte 3 (0x40 = HT)
     pub precinct_sizes: Vec<u8>,
 }
 

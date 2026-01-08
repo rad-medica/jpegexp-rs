@@ -23,6 +23,8 @@ pub struct J2kEncoder {
     /// Quality parameter (unused for lossless, kept for API compatibility)
     #[allow(dead_code)]
     quality: u8,
+    /// Use HTJ2K (High-Throughput JPEG 2000) encoding
+    use_htj2k: bool,
 }
 
 /// Encoded packet data structure
@@ -42,6 +44,7 @@ impl J2kEncoder {
             use_irreversible: false, // Default to reversible for lossless
             codeblock_exp: 4,        // 64x64 codeblocks
             quality: 100,
+            use_htj2k: false,        // Default to standard JPEG 2000
         }
     }
 
@@ -58,6 +61,12 @@ impl J2kEncoder {
     /// Set whether to use irreversible (9-7) or reversible (5-3) transform
     pub fn set_irreversible(&mut self, irreversible: bool) {
         self.use_irreversible = irreversible;
+    }
+
+    /// Set whether to use HTJ2K (High-Throughput JPEG 2000) encoding
+    /// HTJ2K provides faster encoding at the cost of slightly larger files
+    pub fn set_htj2k(&mut self, use_htj2k: bool) {
+        self.use_htj2k = use_htj2k;
     }
 
     /// Encode pixel data to JPEG 2000 codestream
@@ -95,6 +104,11 @@ impl J2kEncoder {
         // Write SOC (Start of Codestream)
         writer.write_soc()?;
 
+        // Write CAP (Capability) marker if HTJ2K is enabled
+        if self.use_htj2k {
+            writer.write_cap(true, components as u16)?;
+        }
+
         // Write SIZ (Image and Tile Size)
         writer.write_siz(
             width as u32,
@@ -119,6 +133,7 @@ impl J2kEncoder {
             decomposition_levels,
             codeblock_width_exp: self.codeblock_exp,
             codeblock_height_exp: self.codeblock_exp,
+            code_block_style: 0,
             transformation,
             precinct_sizes: Vec::new(),
         };

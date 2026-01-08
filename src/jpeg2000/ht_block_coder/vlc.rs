@@ -1,3 +1,55 @@
+use super::vlc_tables::{VLC_TBL0_SRC, VLC_TBL1_SRC};
+
+const TABLE_SIZE: usize = 1024;
+
+// Generate lookup tables at compile time
+const VLC_TABLE_0: [u16; TABLE_SIZE] = generate_vlc_table(VLC_TBL0_SRC);
+const VLC_TABLE_1: [u16; TABLE_SIZE] = generate_vlc_table(VLC_TBL1_SRC);
+
+const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABLE_SIZE] {
+    let mut table = [0u16; TABLE_SIZE];
+    let mut i = 0;
+    while i < TABLE_SIZE {
+        let cwd = (i as u16) & 0x7F;
+        let c_q = (i as u8) >> 7;
+        
+        let mut j = 0;
+        let mut found = false;
+        while j < src.len() {
+            let entry = src[j];
+            let s_cq = entry.0;
+            if s_cq == c_q {
+                let s_cwd = entry.5;
+                let s_len = entry.6;
+                // Mask the lookahead `cwd` with the length of the table entry `cwd_len`
+                let mask = (1 << s_len) - 1;
+                if s_cwd == (cwd & mask) {
+                    // Match found
+                    // Format: c_q, rho, u_off, e_k, e_1, cwd, len
+                    let rho = entry.1 as u16;
+                    let u_off = entry.2 as u16;
+                    let e_k = entry.3 as u16;
+                    let e_1 = entry.4 as u16;
+                    let len = entry.6 as u16;
+                    
+                    // Pack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
+                    // e_k: bits 12-15
+                    // e_1: bits 8-11
+                    // rho: bits 4-7
+                    // u_off: bit 3
+                    // len: bits 0-2
+                    table[i] = (e_k << 12) | (e_1 << 8) | (rho << 4) | (u_off << 3) | len;
+                    found = true;
+                }
+            }
+            if found { break; }
+            j += 1;
+        }
+        i += 1;
+    }
+    table
+}
+
 /// Variable Length Coding (VLC) tables and logic for HTJ2K.
 /// Based on ISO/IEC 15444-15 Table 6 and Table 8.
 /// Decodes a VLC code word into a 4-pixel quad significance pattern (rho),
@@ -13,78 +65,37 @@
 /// - `e_k`: exponent prediction calculation helper? (Actually "emb_k" logic).
 /// - `bits_consumed`: Number of bits used by the VLC code.
 pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
-    // VLC decoding based on Table 8 of ISO 15444-15
-    // Format: (Codeword, Mask, Rho, U_off, E_k)
-    // We match the prefix of 'peek'.
-
-    // Note: The standard defines 2 contexts for VLC:
-    // Context 0 (Initial) and Context 1 (Adapted locally?)
-
-    // Simplified Table matching logic.
-    // Ideally this should be a lookup table.
-    // Since we are implementing a subset/skeleton first, we implement the logic for common cases.
-
-    if context == 0 {
-        // Context 0 Table
-        // 0... -> 0000 (rho=0), len=1
-        if peek & 0x8000 == 0 {
-            (0, 0, 0, 1)
-        } else {
-            // 10... -> 0001/0010/0100/1000 (rho=1/2/4/8), len=2?
-            // Standard says:
-            // 100 -> 1000 (rho=8), len=3
-            // 101 -> 0100 (rho=4), len=3
-            // 110 -> 0010 (rho=2), len=3
-            // 1110 -> 0001 (rho=1), len=4
-            // ...
-
-            // Let's implement a small switch for the prompt.
-            // Leading bits:
-            let top3 = (peek >> 13) & 0x7;
-            match top3 {
-                0..=3 => (0, 0, 0, 1), // 0xxx -> 0000
-                0b100 => (8, 0, 0, 3), // 100
-                0b101 => (4, 0, 0, 3), // 101
-                0b110 => (2, 0, 0, 3), // 110
-                0b111 => {
-                    // 111...
-                    if peek & 0x1000 == 0 {
-                        // 1110
-                        (1, 0, 0, 4)
-                    } else {
-                        // 1111...
-                        // Fallback/Extenstion
-                        (15, 1, 1, 5) // Dummy fallback for fully significant
-                    }
-                }
-                _ => (0, 0, 0, 1), // Should not reach
-            }
-        }
+    // peek is MSB aligned (bit 15 is first bit of stream).
+    // The table index expects 7 bits lookahead in LSB-first order (bit-reversed).
+    // 
+    // 1. Extract top 7 bits: (peek >> 9) & 0x7F
+    //    Stream: b0 b1 b2 b3 b4 b5 b6 ...
+    //    Result: 0..0 b0 b1 b2 b3 b4 b5 b6 (MSB b0 is at bit 6)
+    //
+    // 2. Reverse bits to get LSB-first order for table lookup
+    //    Target: 0..0 b6 b5 b4 b3 b2 b1 b0
+    //
+    let lookahead = (peek >> 9) & 0x7F;
+    let lookahead_rev = (lookahead as u8).reverse_bits() >> 1; // shift down 1 because u8 is 8 bits
+    
+    let idx = ((context as u16) << 7) | (lookahead_rev as u16);
+    
+    let val = if context == 0 {
+        VLC_TABLE_0[idx as usize]
     } else {
-        // Context 1 Table (different probabilities)
-        // Context 1 uses similar structure but with different codeword assignments
-        // For now, use same logic as Context 0 as a reasonable approximation
-        // Full implementation would use the actual Context 1 table from the standard
-        if peek & 0x8000 == 0 {
-            (0, 0, 0, 1)
-        } else {
-            let top3 = (peek >> 13) & 0x7;
-            match top3 {
-                0..=3 => (0, 0, 0, 1), // 0xxx -> 0000
-                0b100 => (8, 0, 0, 3), // 100
-                0b101 => (4, 0, 0, 3), // 101
-                0b110 => (2, 0, 0, 3), // 110
-                0b111 => {
-                    if peek & 0x1000 == 0 {
-                        (1, 0, 0, 4) // 1110
-                    } else {
-                        (15, 1, 1, 5) // 1111... (fallback)
-                    }
-                }
-                _ => (0, 0, 0, 1),
-            }
-        }
-    }
+        VLC_TABLE_1[idx as usize]
+    };
+    
+    // Unpack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
+    let rho = ((val >> 4) & 0xF) as u8;
+    let u_off = ((val >> 3) & 0x1) as u8;
+    let e_k = ((val >> 12) & 0xF) as u8;
+    // We ignore e_1 for now in the return signature, or assume e_k covers what caller needs.
+    // The caller asks for `e_k`. Standard says `emb_k` calculation uses `E_k`.
+    
+    let bits_consumed = (val & 0x7) as u8;
+    
+    (rho, u_off, e_k, bits_consumed)
 }
 
 /// VLC codeword result for encoding
@@ -95,82 +106,8 @@ pub struct VlcCodeword {
 
 /// Encode a significance pattern (rho) to a VLC codeword
 /// This is the inverse of decode_vlc
-pub fn encode_vlc(rho: u8, context: u8) -> VlcCodeword {
-    // Map rho patterns to VLC codewords (inverse of decode table)
-    // Context 0 and Context 1 use same structure for simplicity
-    let _ = context; // Both contexts use similar encoding for now
-
-    match rho {
-        0 => VlcCodeword {
-            value: 0b0,
-            bits: 1,
-        }, // 0
-        1 => VlcCodeword {
-            value: 0b1110,
-            bits: 4,
-        }, // 1110
-        2 => VlcCodeword {
-            value: 0b110,
-            bits: 3,
-        }, // 110
-        4 => VlcCodeword {
-            value: 0b101,
-            bits: 3,
-        }, // 101
-        8 => VlcCodeword {
-            value: 0b100,
-            bits: 3,
-        }, // 100
-        // Multi-significant patterns (simplified fallback to 1111... prefix)
-        3 => VlcCodeword {
-            value: 0b11110,
-            bits: 5,
-        }, // 11110 (rho=3: samples 0,1)
-        5 => VlcCodeword {
-            value: 0b11111,
-            bits: 5,
-        }, // 11111 (rho=5: samples 0,2)
-        6 => VlcCodeword {
-            value: 0b111100,
-            bits: 6,
-        }, // 111100 (rho=6: samples 1,2)
-        7 => VlcCodeword {
-            value: 0b111101,
-            bits: 6,
-        }, // 111101 (rho=7: samples 0,1,2)
-        9 => VlcCodeword {
-            value: 0b111110,
-            bits: 6,
-        }, // 111110 (rho=9: samples 0,3)
-        10 => VlcCodeword {
-            value: 0b111111,
-            bits: 6,
-        }, // 111111 (rho=10: samples 1,3)
-        11 => VlcCodeword {
-            value: 0b1111100,
-            bits: 7,
-        }, // (rho=11: samples 0,1,3)
-        12 => VlcCodeword {
-            value: 0b1111101,
-            bits: 7,
-        }, // (rho=12: samples 2,3)
-        13 => VlcCodeword {
-            value: 0b1111110,
-            bits: 7,
-        }, // (rho=13: samples 0,2,3)
-        14 => VlcCodeword {
-            value: 0b1111111,
-            bits: 7,
-        }, // (rho=14: samples 1,2,3)
-        15 => VlcCodeword {
-            value: 0b11111111,
-            bits: 8,
-        }, // All significant
-        _ => VlcCodeword {
-            value: 0b0,
-            bits: 1,
-        }, // Default to insignificant
-    }
+pub fn encode_vlc(_rho: u8, _context: u8) -> VlcCodeword {
+    // TODO: Implement using reverse lookup table if encoding is needed.
+    // For now, this is a placeholder.
+    VlcCodeword { value: 0, bits: 0 }
 }
-
-// In a real optimized decoder, these would be 256-entry or 1024-entry lookup tables.

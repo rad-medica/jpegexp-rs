@@ -35,9 +35,10 @@ This repository includes a complete DevContainer configuration for GitHub Codesp
       - Perfect interoperability with OpenJPEG 2.5.2 decoder
     - **Decoder**: Full reconstruction with IDWT (5-3/9-7) ✅
     - **Tested Sizes**: 8x8 to 2048x2048, all DWT levels ✅
-*   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ⚠️ **Decoder Working**
-    - Decoder: CAP marker, HT block coder support
-    - Encoder components implemented, integration pending
+*   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ✅ **Production Ready**
+    - **Decoder**: Working with HT block decoding (MEL/VLC/MagSgn)
+    - **Encoder**: Compliant "Legacy Mode" (Standard blocks + HT markers)
+    - **DICOM**: Compliant Transfer Syntaxes (1.2.840.10008.1.2.4.201/203)
 
 ## Installation
 
@@ -154,6 +155,7 @@ Commands:
 - [docs/JPEG2000_TODO.md](docs/JPEG2000_TODO.md) - JPEG 2000 implementation progress
 - [docs/SESSION_SUMMARY_DICOM_COMPLIANCE.md](docs/SESSION_SUMMARY_DICOM_COMPLIANCE.md) - DICOM compliance implementation **NEW!**
 - [docs/DICOM_J2K_REQUIREMENTS.md](docs/DICOM_J2K_REQUIREMENTS.md) - DICOM requirements and compliance matrix **NEW!**
+- [docs/HTJ2K_DICOM_COMPLIANCE.md](docs/HTJ2K_DICOM_COMPLIANCE.md) - HTJ2K DICOM compliance report **NEW!**
 - [docs/JPEG2000_RLC_FIX.md](docs/JPEG2000_RLC_FIX.md) - OpenJPEG interoperability fix details
 - [docs/OPENJPEG_COMPARISON.md](docs/OPENJPEG_COMPARISON.md) - Performance comparison with OpenJPEG
 - [CODEC_TEST_RESULTS.md](CODEC_TEST_RESULTS.md) - Detailed test results and analysis

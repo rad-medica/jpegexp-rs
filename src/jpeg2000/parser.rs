@@ -123,7 +123,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let decomposition_levels = self.reader.read_u8()?; // number of decomposition levels
         let codeblock_width_exp = self.reader.read_u8()?; // codeblock width exponent (log2)
         let codeblock_height_exp = self.reader.read_u8()?; // codeblock height exponent (log2)
-        let _codeblock_style = self.reader.read_u8()?;
+        let code_block_style = self.reader.read_u8()?;
         let transformation = self.reader.read_u8()?;
 
         let mut precinct_sizes = Vec::new();
@@ -153,6 +153,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             decomposition_levels,
             codeblock_width_exp,
             codeblock_height_exp,
+            code_block_style,
             transformation,
             precinct_sizes,
         });

@@ -98,9 +98,19 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
             let last_marker = self.parser.parse_main_header()?;
 
             // 2. Identify Decoding Path
+            // HTJ2K is indicated by bit 14 of Pcap (MSB-first bit numbering)
+            // Bit 14 MSB-first = 0x00020000
             let is_htj2k = if let Some(cap) = &self.parser.image.cap {
-                (cap.pcap & (1 << 14)) != 0
+                let htj2k_flag = (cap.pcap & 0x00020000) != 0;
+                if std::env::var("HTJ2K_DEBUG").is_ok() {
+                    eprintln!("[HTJ2K] CAP detected: Pcap=0x{:08X}, bit14_check=0x{:08X}, is_htj2k={}",
+                             cap.pcap, cap.pcap & 0x00020000, htj2k_flag);
+                }
+                htj2k_flag
             } else {
+                if std::env::var("HTJ2K_DEBUG").is_ok() {
+                    eprintln!("[HTJ2K] No CAP marker found");
+                }
                 false
             };
 
@@ -124,6 +134,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         is_htj2k: bool,
         tile_states: &mut Vec<TileState>,
     ) -> Result<(), JpeglsError> {
+        if std::env::var("HTJ2K_DEBUG").is_ok() {
+            eprintln!("[HTJ2K] Entering tile loop with marker={:?}", marker);
+        }
         loop {
             if marker == crate::jpeg_marker_code::JpegMarkerCode::EndOfImage {
                 break;
@@ -178,9 +191,15 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         parser: &mut J2kParser,
         _len: u32,
         isot: u16,
-        _is_htj2k: bool,
+        is_ht_mode: bool,
         tile_states: &mut Vec<TileState>,
     ) -> Result<(), JpeglsError> {
+        let ht_enabled = is_ht_mode; // Capture argument locally
+        
+        if std::env::var("HTJ2K_DEBUG").is_ok() {
+            eprintln!("[HTJ2K] decode_tile_data called for tile {}. is_htj2k={}", isot, ht_enabled);
+        }
+        
         let tile_idx = isot as usize;
         if parser.image.tiles.len() <= tile_idx {
             parser
@@ -330,13 +349,14 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         }
 
         // Finalize decoding steps (e.g. IDWT, Color Transform) are handled in `decode` after this returns
-        Self::decode_packets(parser, tile_states)
+        Self::decode_packets(parser, tile_states, ht_enabled)
     }
 
     // Updated decode_packets to use per-precinct TagTrees
     fn decode_packets(
         parser: &mut J2kParser,
         tile_states: &mut Vec<TileState>,
+        is_ht_mode: bool,
     ) -> Result<(), JpeglsError> {
         // Ensure we have state for the current tile
         if tile_states.is_empty() {
@@ -359,7 +379,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let safe_num_layers = num_layers; // Corrected logic
 
         let isot = parser.image.tiles.len().saturating_sub(1) as u16;
-        let is_htj2k = false; // Placeholder
+        // let is_htj2k = false; // Placeholder - REMOVED (Shadows argument!)
 
         // LRCP Loop
         for l in 0..safe_num_layers {
@@ -546,7 +566,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                     }
                                 }
 
-                                Self::decode_packet_body(parser, h, isot, c, r, l, is_htj2k)?;
+                                Self::decode_packet_body(parser, h, isot, c, r, l, is_ht_mode)?;
                             }
                         }
                     }
@@ -654,24 +674,64 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 subband.width = sb_w as u32;
                 subband.height = sb_h as u32;
 
-                if is_htj2k {
-                    let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
-                        &data, &data, 64, 64,
-                    );
+                // Calculate codeblock dimensions (Common logic)
+                let cod = parser.image.cod.as_ref().unwrap();
+                let nom_w = 1 << (cod.codeblock_width_exp + 2);
+                let nom_h = 1 << (cod.codeblock_height_exp + 2);
+
+                let cb_x = cb_info.x * nom_w;
+                let cb_y = cb_info.y * nom_h;
+                let cb_width = nom_w.min(sb_w.saturating_sub(cb_x));
+                let cb_height = nom_h.min(sb_h.saturating_sub(cb_y));
+
+                // HTJ2K mode requires CAP marker (is_ht_mode) AND code-block style bit 6 (0x40)
+                // If CAP is present but style bit 6 is 0, it's a standard code-block (Legacy Mode)
+                let is_ht_block = is_htj2k && ((cod.code_block_style & 0x40) != 0);
+
+                if std::env::var("HTJ2K_DEBUG").is_ok() {
+                    eprintln!("[HTJ2K] Block check: CAP={}, Style=0x{:02X}, UseHT={}, cb=({},{})", 
+                        is_htj2k, cod.code_block_style, is_ht_block, cb_info.x, cb_info.y);
+                }
+
+                if is_ht_block {
+                    // HTJ2K Decoding Path
                     let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
+                    block.x = cb_info.x as u32;
+                    block.y = cb_info.y as u32;
+                    block.width = cb_width as u32;
+                    block.height = cb_height as u32;
                     block.layer_data.push(data.clone());
                     block.layers_decoded = (layer + 1) as u8;
-                    let _ = coder.decode_block(&mut block);
+                    
+                    // HTJ2K uses the same packet data for MEL and MagSgn/VLC
+                    // The splitting is implicit: MEL grows backward from end, MagSgn forward from start
+                    let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
+                        &data, &data, 
+                        block.width as usize, 
+                        block.height as usize,
+                    );
+                    
+                    if std::env::var("HTJ2K_DEBUG").is_ok() {
+                        eprintln!("[HTJ2K] Decoding block [{},{}] {}x{} len={}", 
+                            block.x, block.y, block.width, block.height, data.len());
+                    }
+
+                    match coder.decode_block(&mut block) {
+                        Ok(_) => {
+                            if std::env::var("HTJ2K_DEBUG").is_ok() {
+                                eprintln!("[HTJ2K] Decoded {} coefficients", block.coefficients.len());
+                            }
+                        },
+                        Err(_) => {
+                            if std::env::var("HTJ2K_DEBUG").is_ok() {
+                                eprintln!("[HTJ2K] Block decoding failed");
+                            }
+                        }
+                    }
                     subband.codeblocks.push(block);
                 } else {
-                    let cod = parser.image.cod.as_ref().unwrap();
-                    let nom_w = 1 << (cod.codeblock_width_exp + 2);
-                    let nom_h = 1 << (cod.codeblock_height_exp + 2);
-
-                    let cb_x = cb_info.x * nom_w;
-                    let cb_y = cb_info.y * nom_h;
-                    let cb_width = nom_w.min(sb_w.saturating_sub(cb_x));
-                    let cb_height = nom_h.min(sb_h.saturating_sub(cb_y));
+                    // Standard JPEG 2000 Decoding Path
+                    // Dimensions already calculated above
 
                     // Use zero_bp from packet header
                     let zero_bp = cb_info.zero_bp;
@@ -692,13 +752,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     };
 
                     // M_b = G + epsilon_b - 1
-                    // Note: This is the standard formula for reversible compression
-                    // Standard E.1.1: M_b = G + epsilon_b - 1.
-                    // We extract `epsilon_b` directly from QCD.
                     let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     let m_b = (guard_bits + epsilon_b).saturating_sub(1);
-                    // max_bit_plane is 0-based index. 
-                    // zero_bp is number of skipped planes from top.
                     // max_bit_plane = (M_b - 1) - zero_bp
                     let max_bit_plane = (m_b.saturating_sub(1)).saturating_sub(zero_bp);
 

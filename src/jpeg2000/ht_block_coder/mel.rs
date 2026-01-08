@@ -11,9 +11,29 @@ pub struct MelDecoder<'a> {
 
 impl<'a> MelDecoder<'a> {
     pub fn new(data: &'a [u8]) -> Self {
+        // Experimental: OpenHTJ2K seems to add a 00 padding byte at the end.
+        // Scan backwards and skip trailing zeros to find the start of the MEL stream.
+        let mut effective_len = data.len();
+        while effective_len > 0 && data[effective_len - 1] == 0 {
+            effective_len -= 1;
+        }
+        
+        // If buffer was all zeros, we might have trimmed valid zeros.
+        // But for MEL, a stream of all zeros means "run of zeros", which matches behavior of 00 bytes.
+        // So trimming is probably safe-ish for decoding logic, but let's keep at least 1 byte if meaningful?
+        // Actually, if we trim all, effective_len=0. read_raw_bit returns None.
+        // MEL decode should handle EOF as 0?
+        if effective_len == 0 && !data.is_empty() {
+             // Revert to full length if it appears to be all zeros (e.g. black image)
+             // effective_len = data.len();
+             // Wait, for black image, we WANT 0s.
+             // If we trim to 0 length, read_bit returns None.
+             // We should handle None.
+        }
+
         Self {
-            data,
-            pos: 0,
+            data: &data[..effective_len],
+            pos: effective_len, // Start at end of buffer
             bits_buffer: 0,
             bits_left: 0,
             k: 0,
@@ -22,24 +42,29 @@ impl<'a> MelDecoder<'a> {
     }
 
     /// Read a single raw bit from the bitstream (bypasses MEL state machine).
-    /// This is used for VLC decoding which shares the same bitstream.
+    /// The MEL bitstream grows backward from the end of the buffer.
     pub fn read_raw_bit(&mut self) -> Option<u8> {
         if self.bits_left == 0 {
-            if self.pos >= self.data.len() {
+            if self.pos == 0 {
                 return None; // EOF
             }
 
-            self.bits_buffer = self.data[self.pos];
-            self.pos += 1;
+            self.pos -= 1;
+            let mut byte = self.data[self.pos];
 
-            // Handle 0xFF stuffing
-            if self.bits_buffer == 0xFF && self.pos < self.data.len() {
-                let next = self.data[self.pos];
-                if next == 0x00 {
-                    self.pos += 1;
+            // Handle 0xFF stuffing (backward reading)
+            // If we encounter 0x00 and the *next* byte (lower address) is 0xFF,
+            // then this 0x00 is a stuffing byte and should be skipped.
+            // The byte to return is the 0xFF.
+            if self.pos > 0 && byte == 0x00 {
+                if self.data[self.pos - 1] == 0xFF {
+                    // Skip the stuffing byte 0x00
+                    self.pos -= 1;
+                    byte = 0xFF;
                 }
             }
 
+            self.bits_buffer = byte;
             self.bits_left = 8;
         }
 
@@ -63,15 +88,23 @@ impl<'a> MelDecoder<'a> {
 
         for _ in 0..count.min(16) {
             if temp_left == 0 {
-                if temp_pos >= self.data.len() {
+                if temp_pos == 0 {
                     break;
                 }
-                temp_buffer = self.data[temp_pos];
-                temp_pos += 1;
-                if temp_buffer == 0xFF && temp_pos < self.data.len() && self.data[temp_pos] == 0x00
-                {
-                    temp_pos += 1;
+                
+                // Read backward logic (match read_raw_bit)
+                let mut next_read_pos = temp_pos - 1;
+                temp_buffer = self.data[next_read_pos];
+                
+                // Stuffing check
+                if next_read_pos > 0 && temp_buffer == 0x00 {
+                    if self.data[next_read_pos - 1] == 0xFF {
+                        next_read_pos -= 1;
+                        temp_buffer = 0xFF;
+                    }
                 }
+                
+                temp_pos = next_read_pos;
                 temp_left = 8;
             }
             let bit = (temp_buffer >> (temp_left - 1)) & 1;

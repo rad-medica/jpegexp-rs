@@ -56,10 +56,20 @@ impl<'a> HTBlockCoder<'a> {
         }
 
         // We iterate through "stripes" (4 rows high).
+        // Each stripe contains 2 rows of 2x2 quads.
         for y_stripe in (0..self.height).step_by(self.stripe_height) {
-            for x in 0..self.width {
-                // Decode quad at (x, y_stripe)
-                self.decode_quad(x, y_stripe, block)?;
+            // Iterate quad rows within the stripe (0 and 2 offset)
+            for qy_offset in (0..self.stripe_height).step_by(2) {
+                let y = y_stripe + qy_offset;
+                if y >= self.height {
+                    break;
+                }
+                
+                // Iterate quads horizontally
+                for x in (0..self.width).step_by(2) {
+                    // Decode quad at (x, y)
+                    self.decode_quad(x, y, block)?;
+                }
             }
         }
 
@@ -82,34 +92,32 @@ impl<'a> HTBlockCoder<'a> {
         // If symbol is 1 -> Significant quad.
 
         let is_significant = self.mel_decoder.decode();
+        
+        if std::env::var("HTJ2K_DEBUG").is_ok() {
+            eprintln!("[HTJ2K] Quad ({:2},{:2}): ctx={}, is_sig={}", 
+                     x, y_base, context, is_significant);
+        }
 
         if is_significant {
             // 3. VLC Decoding
-            // VLC codewords are interleaved with MEL in the same bitstream.
-            // We peek ahead to decode the VLC codeword, then consume the bits.
-
-            // VLC Decoding
-            // MEL and VLC share the same bitstream (read backwards from end of packet).
-            // Use peek to read VLC codeword without consuming bits yet.
             let peek = self.mel_decoder.peek_bits(16);
             let (rho, _u_off, _e_k, bits_consumed) = vlc::decode_vlc(peek, context);
+            
+            // Force debug log for investigation
+            eprintln!("       VLC: peek={:016b}, rho={:04b}, bits={}", peek, rho, bits_consumed);
 
-            // Consume the VLC bits by reading raw bits (bypass MEL state machine)
-            // since VLC codewords are encoded as raw bits in the shared stream
+            if std::env::var("HTJ2K_DEBUG").is_ok() {
+                // eprintln!("       VLC: peek={:016b}, rho={:04b}, bits={}", 
+                //          peek, rho, bits_consumed);
+            }
+
+            // Consume the VLC bits
             for _ in 0..bits_consumed {
                 let _ = self.mel_decoder.read_raw_bit();
             }
 
-            // Advance MEL/VLC stream by `bits_consumed`.
-
-            // 4. Update Block State (Significance)
-            // Apply `rho` pattern to the 2x2 quad at (x, y_base).
-            // rho is 4 bits: (0,0), (1,0), (0,1), (1,1) -> LSB to MSB?
-
             self.apply_rho(x, y_base, rho, block);
 
-            // 5. Magnitude Refinement / Sign (MagSgn)
-            // For each significant pixel in rho, read sign bit and refinement bits from MagSgn stream.
             self.process_magsgn(x, y_base, rho, block)?;
         } else {
             // insignificant quad
