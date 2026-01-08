@@ -19,11 +19,16 @@ This repository includes a complete DevContainer configuration for GitHub Codesp
     - Grayscale 8-bit: Lossless (MAE = 0) ✅
     - Grayscale 16-bit: Lossless (MAE = 0) ✅
     - RGB/multi-component: Not yet supported (see `src/jpegls/mod.rs` for details)
-*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ✅ **Production Ready (Grayscale)** / ⚠️ **Partial Color**
-    - Decoder: Full reconstruction with IDWT (5-3/9-7) ✅
-    - Encoder: Functional lossless encoder (5-3 DWT, EBCOT) ✅
-    - 12-bit Support: Full support for 12-bit grayscale and small color images ✅
-    - Known Issue: Large 12-bit color images (>32x32 codeblocks) show artifacts ⚠️
+*   **JPEG 2000 (ISO/IEC 15444-1)**: Wavelet-based compression. ✅ **Production Ready (Lossless Grayscale)**
+    - **Encoder**: Full lossless encoder with 100% OpenJPEG compatibility ✅
+      - Lossless 5-3 DWT with 0-5 decomposition levels
+      - Bit-plane coding (EBCOT) with Run-Length Coding (RLC)
+      - Verified up to 1024x1024 images (MAE=0 self-roundtrip)
+      - Perfect interoperability with OpenJPEG 2.5.0 decoder
+    - **Decoder**: Full reconstruction with IDWT (5-3/9-7) ✅
+    - **8-bit Grayscale**: Lossless (MAE = 0) ✅
+    - **Tested Sizes**: 64x64 to 1024x1024, all DWT levels ✅
+    - **Color/12-bit**: Encoder in progress ⚠️
 *   **HTJ2K (ISO/IEC 15444-15)**: High-Throughput JPEG 2000. ⚠️ **Decoder Working**
     - Decoder: CAP marker, HT block coder support
     - Encoder components implemented, integration pending
@@ -141,6 +146,7 @@ Commands:
 ### Documentation
 - [DEVELOPMENT.md](DEVELOPMENT.md) - Complete development guide
 - [docs/JPEG2000_TODO.md](docs/JPEG2000_TODO.md) - JPEG 2000 implementation progress
+- [docs/JPEG2000_RLC_FIX.md](docs/JPEG2000_RLC_FIX.md) - OpenJPEG interoperability fix details
 - [CODEC_TEST_RESULTS.md](CODEC_TEST_RESULTS.md) - Detailed test results and analysis
 - [SUMMARY.md](SUMMARY.md) - Project summary and findings
 - [COMPLIANCE.md](COMPLIANCE.md) - Conformance testing details
@@ -152,14 +158,39 @@ Commands:
 - ✅ JPEG 1 RGB with subsampling
 - ✅ JPEG-LS Grayscale 8-bit (Lossless, MAE = 0)
 - ✅ JPEG-LS Grayscale 16-bit (Lossless, MAE = 0)
-- ✅ JPEG 2000 Grayscale (Lossless, 8-bit & 12-bit)
+- ✅ **JPEG 2000 Lossless Grayscale 8-bit** (MAE = 0, 100% OpenJPEG compatible)
+  - Tested: 64x64 to 1024x1024 images
+  - All DWT decomposition levels (0-5)
+  - Multiple patterns: gradients, checkerboards, solid colors
 
 **In Development**:
 - ⚠️ JPEG-LS RGB/multi-component (sample-interleave not yet supported)
-- ⚠️ JPEG 2000 Color (Small images working, large 12-bit images show artifacts)
-- ✅ JPEG 2000 Decoder performs full reconstruction with IDWT
+- ⚠️ JPEG 2000 Color and 12-bit support
 
-See [tests/jpegls_charls_validation.rs](tests/jpegls_charls_validation.rs) for JPEG-LS test results.
+## Test Results
+
+### JPEG 2000 Encoder Validation
+
+Comprehensive testing validates perfect lossless encoding:
+
+| Image Size | DWT Levels | Pattern | Self-Roundtrip | Status |
+|------------|-----------|---------|----------------|--------|
+| 64x64 | 0-2 | All patterns | MAE=0 | ✅ |
+| 128x128 | 0-3 | All patterns | MAE=0 | ✅ |
+| 256x256 | 0-4 | All patterns | MAE=0 | ✅ |
+| 512x512 | 0-5 | All patterns | MAE=0 | ✅ |
+| 1024x1024 | 0-5 | Gradients | MAE=0 | ✅ |
+
+**OpenJPEG Interoperability** (verified with OpenJPEG 2.5.0):
+- ✅ Solid colors: MAE=0
+- ✅ Gradients: MAE=0
+- ✅ Checkerboards: MAE=0
+- ✅ All test patterns: 100% compatible
+
+See test files:
+- [tests/test_openjpeg_interop_detailed.rs](tests/test_openjpeg_interop_detailed.rs) - OpenJPEG cross-validation
+- [tests/test_various_sizes.rs](tests/test_various_sizes.rs) - Comprehensive size/DWT testing
+- [tests/jpegls_charls_validation.rs](tests/jpegls_charls_validation.rs) - JPEG-LS validation
 
 ## Compliance
 
