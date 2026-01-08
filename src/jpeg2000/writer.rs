@@ -107,6 +107,8 @@ impl<'a> J2kWriter<'a> {
 
         for &step in &qcd.step_sizes {
             if is_16bit {
+                // OpenJPEG and standard expect Big Endian u16
+                // (Exponent << 11) | Mantissa
                 self.writer.write_u16(step)?;
             } else {
                 // For reversible mode (quant_type 0 or 1), step_sizes store

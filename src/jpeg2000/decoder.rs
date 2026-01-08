@@ -637,6 +637,23 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         _ => {}
                     };
                 }
+
+                let (res_w, res_h) = (resolution.width as usize, resolution.height as usize);
+                let (sb_w, sb_h) = if res == 0 {
+                    (res_w, res_h)
+                } else {
+                    let ll_w = res_w.div_ceil(2);
+                    let ll_h = res_h.div_ceil(2);
+                    match cb_info.subband_index {
+                        0 => (res_w - ll_w, ll_h),         // HL
+                        1 => (ll_w, res_h - ll_h),         // LH
+                        2 => (res_w - ll_w, res_h - ll_h), // HH
+                        _ => (0, 0),
+                    }
+                };
+                subband.width = sb_w as u32;
+                subband.height = sb_h as u32;
+
                 if is_htj2k {
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
                         &data, &data, 64, 64,
@@ -650,20 +667,6 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     let cod = parser.image.cod.as_ref().unwrap();
                     let nom_w = 1 << (cod.codeblock_width_exp + 2);
                     let nom_h = 1 << (cod.codeblock_height_exp + 2);
-
-                    let (res_w, res_h) = (resolution.width as usize, resolution.height as usize);
-                    let (sb_w, sb_h) = if res == 0 {
-                        (res_w, res_h)
-                    } else {
-                        let ll_w = res_w.div_ceil(2);
-                        let ll_h = res_h.div_ceil(2);
-                        match cb_info.subband_index {
-                            0 => (res_w - ll_w, ll_h),         // HL
-                            1 => (ll_w, res_h - ll_h),         // LH
-                            2 => (res_w - ll_w, res_h - ll_h), // HH
-                            _ => (0, 0),
-                        }
-                    };
 
                     let cb_x = cb_info.x * nom_w;
                     let cb_y = cb_info.y * nom_h;
@@ -698,7 +701,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     // max_bit_plane is 0-based index. 
                     // zero_bp is number of skipped planes from top.
                     // max_bit_plane = (M_b - 1) - zero_bp
-                    let max_bit_plane = m_b.saturating_sub(zero_bp).saturating_sub(1);
+                    let max_bit_plane = (m_b.saturating_sub(1)).saturating_sub(zero_bp);
 
                     if std::env::var("J2K_DEBUG").is_ok() {
                         eprintln!("  Decoding CB[{},{}] subband={} zero_bp={} eps={} guard={} mb={} max_bp={}", 
@@ -724,6 +727,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         if !block.state.is_empty() {
                             bpc.state = block.state.clone();
                         }
+                        if !block.mq_contexts.is_empty() {
+                            bpc.set_mq_contexts(&block.mq_contexts);
+                        }
                         bpc.num_passes_decoded = block.coding_passes as u32;
 
                         let res = bpc.decode_codeblock(
@@ -740,6 +746,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             return Err(JpeglsError::InvalidData);
                         }
 
+                        block.mq_contexts = bpc.get_mq_contexts();
                         block.state = bpc.state;
                         block.coding_passes += cb_info.num_passes; // Accumulate passes
                     } else {
@@ -770,6 +777,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         match res {
                             Ok(coefficients) => {
                                 block.coefficients = coefficients;
+                                block.mq_contexts = bpc.get_mq_contexts();
                                 block.state = bpc.state;
                                 block.coding_passes = cb_info.num_passes;
                                 subband.codeblocks.push(block);

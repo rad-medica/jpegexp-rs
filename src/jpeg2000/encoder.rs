@@ -649,6 +649,7 @@ impl J2kEncoder {
             // Write Packet
             if packet_header.included_cblks.is_empty() {
                 packet_header.empty = true;
+                packet_body.clear();
             }
 
             let mut header_writer = J2kBitWriter::new();
@@ -666,6 +667,12 @@ impl J2kEncoder {
                 header_data: header_writer.finish(),
                 body_data: packet_body,
             });
+
+            if std::env::var("J2K_DEBUG").is_ok() {
+                let p = packets.last().unwrap();
+                eprintln!("ENC: Created packet for res={} comp={} header_len={} body_len={} cblks={}", 
+                           res, comp_idx, p.header_data.len(), p.body_data.len(), packet_header.included_cblks.len());
+            }
         }
 
         Ok(packets)
@@ -809,6 +816,9 @@ impl J2kEncoder {
         // For resolution 0, return LL coefficients
         if res == 0 {
             let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels, 0);
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("EXTRACT: Res 0 LL {}x{} at (0,0)", ll_w, ll_h);
+            }
             let mut ll_coeffs = Vec::with_capacity(ll_w * ll_h);
             for y in 0..ll_h {
                 for x in 0..ll_w {
@@ -841,6 +851,10 @@ impl J2kEncoder {
             }
             _ => (0, 0, 0, 0),
         };
+
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("EXTRACT: Res {} subband {} {}x{} at ({},{})", res, sb_idx, sb_w, sb_h, start_x, start_y);
+        }
 
         let mut sb_coeffs = Vec::with_capacity(sb_w * sb_h);
         for y in 0..sb_h {

@@ -52,6 +52,9 @@ tests/jpegls_test_images/*.jls
 tests/jpegls_test_images/*.txt
 
 openjpeg/
+openjpeg_src/
+
+.ruff_cache/
 
 *.raw
 *.jls
@@ -59,3 +62,6 @@ openjpeg/
 *.jpeg
 *.j2k
 *.zip
+*.pgm
+*.pdb
+*.exe

@@ -216,21 +216,21 @@ fn decode_image(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
 
-    let (pixels, width, height, components) = detect_and_decode(&data)?;
+    let (pixels, width, height, components, depth) = detect_and_decode(&data)?;
 
     match format {
         OutputFormat::Raw => {
             fs::write(output, &pixels)?;
             println!(
-                "✓ Decoded {}x{} image ({} components) to {:?}",
-                width, height, components, output
+                "✓ Decoded {}x{} image ({} components, {}-bit) to {:?}",
+                width, height, components, depth, output
             );
         }
         OutputFormat::Ppm => {
-            write_ppm(output, &pixels, width, height, components)?;
+            write_ppm(output, &pixels, width, height, components, depth)?;
             println!(
-                "✓ Decoded {}x{} image ({} components) to {:?} (PPM format)",
-                width, height, components, output
+                "✓ Decoded {}x{} image ({} components, {}-bit) to {:?} (PPM format)",
+                width, height, components, depth, output
             );
         }
     }
@@ -349,12 +349,12 @@ fn transcode_image(
     quality: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
-    let (pixels, width, height, components) = detect_and_decode(&data)?;
+    let (pixels, width, height, components, depth) = detect_and_decode(&data)?;
 
     let frame_info = jpegexp_rs::FrameInfo {
         width,
         height,
-        bits_per_sample: 8,
+        bits_per_sample: depth as i32,
         component_count: components as i32,
     };
 
@@ -481,7 +481,7 @@ fn show_info(input: &PathBuf, extended: bool) -> Result<(), Box<dyn std::error::
                 if image.roi.is_some() {
                     println!("  ROI:        Present");
                 }
-                println!("  Decoded layers: {}", image.decoded_layers);
+                // println!("  Decoded layers: {}", image.decoded_layers);
             }
         }
     } else {
@@ -519,7 +519,7 @@ fn list_codecs() -> Result<(), Box<dyn std::error::Error>> {
 
 // Internal helpers
 
-fn detect_and_decode(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {
+fn detect_and_decode(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     if data.starts_with(&[0xFF, 0xD8]) {
         if is_jpegls(data) {
             decode_jpegls(data)
@@ -555,7 +555,7 @@ fn is_jpegls(data: &[u8]) -> bool {
     false
 }
 
-fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {
+fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
     let mut spiff = None;
     reader.read_header(&mut spiff)?;
@@ -563,6 +563,7 @@ fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::er
     let width = info.width;
     let height = info.height;
     let components = info.component_count as u32;
+    let depth = info.bits_per_sample as u8;
 
     let pixel_count = (width * height * components) as usize;
     let mut pixels = vec![0u8; pixel_count];
@@ -571,10 +572,10 @@ fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::er
     decoder.read_header()?;
     decoder.decode(&mut pixels)?;
 
-    Ok((pixels, width, height, components))
+    Ok((pixels, width, height, components, depth))
 }
 
-fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {
+fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
     let mut decoder = jpegexp_rs::jpeg2000::decoder::J2kDecoder::new(&mut reader);
     let image = decoder.decode()?;
@@ -582,20 +583,22 @@ fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::erro
     let width = image.width;
     let height = image.height;
     let components = image.component_count;
+    let depth = image.components.first().map(|c| c.depth).unwrap_or(8);
 
     // Reconstruct pixels from DWT coefficients using IDWT
     match image.reconstruct_pixels() {
-        Ok(reconstructed) => Ok((reconstructed, width, height, components)),
+        Ok(reconstructed) => Ok((reconstructed, width, height, components, depth)),
         Err(e) => {
             eprintln!("J2K Reconstruction failed: {}", e);
             // Fallback to default if reconstruction fails
-            let pixels = vec![128u8; (width * height * components) as usize];
-            Ok((pixels, width, height, components))
+            let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+            let pixels = vec![128u8; (width * height * components) as usize * bytes_per_sample];
+            Ok((pixels, width, height, components, depth))
         }
     }
 }
 
-fn decode_jpegls(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::error::Error>> {
+fn decode_jpegls(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     let mut decoder = jpegexp_rs::jpegls::JpeglsDecoder::new(data);
     decoder.read_header()?;
     let info = decoder.frame_info();
@@ -609,7 +612,7 @@ fn decode_jpegls(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32), Box<dyn std::e
     let mut pixels = vec![0u8; byte_count];
     decoder.decode(&mut pixels)?;
 
-    Ok((pixels, width, height, components))
+    Ok((pixels, width, height, components, bits_per_sample as u8))
 }
 
 fn write_ppm(
@@ -618,6 +621,7 @@ fn write_ppm(
     width: u32,
     height: u32,
     components: u32,
+    depth: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
     let mut file = fs::File::create(path)?;
@@ -627,9 +631,23 @@ fn write_ppm(
     } else {
         writeln!(file, "P6")?;
     }
+    let maxval = (1 << depth) - 1;
     writeln!(file, "{} {}", width, height)?;
-    writeln!(file, "255")?;
-    file.write_all(pixels)?;
+    writeln!(file, "{}", maxval)?;
+
+    if depth > 8 {
+        // Swap bytes to Big Endian
+        let mut be_pixels = Vec::with_capacity(pixels.len());
+        for chunk in pixels.chunks(2) {
+            if chunk.len() == 2 {
+                be_pixels.push(chunk[1]);
+                be_pixels.push(chunk[0]);
+            }
+        }
+        file.write_all(&be_pixels)?;
+    } else {
+        file.write_all(pixels)?;
+    }
 
     Ok(())
 }

@@ -252,9 +252,8 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         }
 
         self.image.roi = Some(super::image::J2kRoi {
-            component_index,
-            roi_style,
-            shift_value,
+            component_index: component_index as u16,
+            shift: shift_value,
         });
 
         Ok(())
