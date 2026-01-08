@@ -70,8 +70,10 @@ jpegexp list
 | -------------------------------------- | ------ | ------ |
 | JPEG (Baseline, Progressive, Lossless) | ✓      | ✓      |
 | JPEG-LS (Lossless, Near-Lossless)      | ✓      | ✓      |
-| JPEG 2000                              | ✗      | ✓      |
-| HTJ2K                                  | ✗      | ✓      |
+| JPEG 2000                              | ✓      | ✓      |
+| HTJ2K                                  | ✓*     | ✓      |
+
+\* *HTJ2K Encoding uses Legacy Mode (Standard blocks + CAP marker)*
 
 ## License
 

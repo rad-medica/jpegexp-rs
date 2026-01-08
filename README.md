@@ -18,6 +18,7 @@
 | [**Test Results**](docs/TEST_RESULTS.md) | Validation data, interoperability reports. |
 | [**Compliance**](docs/compliance/jpeg_standard.md) | Standard compliance details. |
 | [**DICOM**](docs/compliance/dicom.md) | Unified DICOM compliance requirements (JPEG1, LS, J2K, HTJ2K). |
+| [**Roadmap**](docs/TODO.md) | Pending tasks and future work. |
 
 ### API Reference
 *   [**CLI**](docs/api/cli.md) - Command Line Interface
