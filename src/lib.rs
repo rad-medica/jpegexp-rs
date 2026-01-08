@@ -53,6 +53,7 @@ pub mod jpeg_stream_writer;
 pub mod jpeg1;
 pub mod jpeg2000;
 pub mod jpegls;
+pub mod dicom;
 
 // Conditional modules
 #[cfg(target_arch = "wasm32")]
