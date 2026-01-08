@@ -17,7 +17,7 @@
 | [**Comparisons**](docs/COMPARISON.md) | Benchmarks vs OpenJPEG/CharLS. Feature matrix. |
 | [**Test Results**](docs/TEST_RESULTS.md) | Validation data, interoperability reports. |
 | [**Compliance**](docs/compliance/jpeg_standard.md) | Standard compliance details. |
-| [**DICOM**](docs/compliance/dicom.md) | Specific medical imaging requirements. |
+| [**DICOM**](docs/compliance/dicom.md) | Unified DICOM compliance requirements (JPEG1, LS, J2K, HTJ2K). |
 
 ### API Reference
 *   [**CLI**](docs/api/cli.md) - Command Line Interface
