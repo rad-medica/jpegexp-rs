@@ -178,24 +178,42 @@ impl PacketHeader {
     /// Reads the number of coding passes using J2K codeword table (Table B.4).
     fn read_coding_passes(reader: &mut J2kBitReader<'_, '_>) -> Result<u8, BitIoError> {
         if reader.read_bit()? == 0 {
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("    DECODE num_passes: 1");
+            }
             return Ok(1);
         }
         if reader.read_bit()? == 0 {
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("    DECODE num_passes: 2");
+            }
             return Ok(2);
         }
         let bits = reader.read_bits(2)?;
         if bits < 3 {
-            return Ok((3 + bits) as u8);
+            let result = (3 + bits) as u8;
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("    DECODE num_passes: {}", result);
+            }
+            return Ok(result);
         }
         let bits = reader.read_bits(5)?;
         if bits < 31 {
-            return Ok((6 + bits) as u8);
+            let result = (6 + bits) as u8;
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("    DECODE num_passes: {}", result);
+            }
+            return Ok(result);
         }
         let bits2 = reader.read_bits(5)?;
-        Ok((37 + bits2) as u8)
+        let result = (37 + bits2) as u8;
+        if std::env::var("J2K_DEBUG").is_ok() {
+            eprintln!("    DECODE num_passes: {}", result);
+        }
+        Ok(result)
     }
 
-    /// Write coding passes using Table B.4
+    /// Writes the number of coding passes using J2K codeword table (Table B.4).
     fn write_coding_passes(writer: &mut crate::jpeg2000::bit_io::J2kBitWriter, passes: u8) {
         match passes {
             1 => writer.write_bit(0),
@@ -325,11 +343,6 @@ impl PacketHeader {
                         let lblock = numlenbits + increment;
                         let lbits = lblock + log2_passes;
 
-                        if std::env::var("J2K_DEBUG").is_ok() {
-                            eprintln!("  ENC CB[{},{}] s={}: passes={} len={} bits_needed={} log2_passes={} numlenbits={} increment={} lblock={} lbits={}", 
-                                      x, y, s, cb.num_passes, cb.data_len, bits_needed, log2_passes, numlenbits, increment, lblock, lbits);
-                        }
-                        
                         Self::write_comma_code(writer, increment);
                         writer.write_bits(cb.data_len, lbits as u8);
                     } else {

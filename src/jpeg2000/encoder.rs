@@ -167,45 +167,115 @@ impl J2kEncoder {
             // Note: quant_style is overwritten below, this line is for documentation
             let _quant_style_expounded = (guard_bits << 5) | 0x02; // Scalar Expounded
             
-            // Temporary: Use fixed step size for all bands (simulating quality)
-            // Quality 100 => small step. Quality 50 => large step.
-            // Let's map quality to `step_val` (float).
-            let base_step = if self.quality >= 100 {
-                0.001 // High quality
+            // Quality-based rate control for 9-7 irreversible transform
+            // Map quality 1-100 to compression ratio (larger step = more compression)
+            // Quality 100: near-lossless (very small step)
+            // Quality 75-90: visually lossless range
+            // Quality 50: medium compression
+            // Quality 1: maximum compression
+            
+            let base_step = if self.quality >= 95 {
+                // Near-lossless range (quality 95-100)
+                // IMPORTANT: Step must be large enough to limit bit planes to avoid exceeding
+                // the packet header encoding limit of 68 passes (Table B.4: 37 + 31 max).
+                // With max 68 passes: 68 = 1 + 3*N => N ≤ 22.3, so max 22 bit planes after start_bp.
+                // For 8-bit data with 9-7 DWT, coefficients can reach ~2^20 range.
+                // Use step ≥ 0.0001 to ensure max_bp stays reasonable.
+                0.0001 + (100 - self.quality) as f32 * 0.00002
+            } else if self.quality >= 75 {
+                // Visually lossless range (quality 75-94)
+                0.001 + (94 - self.quality) as f32 * 0.0001
+            } else if self.quality >= 50 {
+                // Good quality range (quality 50-74)
+                0.001 + (74 - self.quality) as f32 * 0.0001
             } else {
-                0.01 * (100.0 - self.quality as f32) // Lower quality -> larger step
+                // High compression range (quality 1-49)
+                0.01 + (49 - self.quality) as f32 * 0.001
             };
             
-            // Convert float step to (E, M).
-            // Delta = 2^(Rb - E) * (1 + M/2048)
-            // Rb = nominal range bits (e.g. 8 + 1 + ...).
-            // This is complex. 
-            // Alternative: Use Scalar Derived (0x01). Only LL is signaled.
-            // Let's use Scalar Derived.
+            // Use Scalar Expounded (0x02) for per-subband quantization control
+            // This provides better rate-distortion performance than Scalar Derived
+            quant_style = (guard_bits << 5) | 0x02;
             
-            quant_style = (guard_bits << 5) | 0x01;
+            // Calculate step sizes for each subband
+            // IMPORTANT: Like the lossless encoder, epsilon must include the implicit subband gain
+            // The decoder uses: Δ = (1 + μ/2048) * 2^(depth + guard_bits - ε)
+            // Where ε already includes the gain for the subband type:
+            //   - LL subband: gain = 0
+            //   - HL/LH subbands: gain = 1  
+            //   - HH subband: gain = 2
+            //
+            // For a desired step size Δ_target:
+            //   ε = (depth + guard_bits + gain) - log2(Δ_target / (1 + μ/2048))
+            //
+            // Two-step calculation:
+            //   1. Calculate ε assuming μ ≈ 0
+            //   2. Refine μ to match Δ_target exactly
             
-            // Calculate LL step.
-            // Let's pick E and M to approximate `base_step`.
-            // Delta = (1 + m/2048) * 2^-E
-            // We want closest Delta to `base_step`.
-            // log2(base_step) = -E + log2(1 + m/2048)
-            // E = -floor(log2(base_step))
-            let log_step = base_step.log2();
-            let e = (-log_step.floor()) as i32;
-            let encoded_e = e.max(0).min(31); // 5 bits
-            
-            // 2^-E * (1 + m/2048) = base_step
-            // 1 + m/2048 = base_step * 2^E
-            // m = (base_step * 2^E - 1) * 2048
-            let m = ((base_step * 2.0f32.powi(encoded_e) - 1.0) * 2048.0).round() as i32;
-            let encoded_m = m.max(0).min(2047);
-            
-            let val = ((encoded_e as u16) << 11) | (encoded_m as u16);
-            
-            // For Scalar Expounded, we need values for ALL bands.
-            // We'll use the same step for all.
-            step_sizes = vec![val; num_subbands]; 
+            step_sizes = (0..num_subbands)
+                .map(|i| {
+                    // Determine subband gain (matches lossless encoder lines 257-270)
+                    let gain = if i == 0 {
+                        0  // LL subband
+                    } else {
+                        let subband_in_decomp = i - 1;
+                        let band_type = subband_in_decomp % 3;  // 0=HL, 1=LH, 2=HH
+                        if band_type < 2 { 1 } else { 2 }  // HL/LH: gain=1, HH: gain=2
+                    };
+                    
+                    // Calculate rb = depth + guard_bits + gain (implicit in epsilon)
+                    let rb = depth as i32 + guard_bits as i32 + gain;
+                    
+                    // Calculate perceptually-weighted step size
+                    let subband_step = if i == 0 {
+                        // LL subband (most important) - use base step
+                        base_step
+                    } else {
+                        let subband_in_decomp = i - 1;
+                        let decomp_level = subband_in_decomp / 3;
+                        let band_type = subband_in_decomp % 3;
+                        
+                        // Perceptual weighting factors
+                        let band_factor = match band_type {
+                            0 | 1 => 1.0,   // HL and LH
+                            2 => 1.05,      // HH can be quantized slightly more
+                            _ => 1.0,
+                        };
+                        
+                        // Coarser resolution levels are more important
+                        let level_factor = 1.0 + (decomp_level as f32) * 0.05;
+                        
+                        base_step * band_factor * level_factor
+                    };
+                    
+                    // Calculate epsilon to match decoder formula
+                    // Δ = (1 + μ/2048) * 2^((depth + guard_bits) - ε)
+                    // But ε already includes gain, so: ε = rb - log2(Δ / (1 + μ/2048))
+                    // First approximation with μ = 0:
+                    let log_delta = subband_step.log2();
+                    let epsilon_float = rb as f32 - log_delta;
+                    let epsilon = epsilon_float.round().max(0.0).min(31.0) as i32;
+                    
+                    // Refine μ to match target step size exactly:
+                    // (1 + μ/2048) = Δ / 2^((depth + guard_bits) - ε)
+                    // Note: The gain is in ε, so we use (depth + guard_bits) here
+                    let scale = 2.0f32.powi(depth as i32 + guard_bits as i32 - epsilon);
+                    let mu_float = (subband_step / scale - 1.0) * 2048.0;
+                    let mu = mu_float.round().max(0.0).min(2047.0) as i32;
+                    
+                    // Pack epsilon (5 bits) and mu (11 bits) into u16
+                    let packed = ((epsilon as u16) << 11) | (mu as u16);
+                    
+                    if std::env::var("J2K_DEBUG").is_ok() {
+                        eprintln!(
+                            "Subband {}: gain={}, rb={}, step={:.6}, eps={}, mu={}, packed=0x{:04X}",
+                            i, gain, rb, subband_step, epsilon, mu, packed
+                        );
+                    }
+                    
+                    packed
+                })
+                .collect();
         } else {
             // Reversible 5-3 (No Quantization - Style 0x00)
             quant_style = guard_bits << 5;
@@ -298,7 +368,34 @@ impl J2kEncoder {
         }
         // Apply ICT (Irreversible Color Transform) if 3 components and using irreversible transform
         else if components == 3 && self.use_irreversible {
-             // ... ICT ...
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("ICT: Applying ICT to {}x{} image", width, height);
+                eprintln!("ICT BEFORE: R[0]={}, G[0]={}, B[0]={}", 
+                         component_data[0][0], component_data[1][0], component_data[2][0]);
+            }
+            for i in 0..width * height {
+                let r = component_data[0][i] as f32;
+                let g = component_data[1][i] as f32;
+                let b = component_data[2][i] as f32;
+
+                // ICT coefficients from ISO/IEC 15444-1 Annex G.2
+                let y = 0.299 * r + 0.587 * g + 0.114 * b;
+                let cb = -0.16875 * r - 0.33126 * g + 0.5 * b;
+                let cr = 0.5 * r - 0.41869 * g - 0.08131 * b;
+
+                component_data[0][i] = y as i32;
+                component_data[1][i] = cb as i32;
+                component_data[2][i] = cr as i32;
+            }
+            if std::env::var("J2K_DEBUG").is_ok() {
+                eprintln!("ICT AFTER: Y[0]={}, Cb[0]={}, Cr[0]={}", 
+                         component_data[0][0], component_data[1][0], component_data[2][0]);
+                eprintln!("ICT AFTER: Y[1]={}, Cb[1]={}, Cr[1]={}", 
+                         component_data[0][1], component_data[1][1], component_data[2][1]);
+                let mid = width * height / 2;
+                eprintln!("ICT AFTER: Y[{}]={}, Cb[{}]={}, Cr[{}]={}", 
+                         mid, component_data[0][mid], mid, component_data[1][mid], mid, component_data[2][mid]);
+            }
         }
 
         for (comp_idx, mut comp_data) in component_data.into_iter().enumerate() {
@@ -401,6 +498,7 @@ impl J2kEncoder {
                 depth,
                 guard_bits,
                 comp_idx as u8,
+                &step_sizes,
             )?;
             if std::env::var("J2K_DEBUG").is_ok() {
                 eprintln!("COMPONENT {}: Generated {} packets", comp_idx, comp_packets.len());
@@ -522,6 +620,7 @@ impl J2kEncoder {
         depth: u8,
         guard_bits: u8,
         comp_idx: u8,
+        step_sizes: &[u16], // QCD step sizes for lossy mode
     ) -> Result<Vec<Packet>, JpeglsError> {
         let mut packets = Vec::new();
         let num_resolutions = (num_levels + 1) as usize;
@@ -596,23 +695,30 @@ impl J2kEncoder {
                              band, sb_w, sb_h, sb_coeffs.len(), &sb_coeffs[..sb_coeffs.len().min(10)]);
                 }
 
-                // Calculate epsilon for this subband (matches write_qcd / OpenJPEG)
-                // LL=depth, HL/LH=depth+1, HH=depth+2 (same for all levels)
+                // Calculate epsilon for this subband
+                // For lossy mode (irreversible), use the epsilon from QCD step_sizes
+                // For lossless mode, use the standard formula: LL=depth, HL/LH=depth+1, HH=depth+2
                 let qcd_idx = if res == 0 {
                     0
                 } else {
                     1 + (res - 1) * 3 + band
                 };
                 
-                let epsilon = if qcd_idx == 0 {
-                    // LL band
-                    depth
+                let epsilon = if self.use_irreversible && qcd_idx < step_sizes.len() {
+                    // Extract epsilon from the packed QCD step size
+                    ((step_sizes[qcd_idx] >> 11) & 0x1F) as u8
                 } else {
-                    let band_in_level = (qcd_idx - 1) % 3;
-                    if band_in_level < 2 {
-                        depth + 1 // HL or LH
+                    // Lossless mode: use standard formula
+                    if qcd_idx == 0 {
+                        // LL band
+                        depth
                     } else {
-                        depth + 2 // HH
+                        let band_in_level = (qcd_idx - 1) % 3;
+                        if band_in_level < 2 {
+                            depth + 1 // HL or LH
+                        } else {
+                            depth + 2 // HH
+                        }
                     }
                 };
 
@@ -705,16 +811,46 @@ impl J2kEncoder {
                             }
 
                         // zero_bp calculation
-                        // M_b = G + epsilon - 1 (per JPEG 2000 standard)
+                        // For irreversible (9-7) DWT, epsilon includes the gain and step size adjustments,
+                        // so M_b = G + epsilon - 1 doesn't apply directly.
+                        // Instead, we calculate zero_bp based on the actual coefficient range.
+                        //
+                        // The quantized coefficients are integers, and their maximum magnitude
+                        // determines max_bp. The total available bit-planes depend on the
+                        // integer representation (typically 32 bits for i32).
+                        //
+                        // For consistency with the decoder, we use:
+                        // M_b = depth + guard_bits + gain - 1
+                        // (where gain is implicit in epsilon for lossless, but explicit here)
+                        //
+                        // Actually, for 9-7, we should use a fixed M_b based on the expected
+                        // dynamic range of quantized coefficients. Since we're using i32,
+                        // and coefficients can be quite large after quantization with small delta,
+                        // we'll use M_b = 30 (leaving room for sign bit in i32).
+                        //
+                        // NO WAIT - the decoder calculates max_bit_plane = (m_b - 1) - zero_bp
+                        // And m_b in the decoder is calculated from epsilon.
+                        // So we need mb here to match what the decoder will calculate!
+                        
                         let mb = (guard_bits + epsilon).saturating_sub(1);
-
-                        // zero_bp is the number of zero bit planes starting from the MSB
-                        // M_b bit planes available: M_b-1 ... 0
-                        // max_bp is the index of the most significant non-zero bit plane
-                        // So zero planes are: (M_b - 1) - max_bp
-                        let zero_bp = if max_bp < mb { mb - max_bp - 1 } else { 0 };
+                        
+                        // But here's the key: max_bp is the actual MSB of our coefficients.
+                        // zero_bp is how many high-order bit-planes are all zero.
+                        // The relationship is: zero_bp = mb - 1 - max_bp
+                        // Or: max_bp = mb - 1 - zero_bp
+                        //
+                        // The decoder will calculate: max_bit_plane = (mb - 1) - zero_bp
+                        // So if we send zero_bp, the decoder gets max_bit_plane = max_bp. Good!
+                        
+                        let zero_bp = if max_bp <= mb.saturating_sub(1) {
+                            mb.saturating_sub(1).saturating_sub(max_bp as u8)
+                        } else {
+                            0
+                        };
 
                             if std::env::var("J2K_DEBUG").is_ok() {
+                                eprintln!("    zero_bp calc: mb={}, max_bp={}, mb-1={}, zero_bp={}",
+                                    mb, max_bp, mb.saturating_sub(1), zero_bp);
                                 eprintln!("    -> zero_bp={}", zero_bp);
                             }
 
@@ -830,30 +966,21 @@ impl J2kEncoder {
                 // If not (derived), we need to derive.
                 // Let's stick to EXPOUNDED for now in `encode` to make it explicit.
                 
-                let exponent = (step_encoded >> 11) as i32;
+                let epsilon = (step_encoded >> 11) as i32;
                 let mantissa = (step_encoded & 0x7FF) as i32;
                 
-                // Rb = nominal range bits.
-                // For 9-7, nominal dynamic range depends on subband gain.
-                // OpenJPEG simplifies: `delta = (1 + m/2048) * 2^(-e)`. 
-                // Wait, `e` in file is `Rb - true_exponent`.
-                // Let's use the raw float delta.
-                // If we stored `base_step` approx.
-                // Let's assume `step_encoded` maps to `delta`.
-                // delta = (1.0 + m/2048.0) / (1 << exponent) ???
-                // Usually `delta` is small. e.g. 0.01.
-                // So exponent is positive.
+                // The epsilon in QCD already includes the subband gain, so we use the decoder's formula:
+                // Δ = 2^(depth + guard_bits - epsilon) * (1 + mantissa/2048)
+                // This matches what the decoder does in image.rs line 209
+                let delta = (1.0 + (mantissa as f32) / 2048.0) 
+                    * 2.0f32.powi(_depth as i32 + _guard_bits as i32 - epsilon);
                 
-                // Let's use a simpler quantization for now:
-                // delta = base_step (from encode).
-                // We need to pass `base_step` to this function?
-                // Or reconstruct it.
-                
-                // REFACTOR: Pass `base_step` directly to `quantize_97` and ignore `step_sizes` for calc?
-                // But we need to match what we wrote in QCD.
-                
-                let delta = (1.0 + (mantissa as f32) / 2048.0) * 2.0f32.powi(-exponent);
-                // Note: Rb is ignored here, assuming normalized?
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!(
+                        "Quantize97: res={}, band={}, qcd_idx={}, eps={}, mu={}, delta={:.6}",
+                        res, band, qcd_idx, epsilon, mantissa, delta
+                    );
+                }
                 
                 let inv_delta = 1.0 / delta;
 

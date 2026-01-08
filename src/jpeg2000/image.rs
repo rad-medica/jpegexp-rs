@@ -160,6 +160,31 @@ impl J2kImage {
                 eprintln!("COMP {} RES 0 LL: len={} first_few={:?}", 
                          comp_idx, current_ll.len(), &current_ll[..current_ll.len().min(10)]);
             }
+            
+            // For irreversible transform, dequantize the LL subband ONCE before IDWT loop
+            if !is_reversible {
+                let qcd = self.qcd.as_ref().unwrap();
+                let depth = self.components[comp_idx].depth;
+                let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                let val = qcd.step_sizes[0];
+                let eps = ((val >> 11) & 0x1F) as i32;
+                let mu = (val & 0x7FF) as i32;
+                let s_ll = (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - eps);
+                
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("DEC step[0] (LL ONCE): eps={}, mu={}, depth={}, guard={}, delta={:.6}", 
+                        eps, mu, depth, guard_bits, s_ll);
+                    eprintln!("DEC: Before dequant LL once, coeffs (first 10): {:?}", &current_ll[..current_ll.len().min(10)]);
+                }
+                
+                for v in &mut current_ll {
+                    *v = (*v as f32 * s_ll).round() as i32;
+                }
+                
+                if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("DEC: After dequant LL once, coeffs (first 10): {:?}", &current_ll[..current_ll.len().min(10)]);
+                }
+            }
 
             for r in 1..component.resolutions.len() {
                 let res = &component.resolutions[r];
@@ -194,28 +219,39 @@ impl J2kImage {
                 if is_reversible {
                     crate::jpeg2000::dwt::Dwt53::inverse_2d(&current_ll, &hl, &lh, &hh, res.width, res.height, &mut output);
                 } else {
-                    // Irreversible: use float path
-                    let mut cur_ll_f32: Vec<f32> = current_ll.iter().map(|&v| v as f32).collect();
+                    // Irreversible: use float path  
+                    let cur_ll_f32: Vec<f32> = current_ll.iter().map(|&v| v as f32).collect();
                     let hl_f32: Vec<f32> = hl.iter().map(|&v| v as f32).collect();
                     let lh_f32: Vec<f32> = lh.iter().map(|&v| v as f32).collect();
                     let hh_f32: Vec<f32> = hh.iter().map(|&v| v as f32).collect();
                     
-                    // Simple dequantization (approx)
+                    // Dequantize the high-pass subbands ONLY (LL already dequantized before loop)
                     let qcd = self.qcd.as_ref().unwrap();
                     let depth = self.components[comp_idx].depth;
                     let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     let step = |idx: usize| -> f32 {
                         let val = qcd.step_sizes[idx];
-                        (1.0 + (val & 0x7FF) as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - ((val >> 11) & 0x1F) as i32)
+                        let eps = ((val >> 11) & 0x1F) as i32;
+                        let mu = (val & 0x7FF) as i32;
+                        let delta = (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - eps);
+                        
+                        if std::env::var("J2K_DEBUG").is_ok() {
+                            eprintln!("DEC step[{}]: eps={}, mu={}, depth={}, guard={}, delta={:.6}", 
+                                idx, eps, mu, depth, guard_bits, delta);
+                        }
+                        delta
                     };
-                    
-                    let s_ll = step(0);
-                    for v in &mut cur_ll_f32 { *v *= s_ll; }
                     
                     let idx_base = 1 + (r - 1) * 3;
                     let s_hl = step(idx_base);
                     let s_lh = step(idx_base + 1);
                     let s_hh = step(idx_base + 2);
+                    
+                    if std::env::var("J2K_DEBUG").is_ok() {
+                        eprintln!("DEC: Before dequant, HL coeffs (first 10): {:?}", &hl_f32[..hl_f32.len().min(10)]);
+                        eprintln!("DEC: Before dequant, LH coeffs (first 10): {:?}", &lh_f32[..lh_f32.len().min(10)]);
+                        eprintln!("DEC: Before dequant, HH coeffs (first 10): {:?}", &hh_f32[..hh_f32.len().min(10)]);
+                    }
                     let mut hl_f = hl_f32; for v in &mut hl_f { *v *= s_hl; }
                     let mut lh_f = lh_f32; for v in &mut lh_f { *v *= s_lh; }
                     let mut hh_f = hh_f32; for v in &mut hh_f { *v *= s_hh; }

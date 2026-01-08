@@ -57,6 +57,7 @@ impl<'a, 'b> J2kBitReader<'a, 'b> {
         
         let bit = (self.bit_buffer >> (self.bits_count - 1)) & 1;
         self.bits_count -= 1;
+        
         Ok(bit)
     }
 

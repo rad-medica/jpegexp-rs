@@ -12,6 +12,11 @@ categories = ["multimedia::images", "encoding"]
 name = "jpegexp"
 path = "src/bin/jpegexp.rs"
 
+[[bench]]
+name = "j2k_compression"
+path = "benches/j2k_compression.rs"
+harness = false
+
 [lib]
 name = "jpegexp_rs"
 path = "src/lib.rs"

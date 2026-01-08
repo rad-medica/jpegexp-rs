@@ -153,10 +153,6 @@ impl TagTree {
                 node.low = parent_low;
             }
 
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("    TT Encode[{}]: val={} low={} thresh={}", curr_idx, node.value, node.low, threshold);
-            }
-
             while node.low < threshold {
                 if node.known {
                     // Already encoded/known, no need to send more bits
