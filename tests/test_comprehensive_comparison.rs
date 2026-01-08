@@ -376,6 +376,276 @@ fn comprehensive_jpeg2000_comparison() {
     generate_summary_report(&results);
 }
 
+/// Write grayscale image in PGM (Portable GrayMap) format
+fn write_pgm(path: &Path, pixels: &[u8], width: usize, height: usize) -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(path)?;
+    writeln!(file, "P5")?;
+    writeln!(file, "{} {}", width, height)?;
+    writeln!(file, "255")?;
+    file.write_all(pixels)?;
+    Ok(())
+}
+
+/// Write RGB image in PPM (Portable PixMap) format
+fn write_ppm(path: &Path, pixels: &[u8], width: usize, height: usize) -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(path)?;
+    writeln!(file, "P6")?;
+    writeln!(file, "{} {}", width, height)?;
+    writeln!(file, "255")?;
+    file.write_all(pixels)?;
+    Ok(())
+}
+
+/// Read PGM file
+fn read_pgm(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Read};
+    
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    
+    // Read magic number
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    if !line.trim().starts_with("P5") {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Not a PGM file"));
+    }
+    
+    // Skip comments and read width/height
+    line.clear();
+    loop {
+        reader.read_line(&mut line)?;
+        if !line.trim().starts_with('#') {
+            break;
+        }
+        line.clear();
+    }
+    
+    // Read max value
+    line.clear();
+    reader.read_line(&mut line)?;
+    
+    // Read pixel data
+    let mut pixels = Vec::new();
+    reader.read_to_end(&mut pixels)?;
+    
+    Ok(pixels)
+}
+
+/// Read PPM file
+fn read_ppm(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Read};
+    
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    
+    // Read magic number
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    if !line.trim().starts_with("P6") {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Not a PPM file"));
+    }
+    
+    // Skip comments and read width/height
+    line.clear();
+    loop {
+        reader.read_line(&mut line)?;
+        if !line.trim().starts_with('#') {
+            break;
+        }
+        line.clear();
+    }
+    
+    // Read max value
+    line.clear();
+    reader.read_line(&mut line)?;
+    
+    // Read pixel data
+    let mut pixels = Vec::new();
+    reader.read_to_end(&mut pixels)?;
+    
+    Ok(pixels)
+}
+
+/// Run OpenJPEG compression and return (encode_time_us, file_size)
+fn run_openjpeg_encode(
+    input_path: &Path,
+    output_path: &Path,
+    quality: Option<u8>,
+    dwt_level: u8,
+) -> Result<(u64, usize), String> {
+    let compress_bin = find_openjpeg_binary("opj_compress")
+        .ok_or_else(|| "opj_compress not found".to_string())?;
+    
+    let mut cmd = Command::new(&compress_bin);
+    cmd.arg("-i").arg(input_path);
+    cmd.arg("-o").arg(output_path);
+    cmd.arg("-n").arg(dwt_level.to_string()); // Number of resolutions = dwt_level + 1
+    
+    if let Some(q) = quality {
+        // OpenJPEG uses -r for rate (compression ratio)
+        // For lossy, we'll use quality-based approach
+        // Quality 100 ≈ rate 1 (nearly lossless), Quality 50 ≈ rate 10
+        let rate = if q >= 95 {
+            1.0
+        } else if q >= 75 {
+            2.0 + (95 - q) as f64 * 0.15
+        } else {
+            5.0 + (75 - q) as f64 * 0.2
+        };
+        cmd.arg("-r").arg(rate.to_string());
+        cmd.arg("-I"); // Use irreversible 9-7 wavelet
+    } else {
+        // Lossless mode (default)
+    }
+    
+    let start = Instant::now();
+    let output = cmd.output().map_err(|e| format!("Failed to run opj_compress: {}", e))?;
+    let encode_time = start.elapsed().as_micros() as u64;
+    
+    if !output.status.success() {
+        return Err(format!(
+            "opj_compress failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    
+    let file_size = std::fs::metadata(output_path)
+        .map_err(|e| format!("Failed to read output file: {}", e))?
+        .len() as usize;
+    
+    Ok((encode_time, file_size))
+}
+
+/// Run OpenJPEG decompression and return (decode_time_us, pixels)
+fn run_openjpeg_decode(
+    input_path: &Path,
+    output_path: &Path,
+) -> Result<(u64, Vec<u8>), String> {
+    let decompress_bin = find_openjpeg_binary("opj_decompress")
+        .ok_or_else(|| "opj_decompress not found".to_string())?;
+    
+    let mut cmd = Command::new(&decompress_bin);
+    cmd.arg("-i").arg(input_path);
+    cmd.arg("-o").arg(output_path);
+    
+    let start = Instant::now();
+    let output = cmd.output().map_err(|e| format!("Failed to run opj_decompress: {}", e))?;
+    let decode_time = start.elapsed().as_micros() as u64;
+    
+    if !output.status.success() {
+        return Err(format!(
+            "opj_decompress failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    
+    // Read the output file
+    let pixels = if output_path.extension().and_then(|s| s.to_str()) == Some("ppm") {
+        read_ppm(output_path)
+    } else {
+        read_pgm(output_path)
+    }.map_err(|e| format!("Failed to read decoded image: {}", e))?;
+    
+    Ok((decode_time, pixels))
+}
+
+/// Run complete OpenJPEG comparison
+/// Returns: (encode_time, decode_time, file_size, jpegexp_to_opj_mae, jpegexp_to_opj_psnr, opj_to_jpegexp_mae)
+fn run_openjpeg_comparison(
+    config: &TestConfig,
+    pixels: &[u8],
+    jpegexp_data: &[u8],
+    quality: Option<u8>,
+    dwt_level: u8,
+) -> Result<(u64, u64, usize, f64, f64, f64), String> {
+    use std::fs;
+    
+    // Create temp directory for OpenJPEG files
+    let temp_dir = std::env::temp_dir().join(format!("jpegexp_openjpeg_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    
+    // Write input image
+    let input_ext = if config.components == 3 { "ppm" } else { "pgm" };
+    let input_path = temp_dir.join(format!("input.{}", input_ext));
+    
+    if config.components == 3 {
+        write_ppm(&input_path, pixels, config.width, config.height)
+    } else {
+        write_pgm(&input_path, pixels, config.width, config.height)
+    }.map_err(|e| format!("Failed to write input file: {}", e))?;
+    
+    // OpenJPEG encode
+    let opj_j2k_path = temp_dir.join("openjpeg.j2k");
+    let (opj_encode_time, opj_file_size) = run_openjpeg_encode(
+        &input_path,
+        &opj_j2k_path,
+        quality,
+        dwt_level,
+    )?;
+    
+    // OpenJPEG decode (from OpenJPEG-encoded file)
+    let opj_output_path = temp_dir.join(format!("openjpeg_decoded.{}", input_ext));
+    let (opj_decode_time, _opj_decoded_pixels) = run_openjpeg_decode(
+        &opj_j2k_path,
+        &opj_output_path,
+    )?;
+    
+    // Cross-compatibility: jpegexp-rs encode → OpenJPEG decode
+    let jpegexp_j2k_path = temp_dir.join("jpegexp.j2k");
+    fs::write(&jpegexp_j2k_path, jpegexp_data)
+        .map_err(|e| format!("Failed to write jpegexp data: {}", e))?;
+    
+    let jpegexp_output_path = temp_dir.join(format!("jpegexp_decoded.{}", input_ext));
+    let (_, jpegexp_to_opj_pixels) = run_openjpeg_decode(
+        &jpegexp_j2k_path,
+        &jpegexp_output_path,
+    )?;
+    
+    // Calculate cross-compatibility metrics
+    let jpegexp_to_opj_mae = calculate_mae(pixels, &jpegexp_to_opj_pixels);
+    let jpegexp_to_opj_psnr = calculate_psnr(pixels, &jpegexp_to_opj_pixels);
+    
+    // Cross-compatibility: OpenJPEG encode → jpegexp-rs decode
+    let opj_data = fs::read(&opj_j2k_path)
+        .map_err(|e| format!("Failed to read OpenJPEG output: {}", e))?;
+    
+    let opj_to_jpegexp_mae = match decode_with_jpegexp(&opj_data) {
+        Ok(decoded) => calculate_mae(pixels, &decoded),
+        Err(e) => {
+            eprintln!("Warning: jpegexp-rs failed to decode OpenJPEG output: {}", e);
+            f64::NAN
+        }
+    };
+    
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+    
+    Ok((
+        opj_encode_time,
+        opj_decode_time,
+        opj_file_size,
+        jpegexp_to_opj_mae,
+        jpegexp_to_opj_psnr,
+        opj_to_jpegexp_mae,
+    ))
+}
+
+/// Decode JPEG 2000 data with jpegexp-rs
+fn decode_with_jpegexp(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut reader = JpegStreamReader::new(data);
+    let mut decoder = J2kDecoder::new(&mut reader);
+    let image = decoder.decode().map_err(|e| format!("Decode failed: {:?}", e))?;
+    image.reconstruct_pixels().map_err(|e| format!("Reconstruct failed: {:?}", e))
+}
+
 fn run_test(
     config: &TestConfig,
     pixels: &[u8],
@@ -424,12 +694,18 @@ fn run_test(
     let jpegexp_self_psnr = calculate_psnr(pixels, &jpegexp_decoded);
     
     // OpenJPEG tests (if available)
-    let (openjpeg_encode_time, openjpeg_decode_time, openjpeg_file_size) = if test_openjpeg {
-        // TODO: Implement OpenJPEG comparison
-        // This requires writing PGM/PPM files and calling opj_compress/opj_decompress
-        (None, None, None)
+    let (openjpeg_encode_time, openjpeg_decode_time, openjpeg_file_size, jpegexp_to_openjpeg_mae, jpegexp_to_openjpeg_psnr, openjpeg_to_jpegexp_mae) = if test_openjpeg {
+        match run_openjpeg_comparison(config, pixels, jpegexp_data, quality, dwt_level) {
+            Ok((enc_time, dec_time, file_size, to_opj_mae, to_opj_psnr, from_opj_mae)) => {
+                (Some(enc_time), Some(dec_time), Some(file_size), Some(to_opj_mae), Some(to_opj_psnr), Some(from_opj_mae))
+            }
+            Err(e) => {
+                eprintln!("OpenJPEG comparison failed: {}", e);
+                (None, None, None, None, None, None)
+            }
+        }
     } else {
-        (None, None, None)
+        (None, None, None, None, None, None)
     };
     
     TestResult {
@@ -447,10 +723,10 @@ fn run_test(
         openjpeg_encode_time_us: openjpeg_encode_time,
         openjpeg_decode_time_us: openjpeg_decode_time,
         openjpeg_file_size,
-        jpegexp_to_openjpeg_mae: None,
-        jpegexp_to_openjpeg_psnr: None,
-        openjpeg_to_jpegexp_mae: None,
-        openjpeg_to_openjpeg_psnr: None,
+        jpegexp_to_openjpeg_mae,
+        jpegexp_to_openjpeg_psnr,
+        openjpeg_to_jpegexp_mae,
+        openjpeg_to_openjpeg_psnr: None, // This would be OpenJPEG self-test PSNR (not currently calculated)
     }
 }
 
