@@ -147,20 +147,16 @@ See [docs/JPEG2000_RLC_FIX.md](JPEG2000_RLC_FIX.md) for detailed technical analy
 
 ## Known Limitations
 
-1. **12-bit High-Frequency**: Checkerboard and step patterns fail (see SESSION_12BIT_VALIDATION.md)
-   - Solid colors and gradients work perfectly (7/9 tests pass)
-   - Suspected issue in bit-plane encoding for 12-bit coefficients
-   - Requires debugging of EBCOT encoder for high-frequency content
-2. **Color Support**: RGB encoding works for small images but needs testing with large images
-3. **Lossy Compression**: 9-7 DWT implemented, but quantization and rate control pending
-4. **HTJ2K**: Encoder components exist but integration incomplete
+1. **Color Support**: RGB encoding works for small images but needs testing with large images
+2. **Lossy Compression**: 9-7 DWT implemented, but quantization and rate control pending
+3. **HTJ2K**: Encoder components exist but integration incomplete
 
 ## Next Steps (Priority Order)
 
 1. ✅ ~~Achieve 100% OpenJPEG interoperability~~ **DONE!**
 2. ✅ ~~Test with large images (512x512, 1024x1024)~~ **DONE!**
 3. ✅ ~~Test all DWT decomposition levels (0-5)~~ **DONE!**
-4. ⚠️ **12-bit grayscale** - 78% complete (7/9 tests pass, see SESSION_12BIT_VALIDATION.md)
+4. ✅ ~~**12-bit grayscale**~~ **DONE!** - All tests pass (MAE=0)
 5. 🔜 **Complete RGB/color support for large images**
 6. 🔜 **Implement lossy compression** (quantization, rate control)
 7. 🔜 **HTJ2K encoder integration**
@@ -169,7 +165,8 @@ See [docs/JPEG2000_RLC_FIX.md](JPEG2000_RLC_FIX.md) for detailed technical analy
 
 ## Documentation
 
-- [SESSION_12BIT_VALIDATION.md](../SESSION_12BIT_VALIDATION.md) - 12-bit testing session results
+- [12BIT_BUG_FIX.md](12BIT_BUG_FIX.md) - Detailed 12-bit packet header bug analysis
+- [SESSION_12BIT_BUG_FIX.md](SESSION_12BIT_BUG_FIX.md) - Complete debugging session summary
 - [JPEG2000_RLC_FIX.md](JPEG2000_RLC_FIX.md) - Detailed RLC fix analysis
 - [../CODEC_COMPARISON.md](../CODEC_COMPARISON.md) - Performance comparison tables
 - [../CODEC_TEST_RESULTS.md](../CODEC_TEST_RESULTS.md) - Comprehensive test results
@@ -184,14 +181,20 @@ See [docs/JPEG2000_RLC_FIX.md](JPEG2000_RLC_FIX.md) for detailed technical analy
 ## Test Commands
 
 ```bash
-# Library tests (26 tests)
+# Library tests (24 tests)
 cargo test --lib --release
 
-# OpenJPEG interop (5 patterns)
+# OpenJPEG interop (8-bit, 5 patterns)
 cargo test --test test_openjpeg_interop_detailed --release -- --ignored --nocapture
 
-# Comprehensive size testing (19 tests)
+# Comprehensive 8-bit size testing (19 tests)
 cargo test --test test_various_sizes --release
+
+# 12-bit testing (all sizes and DWT levels)
+cargo test --test test_12bit_size_hunt --release
+
+# 12-bit debug tests
+cargo test --test test_12bit_debug --release
 
 # Lblock validation
 cargo test --test test_lblock_calc --release
@@ -202,11 +205,12 @@ cargo test --test test_minimal_checkerboard --release -- --ignored --nocapture
 
 ## Conclusion
 
-The JPEG 2000 lossless grayscale 8-bit encoder is now **production ready** with:
+The JPEG 2000 lossless grayscale encoder (8-bit and 12-bit) is now **production ready** with:
 - ✅ 100% OpenJPEG compatibility verified
 - ✅ Tested up to 1024x1024 images
 - ✅ All DWT levels (0-5) working
 - ✅ Perfect reconstruction (MAE=0)
+- ✅ Both 8-bit and 12-bit depth support
 - ✅ Comprehensive test suite
 
 This represents a significant milestone in achieving full JPEG2000 standard compliance.
