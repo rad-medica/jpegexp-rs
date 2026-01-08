@@ -62,7 +62,15 @@ jpegexp-rs/
 │   │   ├── encoder.rs      # ⚠️ Stub implementation
 │   │   └── dwt.rs          # DWT implementation
 │   └── lib.rs              # Library root
+├── libs/               # External libraries
+│   ├── bin/            # Binaries (OpenJPEG, OpenHTJ2K, CharLS)
+│   ├── openjpeg/       # OpenJPEG source/libs
+│   ├── openhtj2k/      # OpenHTJ2K source
+│   └── charls/         # CharLS placeholder
+├── examples/           # Example code and usage scripts
+├── scripts/            # Utility and maintenance scripts
 ├── tests/
+│   ├── fixtures/       # Test images and input data
 │   └── comprehensive_test.py  # Codec comparison tests
 ├── CODEC_TEST_RESULTS.md   # Detailed test results
 ├── SUMMARY.md              # Project summary
@@ -291,7 +299,7 @@ perf report
 ## FAQ
 
 **Q: Why is JPEG-LS not working?**  
-A: The JPEG-LS implementation has fundamental architectural issues that require a complete rewrite of the encoder/decoder core logic. This is documented in CODEC_TEST_RESULTS.md.
+A: The JPEG-LS implementation has fundamental architectural issues that require a complete rewrite of the encoder/decoder core logic. This is documented in [docs/CODEC_TEST_RESULTS.md](docs/CODEC_TEST_RESULTS.md).
 
 **Q: Can I use JPEG 2000?**
 A: The decoder is fully functional for reading JP2/J2K files. The encoder has forward DWT implemented but packet encoding is still in progress. For production use, stick with JPEG 1 or JPEG-LS. See [docs/JPEG2000_TODO.md](docs/JPEG2000_TODO.md) for current progress.
@@ -305,4 +313,4 @@ A: Check the GitHub issues for "good first issue" labels, or tackle the JPEG-LS 
 ## Support
 
 - GitHub Issues: https://github.com/rad-medica/jpegexp-rs/issues
-- Documentation: See CODEC_TEST_RESULTS.md and SUMMARY.md
+- Documentation: See [docs/CODEC_TEST_RESULTS.md](docs/CODEC_TEST_RESULTS.md) and [docs/SUMMARY.md](docs/SUMMARY.md)

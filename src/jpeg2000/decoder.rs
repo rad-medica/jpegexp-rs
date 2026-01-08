@@ -907,6 +907,7 @@ mod tests {
             decomposition_levels: 1,
             codeblock_width_exp: 4,
             codeblock_height_exp: 4,
+            code_block_style: 0,
             transformation: 0,
             precinct_sizes: vec![],
         });

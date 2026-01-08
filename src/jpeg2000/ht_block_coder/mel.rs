@@ -56,12 +56,10 @@ impl<'a> MelDecoder<'a> {
             // If we encounter 0x00 and the *next* byte (lower address) is 0xFF,
             // then this 0x00 is a stuffing byte and should be skipped.
             // The byte to return is the 0xFF.
-            if self.pos > 0 && byte == 0x00 {
-                if self.data[self.pos - 1] == 0xFF {
-                    // Skip the stuffing byte 0x00
-                    self.pos -= 1;
-                    byte = 0xFF;
-                }
+            if self.pos > 0 && byte == 0x00 && self.data[self.pos - 1] == 0xFF {
+                // Skip the stuffing byte 0x00
+                self.pos -= 1;
+                byte = 0xFF;
             }
 
             self.bits_buffer = byte;
@@ -97,11 +95,9 @@ impl<'a> MelDecoder<'a> {
                 temp_buffer = self.data[next_read_pos];
                 
                 // Stuffing check
-                if next_read_pos > 0 && temp_buffer == 0x00 {
-                    if self.data[next_read_pos - 1] == 0xFF {
-                        next_read_pos -= 1;
-                        temp_buffer = 0xFF;
-                    }
+                if next_read_pos > 0 && temp_buffer == 0x00 && self.data[next_read_pos - 1] == 0xFF {
+                    next_read_pos -= 1;
+                    temp_buffer = 0xFF;
                 }
                 
                 temp_pos = next_read_pos;

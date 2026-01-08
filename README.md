@@ -158,9 +158,9 @@ Commands:
 - [docs/HTJ2K_DICOM_COMPLIANCE.md](docs/HTJ2K_DICOM_COMPLIANCE.md) - HTJ2K DICOM compliance report **NEW!**
 - [docs/JPEG2000_RLC_FIX.md](docs/JPEG2000_RLC_FIX.md) - OpenJPEG interoperability fix details
 - [docs/OPENJPEG_COMPARISON.md](docs/OPENJPEG_COMPARISON.md) - Performance comparison with OpenJPEG
-- [CODEC_TEST_RESULTS.md](CODEC_TEST_RESULTS.md) - Detailed test results and analysis
-- [SUMMARY.md](SUMMARY.md) - Project summary and findings
-- [COMPLIANCE.md](COMPLIANCE.md) - Conformance testing details
+- [docs/CODEC_TEST_RESULTS.md](docs/CODEC_TEST_RESULTS.md) - Detailed test results and analysis
+- [docs/SUMMARY.md](docs/SUMMARY.md) - Project summary and findings
+- [docs/COMPLIANCE.md](docs/COMPLIANCE.md) - Conformance testing details
 
 ## Current Status
 
@@ -231,4 +231,4 @@ See test files:
 
 ## Compliance
 
-See [COMPLIANCE.md](COMPLIANCE.md) for details on conformance testing against standard reference implementations like `libjpeg-turbo`, `CharLS`, and `OpenJPEG`.
+See [docs/COMPLIANCE.md](docs/COMPLIANCE.md) for details on conformance testing against standard reference implementations like `libjpeg-turbo`, `CharLS`, and `OpenJPEG`.
