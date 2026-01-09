@@ -25,11 +25,11 @@
 - **Fixed**: Run interruption logic using Context 0 and Rb predictor for all interleaved components.
 - **Verified**: 23/23 CharLS validation tests passing with perfect pixel match (MAE=0).
 
-### 3. HTJ2K: Native Encoding Work in Progress
-- **Implemented**: Full **EMB (Exponents and MagSgn Bits)** pattern for magnitude encoding.
-- **Implemented**: **U_q state machine** for magnitude prediction (kappa logic).
-- **Implemented**: **UVLC decoding** for magnitude residuals.
-- **Status**: Decoder shows pixel mismatches. Further debugging needed for production readiness.
+### 3. HTJ2K: VLC/UVLC Decoding Fixes
+- **Fixed**: VLC table generation now uses longest-prefix matching instead of first-match
+- **Fixed**: UVLC decoder now correctly decodes u_q value pairs using longest-match prefix
+- **Fixed**: VLC encoder now has multi-level fallback when exact table match not found
+- **Status**: UVLC roundtrip verified working. Decoder still shows pixel mismatches due to incomplete VLC table coverage and context calculation issues. Further work needed for production readiness.
 
 ### 5. JPEG 2000: Lossy Compression Fix
 - **Fixed**: Quantization step size calculation for 9-7 irreversible transform.
