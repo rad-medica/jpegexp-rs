@@ -6,8 +6,8 @@
 |-------|-----------|--------|--------|----------|-------|
 | **JPEG 1** | ISO/IEC 10918-1 | ✅ | ✅ | **Production** | Full 8/12-bit support (Baseline & Extended SOF1). |
 | **JPEG-LS** | ISO/IEC 14495-1 | ✅ | ✅ | **Production** | Lossless Grayscale & RGB (ILV=2) validated vs CharLS. |
-| **JPEG 2000** | ISO/IEC 15444-1 | ✅ | ✅ | **Production** | Lossless (MAE=0) production ready. Lossy fixed. |
-| **HTJ2K** | ISO/IEC 15444-15| ⚠️ | ⚠️ | **Experimental** | Decoder/encoder in progress. Not production ready. |
+| **JPEG 2000** | ISO/IEC 15444-1 | ✅ | ✅ | **Production** | Lossless (5-3) & Irreversible (9-7) validated. MAE=0. |
+| **HTJ2K** | ISO/IEC 15444-15| ⚠️ | 🔴 | **Experimental** | Encoder works (Legacy). Decoder broken (pixel mismatches). |
 
 ---
 

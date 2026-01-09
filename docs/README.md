@@ -32,7 +32,7 @@ jpegexp-rs is a universal JPEG codec library supporting:
 | JPEG      | ISO/IEC 10918-1  | ✓      | ✓      | Production ready |
 | JPEG-LS   | ISO/IEC 14495-1  | ✓      | ✓      | Grayscale lossless (MAE=0) |
 | JPEG 2000 | ISO/IEC 15444-1  | ✓      | ✓      | **Production ready for medical imaging** (MAE=0) |
-| HTJ2K     | ISO/IEC 15444-15 | ✗      | ⚠️     | Decoder working, encoder pending |
+| HTJ2K     | ISO/IEC 15444-15 | ⚠️     | 🔴     | Encoder experimental, decoder broken |
 
 ### JPEG 2000 Features
 
@@ -49,7 +49,7 @@ jpegexp-rs is a universal JPEG codec library supporting:
 |------------|--------|--------|--------|
 | Grayscale 8-bit | ✓ | ✓ | Lossless (MAE=0) |
 | Grayscale 16-bit | ✓ | ✓ | Lossless (MAE=0) |
-| RGB (sample interleave) | ✗ | ✗ | Not yet supported |
+| RGB (sample interleave) | ✓ | ✓ | Lossless (MAE=0) |
 
 ## Quick Start
 
@@ -134,10 +134,6 @@ cbindgen --output jpegexp.h
 ## Troubleshooting
 
 ### Common Issues
-
-**JPEG-LS RGB encoding not supported:**
-- JPEG-LS currently only supports grayscale images
-- Use JPEG 1 for RGB images
 
 **JPEG 2000 lossy compression quality:**
 - Lossy compression works but quantization for >8-bit needs improvement
