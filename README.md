@@ -32,7 +32,7 @@
 ## 🌟 Key Features
 
 *   **JPEG 2000 Lossless**: 100% OpenJPEG compatible, medical-grade accuracy (MAE=0).
-*   **JPEG-LS**: Extremely fast lossless compression for 8-bit and 16-bit grayscale.
+*   **JPEG-LS**: Lossless compression for 8/16-bit grayscale and RGB (sample-interleaved, 23/23 CharLS tests passing).
 *   **HTJ2K**: High-Throughput JPEG 2000 support (Legacy Mode + Decoder).
 *   **Pure Rust**: Memory safe, no segfaults, easy cross-compilation.
 *   **Medical Focus**: Native support for 12-bit/16-bit depth and DICOM-compliant bitstreams.

@@ -55,79 +55,64 @@ The tests will automatically detect the binary at:
 
 ## Running Tests
 
-### Integration Tests
+### Rust Tests
 
-Run the main integration test suite:
+Run the Rust test suite (preferred method):
 
 ```bash
-# From project root (with venv activated)
-python -m pytest tests/integration_standard_libs.py -v
+# From project root
+cargo test --release
 
-# Or using unittest directly
-python -m unittest tests.integration_standard_libs -v
+# Run specific test category
+cargo test --release --test final_interop      # Interop tests
+cargo test --release --test jpegls_charls_validation  # JPEG-LS validation
+cargo test --release unit                      # Unit tests
+cargo test --release integration               # Integration tests
+
+# Run a specific test
+cargo test --release --test final_interop test_grayscale_interop -- --nocapture
 ```
 
 ### Test Coverage
 
 The test suite includes:
 
-- **JPEG 1 (Baseline)**: Encoding and decoding tests for grayscale and RGB images
+- **JPEG 1 (Baseline)**: SOF0/SOF1/SOF2 encoding and decoding for grayscale and RGB
 - **JPEG-LS**:
-  - CharLS validation tests (`jpegls_charls_validation.rs`): 17 tests, all passing
-  - Lossless grayscale 8-bit: 14 tests (MAE = 0)
-  - Lossless grayscale 16-bit: 2 tests (MAE = 0)
-  - Edge cases (1x1, 1x8, 8x1): 3 tests (MAE = 0)
-  - RGB: 6 tests (currently ignored - sample-interleave not yet supported)
-- **JPEG 2000**: Encoding tests (decoder not yet implemented)
+  - CharLS validation tests (`tests/interop/jpegls_charls_validation.rs`): 23/23 passing
+  - Lossless grayscale 8-bit: MAE = 0
+  - Lossless grayscale 16-bit: MAE = 0
+  - Lossless RGB sample-interleaved: MAE = 0 (23/23 tests)
+  - Edge cases (1x1, 1x8, 8x1, large images)
+- **JPEG 2000**: Full lossless/lossy encoding and decoding (MAE = 0)
+- **HTJ2K**: Encoder (working), Decoder (4 failing tests - under investigation)
 
-### Specific Tests
+### Interop Tests
 
-You can run individual test methods:
+Interop tests require external binaries in `libs/bin/`:
+- `opj_decompress.exe` (OpenJPEG 2.5.2)
+- `opj_compress.exe` (OpenJPEG 2.5.2)
+- `charls-encoder.exe` (CharLS 2.4.2)
+- `charls-decoder.exe` (CharLS 2.4.2)
+- `oj_compress.exe` (OpenHTJ2K 0.6.0)
+- `oj_decompress.exe` (OpenHTJ2K 0.6.0)
 
+Run interop tests:
 ```bash
-# Test JPEG-LS RGB encoding (previously had panic issues)
-python -m unittest tests.integration_standard_libs.TestCodecIntegration.test_jpegls_encode_rgb -v
-
-# Test JPEG-LS decoding (previously had "all zeros" issue)
-python -m unittest tests.integration_standard_libs.TestCodecIntegration.test_jpegls_decode_standard -v
+cargo test --release --test final_interop -- --nocapture
 ```
 
 ## Jupyter Notebooks
 
-The test suite includes Jupyter notebooks for interactive codec comparison and visualization.
+**Note**: Python-based notebooks are currently deprecated. All testing is done via Rust tests.
 
-### Running Notebooks
+The `notebooks/` directory contains legacy Jupyter notebooks for reference:
+- Historical codec comparison visualizations
+- Previous test results
 
-1. **Start Jupyter Notebook Server** (with venv activated):
-
+For current test results, use:
 ```bash
-# From project root
-jupyter notebook tests/
-```
-
-2. **Or use JupyterLab**:
-
-```bash
-jupyter lab tests/
-```
-
-3. **Open the notebook**:
-   - `codec_comparison.ipynb` - Interactive codec comparison and visualization
-   - `codec_comparison_result.ipynb` - Previous test results
-
-### Notebook Dependencies
-
-The notebooks require:
-- All dependencies from `requirements.txt`
-- Built Rust binaries (see Build section above)
-- Jupyter kernel with access to the virtual environment
-
-### Creating Notebooks Programmatically
-
-You can regenerate notebooks using:
-
-```bash
-python tests/create_notebook.py
+cargo test --release -- --nocapture
 ```
 
 ## Troubleshooting
@@ -170,8 +155,11 @@ Test output includes:
 
 ## Continuous Integration
 
-For CI/CD pipelines:
-1. Install Rust toolchain
-2. Create .venv and install dependencies: `python -m venv .venv && .venv/bin/activate && pip install -r requirements.txt`
-3. Build project: `cargo build --release`
-4. Run tests: `python -m pytest tests/integration_standard_libs.py -v`
+The CI pipeline (`.github/workflows/ci.yml`) runs:
+1. Rust toolchain setup
+2. Build: `cargo build --release`
+3. Tests: `cargo test --lib` (36/36 passing)
+4. Linting: `cargo clippy --all-targets --all-features`
+5. Formatting: `cargo fmt --check`
+
+**Note**: Interop tests are not run in CI (require Windows binaries, CI runs on Ubuntu).

@@ -23,9 +23,9 @@ This document details the compliance of `jpegexp-rs` with DICOM Transfer Syntaxe
 | | 1.2.840.10008.1.2.4.91 | JPEG 2000 | ✅ Supported | 9-7 or 5-3 DWT. |
 | | 1.2.840.10008.1.2.4.92 | JPEG 2000 Part 2 Lossless | ❌ No | Multi-component not supported. |
 | | 1.2.840.10008.1.2.4.93 | JPEG 2000 Part 2 | ❌ No | Multi-component not supported. |
-| **HTJ2K** | 1.2.840.10008.1.2.4.201 | HTJ2K Lossless | ✅ Supported | Native EMB encoding. |
+| **HTJ2K** | 1.2.840.10008.1.2.4.201 | HTJ2K Lossless | ⚠️ Experimental | Native EMB encoding (4 failing tests). |
 | | 1.2.840.10008.1.2.4.202 | HTJ2K RPC | ❌ No | Reduced Resolution not supported. |
-| | 1.2.840.10008.1.2.4.203 | HTJ2K | ✅ Supported | Native EMB encoding. |
+| | 1.2.840.10008.1.2.4.203 | HTJ2K | ⚠️ Experimental | Native EMB encoding (4 failing tests). |
 
 ---
 
