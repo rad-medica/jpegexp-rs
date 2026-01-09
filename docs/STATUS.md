@@ -7,7 +7,7 @@
 | **JPEG 1** | ISO/IEC 10918-1 | ✅ | ✅ | **Production** | Full 8/12-bit support (Baseline & Extended SOF1). |
 | **JPEG-LS** | ISO/IEC 14495-1 | ✅ | ✅ | **Production** | Lossless Grayscale & RGB (ILV=2) validated vs CharLS. |
 | **JPEG 2000** | ISO/IEC 15444-1 | ✅ | ✅ | **Production** | Lossless (MAE=0) production ready. Lossy fixed. |
-| **HTJ2K** | ISO/IEC 15444-15| ✅ | ✅ | **Advanced** | Native magnitude encoding (EMB) and TLM/PLT markers implemented. |
+| **HTJ2K** | ISO/IEC 15444-15| ⚠️ | ⚠️ | **Experimental** | Decoder/encoder in progress. Not production ready. |
 
 ---
 
@@ -25,10 +25,11 @@
 - **Fixed**: Run interruption logic using Context 0 and Rb predictor for all interleaved components.
 - **Verified**: 23/23 CharLS validation tests passing with perfect pixel match (MAE=0).
 
-### 3. HTJ2K: Native Encoding Compliance
+### 3. HTJ2K: Native Encoding Work in Progress
 - **Implemented**: Full **EMB (Exponents and MagSgn Bits)** pattern for magnitude encoding.
 - **Implemented**: **U_q state machine** for magnitude prediction (kappa logic).
-- **Implemented**: **UVLC encoding** for magnitude residuals.
+- **Implemented**: **UVLC decoding** for magnitude residuals.
+- **Status**: Decoder shows pixel mismatches. Further debugging needed for production readiness.
 
 ### 4. JPEG 2000: Random Access Infrastructure
 - **Added**: Support for **TLM (Tile-part Lengths)** and **PLT (Packet Lengths)** markers for fast seeking in large medical studies.

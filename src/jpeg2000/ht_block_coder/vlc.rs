@@ -67,26 +67,12 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
 /// - `e_k`: exponent prediction calculation helper? (Actually "emb_k" logic).
 /// - `bits_consumed`: Number of bits used by the VLC code.
 pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
-    // peek is MSB aligned (bit 15 is first bit of stream).
-    // The table index expects 7 bits lookahead in LSB-first order (bit-reversed).
-    //
-    // 1. Extract top 7 bits: (peek >> 9) & 0x7F
-    //    Stream: b0 b1 b2 b3 b4 b5 b6 ...
-    //    Result: 0..0 b0 b1 b2 b3 b4 b5 b6 (MSB b0 is at bit 6)
-    //
-    // 2. Reverse bits to get LSB-first order for table lookup
-    //    Target: 0..0 b6 b5 b4 b3 b2 b1 b0
-    //
-    let lookahead = (peek >> 9) & 0x7F;
-    let lookahead_rev = (lookahead as u8).reverse_bits() >> 1; // shift down 1 because u8 is 8 bits
-
-    let idx = ((context as u16) << 7) | (lookahead_rev as u16);
-
     let val = if context == 0 {
-        VLC_TABLE_0[idx as usize]
+        VLC_TABLE_0[(peek >> 6) as usize]
     } else {
-        VLC_TABLE_1[idx as usize]
+        VLC_TABLE_1[(peek >> 6) as usize]
     };
+    // ...
 
     // Unpack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
     let rho = ((val >> 4) & 0xF) as u8;
@@ -170,4 +156,37 @@ pub fn encode_uvlc(u_q0: u8, u_q1: u8, context: u8) -> VlcCodeword {
     } else {
         VlcCodeword { value: 0, bits: 0 }
     }
+}
+
+/// Decode magnitude residuals (u_q) for a pair of quads using UVLC
+pub fn decode_uvlc(peek: u16, context: u8) -> (u8, u8, u8) {
+    let src = if context == 0 {
+        UVLC_TBL0_SRC
+    } else {
+        UVLC_TBL1_SRC
+    };
+
+    // peek has bit 15 as the first bit in the stream
+    for (idx, &entry) in src.iter().enumerate() {
+        let len = (entry & 0xFF) as u8;
+        if len == 0 {
+            if idx == 0 {
+                // Handle (0,0) entry if it exists with len 0?
+                // Actually if len is 0, it means it's not a valid code or empty.
+                continue;
+            }
+            continue;
+        }
+        let val = entry >> 8;
+
+        // Extract `len` bits from `peek` (MSB first)
+        let stream_val = (peek >> (16 - len)) as u16;
+        if stream_val == val {
+            let u_q0 = (idx & 0x1F) as u8;
+            let u_q1 = (idx >> 5) as u8;
+            return (u_q0, u_q1, len);
+        }
+    }
+
+    (0, 0, 0)
 }

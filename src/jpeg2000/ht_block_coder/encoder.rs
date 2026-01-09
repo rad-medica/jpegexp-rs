@@ -383,9 +383,9 @@ impl HTBlockEncoder {
                 let bit_k = (emb_k >> i) & 1;
                 let e_k = u_val.saturating_sub(bit_k);
 
-                if e_k > 1 {
-                    // Write bits from e_k-1 down to 1
-                    for b in (1..e_k).rev() {
+                if e_k > 0 {
+                    // Write bits from e_k-1 down to 0 (for lossless)
+                    for b in (0..e_k).rev() {
                         self.magsgn_encoder.write_bit(((mag >> b) & 1) as u8);
                     }
                 }

@@ -67,7 +67,8 @@ impl<'a> J2kWriter<'a> {
         tile_width: u32,
         tile_height: u32,
         component_count: u16,
-        bit_depth: u8, // Assuming same for all components for now
+        bit_depth: u8,
+        is_signed: bool,
         sub_x: u8,
         sub_y: u8,
     ) -> Result<(), JpeglsError> {
@@ -87,8 +88,9 @@ impl<'a> J2kWriter<'a> {
         self.writer.write_u32(0)?; // TileOffY
         self.writer.write_u16(component_count)?;
 
+        let ssiz = (bit_depth - 1) | (if is_signed { 0x80 } else { 0 });
         for _ in 0..component_count {
-            self.writer.write_byte(bit_depth - 1)?; // Precision (bit depth - 1) | Sign bit (0 for unsigned)
+            self.writer.write_byte(ssiz)?;
             self.writer.write_byte(sub_x)?;
             self.writer.write_byte(sub_y)?;
         }
@@ -291,6 +293,7 @@ mod tests {
                 128, 128, // TW, TH
                 3,   // Comps
                 8,   // Depth
+                false, // Signed
                 1, 1, // Sub x, y
             )
             .unwrap();

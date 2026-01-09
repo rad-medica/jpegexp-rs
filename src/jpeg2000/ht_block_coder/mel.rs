@@ -11,26 +11,7 @@ pub struct MelDecoder<'a> {
 
 impl<'a> MelDecoder<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        // Experimental: OpenHTJ2K seems to add a 00 padding byte at the end.
-        // Scan backwards and skip trailing zeros to find the start of the MEL stream.
-        let mut effective_len = data.len();
-        while effective_len > 0 && data[effective_len - 1] == 0 {
-            effective_len -= 1;
-        }
-
-        // If buffer was all zeros, we might have trimmed valid zeros.
-        // But for MEL, a stream of all zeros means "run of zeros", which matches behavior of 00 bytes.
-        // So trimming is probably safe-ish for decoding logic, but let's keep at least 1 byte if meaningful?
-        // Actually, if we trim all, effective_len=0. read_raw_bit returns None.
-        // MEL decode should handle EOF as 0?
-        if effective_len == 0 && !data.is_empty() {
-            // Revert to full length if it appears to be all zeros (e.g. black image)
-            // effective_len = data.len();
-            // Wait, for black image, we WANT 0s.
-            // If we trim to 0 length, read_bit returns None.
-            // We should handle None.
-        }
-
+        let effective_len = data.len();
         Self {
             data: &data[..effective_len],
             pos: effective_len, // Start at end of buffer

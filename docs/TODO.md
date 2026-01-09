@@ -20,6 +20,7 @@ This document tracks the backlog of planned features, improvements, and known is
 
 ### HTJ2K Extensions
 - [x] **Native Magnitude Encoding**: ✅ Implement EMB pattern and U_q state machine (Part 15).
+- [ ] **HTJ2K Decoder Bug Fix**: 🔴 **HIGH PRIORITY** - Fix pixel mismatch issues in HTJ2K decoder (VLC/UVLC/EMB reconstruction).
 - [ ] **RPC Mode**: Support Reduced Resolution (RPC) Transfer Syntax (.202).
 
 ## 🛑 High Priority (Immediate)
@@ -55,5 +56,6 @@ This document tracks the backlog of planned features, improvements, and known is
 | **JLS-02** | Interop | CharLS RGB interop bit over-consumption | 🟢 Fixed (Context sharing) |
 | **JLS-03** | Decoder | Grayscale regression (Rb/Rd init) | 🟢 Fixed |
 | **HT-01** | Encoder | Native Magnitude Encoding missing | 🟢 Fixed (EMB implemented) |
+| **HT-02** | Decoder | HTJ2K pixel mismatch in reconstruction | 🔴 Active - VLC/UVLC decoding issue |
 | **J1-01** | Decoder | Some standard RGB JPEGs fail to decode | 🟢 Low Priority |
 | **J1-02** | Encoder | 12-bit SOF1 requires custom Huffman for high quality | 🟡 Research |

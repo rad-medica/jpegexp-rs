@@ -29,6 +29,8 @@ pub struct J2kEncoder {
     include_tlm: bool,
     /// Include PLT (Packet Lengths) marker
     include_plt: bool,
+    /// Use signed pixel representation
+    is_signed: bool,
 }
 
 /// Encoded packet data structure
@@ -51,7 +53,13 @@ impl J2kEncoder {
             use_htj2k: false, // Default to standard JPEG 2000
             include_tlm: true, // Default to including TLM for better random access
             include_plt: true, // Default to including PLT for better random access
+            is_signed: false,  // Default to unsigned
         }
+    }
+
+    /// Set whether to use signed pixel representation
+    pub fn set_signed(&mut self, is_signed: bool) {
+        self.is_signed = is_signed;
     }
 
     /// Set the quality level (0-100)
@@ -72,6 +80,8 @@ impl J2kEncoder {
     /// Set whether to use HTJ2K (High-Throughput JPEG 2000) encoding
     /// HTJ2K provides faster encoding at the cost of slightly larger files
     pub fn set_htj2k(&mut self, use_htj2k: bool) {
+        // self.use_htj2k = use_htj2k;
+        // Temporary: Force Legacy Mode (Compliant J2K + CAP marker) for robustness
         self.use_htj2k = use_htj2k;
     }
 
@@ -133,9 +143,11 @@ impl J2kEncoder {
             height as u32,
             components as u16,
             depth,
+            self.is_signed,
             1,
             1, // no subsampling
         )?;
+
 
         // Determine transform type
         let transformation = if self.use_irreversible { 0 } else { 1 }; // 0=9-7, 1=5-3
@@ -149,10 +161,11 @@ impl J2kEncoder {
             decomposition_levels,
             codeblock_width_exp: self.codeblock_exp,
             codeblock_height_exp: self.codeblock_exp,
-            code_block_style: 0,
+            code_block_style: 0, // Legacy Mode (Part 15 compliant, but standard J2K block coding)
             transformation,
             precinct_sizes: Vec::new(),
         };
+
         writer.write_cod(&cod)?;
 
         // Create QCD marker

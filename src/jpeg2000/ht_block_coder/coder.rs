@@ -10,26 +10,26 @@ pub struct HTBlockCoder<'a> {
     width: usize,
     height: usize,
     stripe_height: usize,
+    num_quads_x: usize,
+    quad_exponents: Vec<u8>,
 }
 
 impl<'a> HTBlockCoder<'a> {
     pub fn new(mel_data: &'a [u8], magsgn_data: &'a [u8], width: usize, height: usize) -> Self {
+        let num_quads_x = (width + 1) / 2;
+        let num_quads_y = (height + 1) / 2;
         Self {
             mel_decoder: MelDecoder::new(mel_data),
             magsgn_decoder: MagSgnDecoder::new(magsgn_data),
             width,
             height,
             stripe_height: 4,
+            num_quads_x,
+            quad_exponents: vec![0; num_quads_x * num_quads_y],
         }
     }
 
     pub fn decode_block(&mut self, block: &mut J2kCodeBlock) -> Result<(), JpeglsError> {
-        // HTJ2K block decoding process (ISO 15444-15)
-        // 1. Initialize decoders (MEL, VLC, MagSgn) - done in new()
-        // 2. Decode passes: Cleanup (HT Clean)
-        // Note: HTJ2K replaces the standard 3 passes with a single "HT Clean" pass
-        // that handles everything via MEL/VLC/MagSgn.
-
         if block.width == 0 {
             block.width = self.width as u32;
         }
@@ -37,157 +37,184 @@ impl<'a> HTBlockCoder<'a> {
             block.height = self.height as u32;
         }
 
-        // Initialize coefficients
         if block.coefficients.len() != (block.width * block.height) as usize {
             block.coefficients = vec![0; (block.width * block.height) as usize];
         }
 
-        // We iterate through "stripes" (4 rows high).
-        // Each stripe contains 2 rows of 2x2 quads.
         for y_stripe in (0..self.height).step_by(self.stripe_height) {
-            // Iterate quad rows within the stripe (0 and 2 offset)
-            for qy_offset in (0..self.stripe_height).step_by(2) {
-                let y = y_stripe + qy_offset;
-                if y >= self.height {
-                    break;
-                }
-
-                // Iterate quads horizontally
-                for x in (0..self.width).step_by(2) {
-                    // Decode quad at (x, y)
-                    self.decode_quad(x, y, block)?;
-                }
+            for x in (0..self.width).step_by(2) {
+                self.decode_quad_pair(x, y_stripe, block)?;
             }
         }
 
         Ok(())
     }
 
-    fn decode_quad(
+    fn decode_quad_pair(
         &mut self,
         x: usize,
         y_base: usize,
         block: &mut J2kCodeBlock,
     ) -> Result<(), JpeglsError> {
-        // Calculate context for MEL
-        // Context depends on significance of neighbors (sigma)
-        let context = self.calculate_context(x, y_base, block);
+        let qx = x / 2;
+        let qy0 = y_base / 2;
+        let qy1 = qy0 + 1;
 
-        // 2. MEL Decoding
-        // Decode significance of the quad (is_significant)
-        // If symbol is 0 -> Run of length 2^k -> insignificant.
-        // If symbol is 1 -> Significant quad.
+        // 1. Decode Rho 0
+        let context0 = self.calculate_context(x, y_base, block);
+        let mut rho0 = 0u8;
+        let mut emb_k0 = 0u8;
 
-        let is_significant = self.mel_decoder.decode();
+        let is_sig0 = if context0 == 0 {
+            self.mel_decoder.decode()
+        } else {
+            true // VLC will tell us if it's actually 0
+        };
 
-        if std::env::var("HTJ2K_DEBUG").is_ok() {
-            eprintln!(
-                "[HTJ2K] Quad ({:2},{:2}): ctx={}, is_sig={}",
-                x, y_base, context, is_significant
-            );
+        if is_sig0 {
+            let peek = self.mel_decoder.peek_bits(16);
+            let (r, _uoff, ek, bits) = vlc::decode_vlc(peek, context0);
+            rho0 = r;
+            emb_k0 = ek;
+            for _ in 0..bits {
+                self.mel_decoder.read_raw_bit();
+            }
         }
 
-        if is_significant {
-            // 3. VLC Decoding
-            let peek = self.mel_decoder.peek_bits(16);
-            let (rho, _u_off, _e_k, bits_consumed) = vlc::decode_vlc(peek, context);
+        // 2. Decode Rho 1
+        let has_q1 = y_base + 2 < self.height;
+        let mut rho1 = 0u8;
+        let mut emb_k1 = 0u8;
 
-            if std::env::var("HTJ2K_DEBUG").is_ok() {
-                eprintln!(
-                    "       VLC: peek={:016b}, rho={:04b}, bits={}",
-                    peek, rho, bits_consumed
-                );
+        if has_q1 {
+            let context1 = (rho0 >> 1) | (rho0 & 1);
+            let is_sig1 = if context1 == 0 {
+                self.mel_decoder.decode()
+            } else {
+                true
+            };
+
+            if is_sig1 {
+                let peek = self.mel_decoder.peek_bits(16);
+                let (r, _uoff, ek, bits) = vlc::decode_vlc(peek, context1);
+                rho1 = r;
+                emb_k1 = ek;
+                for _ in 0..bits {
+                    self.mel_decoder.read_raw_bit();
+                }
             }
+        }
 
-            // Consume the VLC bits
-            for _ in 0..bits_consumed {
-                let _ = self.mel_decoder.read_raw_bit();
+        // 3. Decode UVLC if needed
+        let mut u_q0 = 0u8;
+        let mut u_q1 = 0u8;
+        if is_sig0 || (has_q1 && rho1 != 0) {
+            let peek_uvlc = self.mel_decoder.peek_bits(16);
+            let (uq0, uq1, bits_uvlc) = vlc::decode_uvlc(peek_uvlc, 0);
+            u_q0 = uq0;
+            u_q1 = uq1;
+            for _ in 0..bits_uvlc {
+                self.mel_decoder.read_raw_bit();
             }
+        }
 
-            self.apply_rho(x, y_base, rho, block);
+        // 4. Reconstruction of E_q
+        let kappa0 = self.get_kappa(qx, qy0, if rho0.count_ones() > 1 { 1 } else { 0 });
+        let u0 = kappa0 + u_q0;
+        self.quad_exponents[qy0 * self.num_quads_x + qx] = u0; // Rough E_q estimate
+        
+        self.reconstruct_quad(x, y_base, rho0, u0, emb_k0, block)?;
 
-            self.process_magsgn(x, y_base, rho, block)?;
-        } else {
-            // insignificant quad
+        if has_q1 {
+            let kappa1 = self.get_kappa(qx, qy1, if rho1.count_ones() > 1 { 1 } else { 0 });
+            let u1 = kappa1 + u_q1;
+            self.quad_exponents[qy1 * self.num_quads_x + qx] = u1;
+            self.reconstruct_quad(x, y_base + 2, rho1, u1, emb_k1, block)?;
         }
 
         Ok(())
     }
 
-    fn calculate_context(&self, _x: usize, _y: usize, _block: &J2kCodeBlock) -> u8 {
-        // TODO: Implement actual context calculation based on neighbors.
-        // For now return 0 (initial context).
-        0
+    fn get_kappa(&self, qx: usize, qy: usize, gamma: u8) -> u8 {
+        if gamma == 0 { return 1; }
+        let mut max_e = 0u8;
+        let neighbors = [
+            if qx > 0 && qy > 0 { Some((qx - 1, qy - 1)) } else { None },
+            if qy > 0 { Some((qx, qy - 1)) } else { None },
+            if qx + 1 < self.num_quads_x && qy > 0 { Some((qx + 1, qy - 1)) } else { None },
+            if qx > 0 { Some((qx - 1, qy)) } else { None },
+        ];
+        for neighbor in neighbors.iter().flatten() {
+            let (nx, ny) = *neighbor;
+            max_e = max_e.max(self.quad_exponents[ny * self.num_quads_x + nx]);
+        }
+        max_e.saturating_sub(1).max(1)
     }
 
-    fn apply_rho(&self, x: usize, y: usize, rho: u8, block: &mut J2kCodeBlock) {
-        // rho is 4 bits: (0,0), (1,0), (0,1), (1,1)
-        // LSB corresponds to first in scan
-
-        let w = block.width as usize;
-        let h = block.height as usize;
-        let coeffs = &mut block.coefficients;
-
-        // (0,0)
-        if (rho & 1) != 0 && x < w && y < h {
-            coeffs[y * w + x] = 1; // Mark as significant (placeholder value)
-        }
-        // (1,0)
-        if (rho & 2) != 0 && (x + 1) < w && y < h {
-            coeffs[y * w + (x + 1)] = 1;
-        }
-        // (0,1)
-        if (rho & 4) != 0 && x < w && (y + 1) < h {
-            coeffs[(y + 1) * w + x] = 1;
-        }
-        // (1,1)
-        if (rho & 8) != 0 && (x + 1) < w && (y + 1) < h {
-            coeffs[(y + 1) * w + (x + 1)] = 1;
-        }
-    }
-
-    fn process_magsgn(
+    fn reconstruct_quad(
         &mut self,
         x: usize,
         y: usize,
         rho: u8,
+        u_val: u8,
+        emb_k: u8,
         block: &mut J2kCodeBlock,
     ) -> Result<(), JpeglsError> {
+        if rho == 0 { return Ok(()); }
+
         let w = block.width as usize;
         let h = block.height as usize;
-        let coeffs = &mut block.coefficients;
+        let mut signs = [0i32; 4];
+        
+        // 1. Read signs
+        for i in 0..4 {
+            if (rho & (1 << i)) != 0 {
+                let s = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
+                signs[i] = if s == 1 { -1 } else { 1 };
+            }
+        }
 
-        // Iterate pixels in quad
-        for qy in 0..2 {
-            for qx in 0..2 {
-                let bit_idx = qy * 2 + qx;
-                if (rho & (1 << bit_idx)) != 0 {
-                    let px = x + qx;
-                    let py = y + qy;
-
-                    if px < w && py < h {
-                        // Read Sign
-                        let sign = self
-                            .magsgn_decoder
-                            .read_bit()
-                            .ok_or(JpeglsError::InvalidData)?;
-
-                        // Read Magnitude Refinement
-                        // Placeholder: value is 1 (from apply_rho)
-                        let mut val = 1;
-
-                        // If we need to read more bits (refinement), we do it here.
-                        // For now, apply sign.
-
-                        if sign == 1 {
-                            val = -val;
+        // 2. Read magnitude bits using EMB
+        for i in 0..4 {
+            if (rho & (1 << i)) != 0 {
+                let px = x + (i % 2);
+                let py = y + (i / 2);
+                if px < w && py < h {
+                    let bit_k = (emb_k >> i) & 1;
+                    let e_k = u_val.saturating_sub(bit_k);
+                    
+                    let mut mag = 0u32;
+                    if e_k > 0 {
+                        // Read bits from e_k-1 down to 0
+                        for b in (0..e_k).rev() {
+                            let bit = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
+                            mag |= (bit as u32) << b;
                         }
-
-                        coeffs[py * w + px] = val;
                     }
+                    
+                    block.coefficients[py * w + px] = (mag as i32) * signs[i];
                 }
             }
         }
         Ok(())
+    }
+
+    fn calculate_context(&self, x: usize, y_base: usize, block: &J2kCodeBlock) -> u8 {
+        let width = self.width;
+        let height = self.height;
+        let neighbors = [
+            if x >= 2 { Some((x - 2, y_base)) } else { None },
+            if y_base >= 2 { Some((x, y_base - 2)) } else { None },
+        ];
+        for neighbor in neighbors.iter().flatten() {
+            let (nx, ny) = *neighbor;
+            if nx < width && ny < height {
+                let idx = ny * width + nx;
+                if idx < block.coefficients.len() && block.coefficients[idx] != 0 {
+                    return 1;
+                }
+            }
+        }
+        0
     }
 }

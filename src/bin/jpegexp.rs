@@ -267,9 +267,7 @@ fn encode_image(
         .into());
     }
 
-    let mut dest = Vec::new(); // Will resize inside encoder or here
-
-    match codec {
+    let dest = match codec {
         Codec::Jpeg => {
             if depth > 8 {
                 return Err("JPEG Baseline only supports 8-bit depth".into());
@@ -291,7 +289,7 @@ fn encode_image(
 
             let len = encoder.encode(&pixels, &info, &mut buffer)?;
             buffer.truncate(len);
-            dest = buffer;
+            buffer
         }
         Codec::Jpegls => {
             let mut buffer = vec![0u8; pixels.len() * 2];
@@ -306,7 +304,7 @@ fn encode_image(
             let _ = encoder.set_near_lossless(near_lossless as i32);
             let len = encoder.encode(&pixels)?;
             buffer.truncate(len);
-            dest = buffer;
+            buffer
         }
         Codec::J2k | Codec::Htj2k => {
             let mut buffer = vec![0u8; pixels.len() * 2]; // J2K can expand? usually compresses.
@@ -330,9 +328,9 @@ fn encode_image(
             };
             let len = encoder.encode(&pixels, &info, &mut buffer)?;
             buffer.truncate(len);
-            dest = buffer;
+            buffer
         }
-    }
+    };
 
     fs::write(output, &dest)?;
     println!(
