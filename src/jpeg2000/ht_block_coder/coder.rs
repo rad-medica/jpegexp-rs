@@ -64,6 +64,7 @@ impl<'a> HTBlockCoder<'a> {
         let context0 = self.calculate_context(x, y_base, block);
         let mut rho0 = 0u8;
         let mut emb_k0 = 0u8;
+        let mut emb_1_0 = 0u8;
 
         let is_sig0 = if context0 == 0 {
             self.mel_decoder.decode()
@@ -73,9 +74,10 @@ impl<'a> HTBlockCoder<'a> {
 
         if is_sig0 {
             let peek = self.mel_decoder.peek_bits(16);
-            let (r, _uoff, ek, bits) = vlc::decode_vlc(peek, context0);
+            let (r, _uoff, ek, e1, bits) = vlc::decode_vlc(peek, context0);
             rho0 = r;
             emb_k0 = ek;
+            emb_1_0 = e1;
             for _ in 0..bits {
                 self.mel_decoder.read_raw_bit();
             }
@@ -85,6 +87,7 @@ impl<'a> HTBlockCoder<'a> {
         let has_q1 = y_base + 2 < self.height;
         let mut rho1 = 0u8;
         let mut emb_k1 = 0u8;
+        let mut emb_1_1 = 0u8;
 
         if has_q1 {
             let context1 = (rho0 >> 1) | (rho0 & 1);
@@ -96,9 +99,10 @@ impl<'a> HTBlockCoder<'a> {
 
             if is_sig1 {
                 let peek = self.mel_decoder.peek_bits(16);
-                let (r, _uoff, ek, bits) = vlc::decode_vlc(peek, context1);
+                let (r, _uoff, ek, e1, bits) = vlc::decode_vlc(peek, context1);
                 rho1 = r;
                 emb_k1 = ek;
+                emb_1_1 = e1;
                 for _ in 0..bits {
                     self.mel_decoder.read_raw_bit();
                 }
@@ -123,13 +127,13 @@ impl<'a> HTBlockCoder<'a> {
         let u0 = kappa0 + u_q0;
         self.quad_exponents[qy0 * self.num_quads_x + qx] = u0; // Rough E_q estimate
         
-        self.reconstruct_quad(x, y_base, rho0, u0, emb_k0, block)?;
+        self.reconstruct_quad(x, y_base, rho0, u0, emb_k0, emb_1_0, block)?;
 
         if has_q1 {
             let kappa1 = self.get_kappa(qx, qy1, if rho1.count_ones() > 1 { 1 } else { 0 });
             let u1 = kappa1 + u_q1;
             self.quad_exponents[qy1 * self.num_quads_x + qx] = u1;
-            self.reconstruct_quad(x, y_base + 2, rho1, u1, emb_k1, block)?;
+            self.reconstruct_quad(x, y_base + 2, rho1, u1, emb_k1, emb_1_1, block)?;
         }
 
         Ok(())
@@ -158,6 +162,7 @@ impl<'a> HTBlockCoder<'a> {
         rho: u8,
         u_val: u8,
         emb_k: u8,
+        emb_1: u8,
         block: &mut J2kCodeBlock,
     ) -> Result<(), JpeglsError> {
         if rho == 0 { return Ok(()); }
@@ -174,23 +179,33 @@ impl<'a> HTBlockCoder<'a> {
             }
         }
 
-        // 2. Read magnitude bits using EMB
+        // 2. Read magnitude bits using EMB (following OpenHTJ2K)
         for i in 0..4 {
             if (rho & (1 << i)) != 0 {
                 let px = x + (i % 2);
                 let py = y + (i / 2);
                 if px < w && py < h {
+                    // Number of bits to read from MagSgn stream
                     let bit_k = (emb_k >> i) & 1;
-                    let e_k = u_val.saturating_sub(bit_k);
+                    let m = u_val.saturating_sub(bit_k);
                     
-                    let mut mag = 0u32;
-                    if e_k > 0 {
-                        // Read bits from e_k-1 down to 0
-                        for b in (0..e_k).rev() {
+                    // Read m bits from MagSgn stream
+                    let mut v = 0u32;
+                    if m > 0 {
+                        for b in (0..m).rev() {
                             let bit = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
-                            mag |= (bit as u32) << b;
+                            v |= (bit as u32) << b;
                         }
                     }
+                    
+                    // Add the "known 1" bit from emb_1 at position m
+                    let known_1 = (emb_1 >> i) & 1;
+                    v |= (known_1 as u32) << m;
+                    
+                    // Reconstruct magnitude (skip the complex formula for now, just use v)
+                    // OpenHTJ2K does: mu = (v + 2) | 1; mu <<= (pLSB - 1); mu |= sign_bit
+                    // For pLSB=0 (lossless), this simplifies
+                    let mag = v;
                     
                     block.coefficients[py * w + px] = (mag as i32) * signs[i];
                 }

@@ -61,29 +61,28 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
 /// - `peek`: 16 bits of lookahead from the bitstream.
 /// - `context`: The current context (0 or 1) derived from neighbors.
 ///
-/// Returns: `(rho, u_off, e_k, bits_consumed)`
+/// Returns: `(rho, u_off, e_k, e_1, bits_consumed)`
 /// - `rho`: 4-bit significance pattern (0..15).
 /// - `u_off`: u-value offset (used for magnitude exponent prediction).
-/// - `e_k`: exponent prediction calculation helper? (Actually "emb_k" logic).
+/// - `e_k`: emb_k - embedded magnitude bit indicator per sample.
+/// - `e_1`: emb_1 - "known 1" bit indicator per sample for magnitude reconstruction.
 /// - `bits_consumed`: Number of bits used by the VLC code.
-pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8) {
+pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8, u8) {
     let val = if context == 0 {
         VLC_TABLE_0[(peek >> 6) as usize]
     } else {
         VLC_TABLE_1[(peek >> 6) as usize]
     };
-    // ...
 
     // Unpack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
     let rho = ((val >> 4) & 0xF) as u8;
     let u_off = ((val >> 3) & 0x1) as u8;
+    let e_1 = ((val >> 8) & 0xF) as u8;
     let e_k = ((val >> 12) & 0xF) as u8;
-    // We ignore e_1 for now in the return signature, or assume e_k covers what caller needs.
-    // The caller asks for `e_k`. Standard says `emb_k` calculation uses `E_k`.
 
     let bits_consumed = (val & 0x7) as u8;
 
-    (rho, u_off, e_k, bits_consumed)
+    (rho, u_off, e_k, e_1, bits_consumed)
 }
 
 /// VLC codeword result for encoding
