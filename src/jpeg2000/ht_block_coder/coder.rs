@@ -169,48 +169,65 @@ impl<'a> HTBlockCoder<'a> {
 
         let w = block.width as usize;
         let h = block.height as usize;
-        let mut signs = [0i32; 4];
         
-        // 1. Read signs
+        // HTJ2K magnitude reconstruction (following OpenHTJ2K ht_cleanup_decode)
+        // For each sample in the quad
         for i in 0..4 {
-            if (rho & (1 << i)) != 0 {
-                let s = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
-                signs[i] = if s == 1 { -1 } else { 1 };
+            let sigma = (rho >> i) & 1; // Is this sample significant?
+            if sigma == 0 {
+                continue; // Sample is zero
             }
-        }
-
-        // 2. Read magnitude bits using EMB (following OpenHTJ2K)
-        for i in 0..4 {
-            if (rho & (1 << i)) != 0 {
-                let px = x + (i % 2);
-                let py = y + (i / 2);
-                if px < w && py < h {
-                    // Number of bits to read from MagSgn stream
-                    let bit_k = (emb_k >> i) & 1;
-                    let m = u_val.saturating_sub(bit_k);
-                    
-                    // Read m bits from MagSgn stream
-                    let mut v = 0u32;
-                    if m > 0 {
-                        for b in (0..m).rev() {
-                            let bit = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
-                            v |= (bit as u32) << b;
-                        }
-                    }
-                    
-                    // Add the "known 1" bit from emb_1 at position m
-                    let known_1 = (emb_1 >> i) & 1;
-                    v |= (known_1 as u32) << m;
-                    
-                    // Reconstruct magnitude (skip the complex formula for now, just use v)
-                    // OpenHTJ2K does: mu = (v + 2) | 1; mu <<= (pLSB - 1); mu |= sign_bit
-                    // For pLSB=0 (lossless), this simplifies
-                    let mag = v;
-                    
-                    block.coefficients[py * w + px] = (mag as i32) * signs[i];
-                }
+            
+            let px = x + (i % 2);
+            let py = y + (i / 2);
+            if px >= w || py >= h {
+                continue; // Out of bounds
             }
+            
+            // Calculate m: number of magnitude bits to read from MagSgn stream
+            // m = U - bit_k (where U is u_val calculated earlier)
+            let bit_k = (emb_k >> i) & 1;
+            let m = u_val.saturating_sub(bit_k);
+            
+            // Read m bits from MagSgn stream
+            // Format: [sign_bit, mag_bit_(m-1), ..., mag_bit_0]
+            // Total bits = m + 1 (m magnitude bits + 1 sign bit)
+            let mut ms_val = 0u32;
+            for _ in 0..=m {  // Read m+1 bits (1 sign + m magnitude)
+                let bit = self.magsgn_decoder.read_bit().ok_or(JpeglsError::InvalidData)?;
+                ms_val = (ms_val << 1) | (bit as u32);
+            }
+            
+            // Extract sign (MSB)
+            let sign_bit = (ms_val >> m) & 1;
+            let sign = if sign_bit == 1 { -1i32 } else { 1i32 };
+            
+            // Extract magnitude (lower m bits)
+            let v_n = if m > 0 {
+                ms_val & ((1 << m) - 1)
+            } else {
+                0
+            };
+            
+            // Add emb_1 bit as MSB of v
+            let known_1 = (emb_1 >> i) & 1;
+            let mut v = v_n | ((known_1 as u32) << m);
+            
+            // Reconstruct magnitude (OpenHTJ2K formula for lossless)
+            // v_n |= 1 means add "center of bin"
+            // Then (v_n + 2) and shift by (pLSB - 1)
+            // For lossless (pLSB = 0), shift = -1, which we skip
+            let mu = if m != 0 {
+                v |= 1;  // Add center of bin
+                (v + 2) as i32
+            } else {
+                v as i32
+            };
+            
+            // Apply sign
+            block.coefficients[py * w + px] = mu * sign;
         }
+        
         Ok(())
     }
 
