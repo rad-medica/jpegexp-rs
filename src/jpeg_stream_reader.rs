@@ -338,8 +338,8 @@ impl<'a> JpegStreamReader<'a> {
         }
 
         let mut identifier = [0u8; 6];
-        for i in 0..6 {
-            identifier[i] = self.read_u8()?;
+        for item in &mut identifier {
+            *item = self.read_u8()?;
         }
 
         if identifier != [b'S', b'P', b'I', b'F', b'F', 0] {

@@ -5,6 +5,14 @@ use crate::jpeg1::huffman::{HuffmanEncoder, JpegBitReader};
 use crate::jpeg1::quantization::dequantize_block_u16;
 use crate::jpeg_stream_reader::JpegStreamReader;
 
+/// Parameters for progressive AC decoding
+struct AcProgressiveParams {
+    ss: u8,
+    se: u8,
+    ah: u8,
+    al: u8,
+}
+
 pub struct Jpeg1Decoder<'a> {
     reader: JpegStreamReader<'a>,
 }
@@ -153,13 +161,11 @@ impl<'a> Jpeg1Decoder<'a> {
                                                     comp_idx,
                                                 )?;
                                             } else {
+                                                let params = AcProgressiveParams { ss, se, ah, al };
                                                 self.decode_ac_progressive(
                                                     &mut bit_reader,
                                                     target_block,
-                                                    ss,
-                                                    se,
-                                                    ah,
-                                                    al,
+                                                    &params,
                                                     &mut eob_runs[comp_idx],
                                                     comp_idx,
                                                 )?;
@@ -218,13 +224,11 @@ impl<'a> Jpeg1Decoder<'a> {
                                         comp_idx,
                                     )?;
                                 } else {
+                                    let params = AcProgressiveParams { ss, se, ah, al };
                                     self.decode_ac_progressive(
                                         &mut bit_reader,
                                         target_block,
-                                        ss,
-                                        se,
-                                        ah,
-                                        al,
+                                        &params,
                                         &mut eob_runs[comp_idx],
                                         comp_idx,
                                     )?;
@@ -247,7 +251,7 @@ impl<'a> Jpeg1Decoder<'a> {
         }
 
         let mut component_buffers_f32 = Vec::new();
-        for c in 0..components_count {
+        for (c, coeff_buf) in coefficient_buffers.iter().enumerate().take(components_count) {
             let comp = &self.reader.components[c];
             let h_samp = comp.h_samp_factor as usize;
             let v_samp = comp.v_samp_factor as usize;
@@ -260,10 +264,10 @@ impl<'a> Jpeg1Decoder<'a> {
             let mut comp_buffer = vec![0.0f32; comp_blocks_w * comp_blocks_h * 64];
             for b in 0..(comp_blocks_w * comp_blocks_h) {
                 let block_offset = b * 64;
-                if block_offset + 64 <= coefficient_buffers[c].len() {
+                if block_offset + 64 <= coeff_buf.len() {
                     let mut block_data = [0i16; 64];
                     block_data
-                        .copy_from_slice(&coefficient_buffers[c][block_offset..block_offset + 64]);
+                        .copy_from_slice(&coeff_buf[block_offset..block_offset + 64]);
                     let mut dequant_coeffs = [0.0f32; 64];
                     dequantize_block_u16(&block_data, quant_table, &mut dequant_coeffs);
                     let mut idct_out = [0.0f32; 64];
@@ -462,13 +466,11 @@ impl<'a> Jpeg1Decoder<'a> {
                                                     comp_idx,
                                                 )?;
                                             } else {
+                                                let params = AcProgressiveParams { ss, se, ah, al };
                                                 self.decode_ac_progressive(
                                                     &mut bit_reader,
                                                     target_block,
-                                                    ss,
-                                                    se,
-                                                    ah,
-                                                    al,
+                                                    &params,
                                                     &mut eob_runs[comp_idx],
                                                     comp_idx,
                                                 )?;
@@ -526,13 +528,11 @@ impl<'a> Jpeg1Decoder<'a> {
                                         comp_idx,
                                     )?;
                                 } else {
+                                    let params = AcProgressiveParams { ss, se, ah, al };
                                     self.decode_ac_progressive(
                                         &mut bit_reader,
                                         target_block,
-                                        ss,
-                                        se,
-                                        ah,
-                                        al,
+                                        &params,
                                         &mut eob_runs[comp_idx],
                                         comp_idx,
                                     )?;
@@ -555,7 +555,7 @@ impl<'a> Jpeg1Decoder<'a> {
         }
 
         let mut component_buffers_f32 = Vec::new();
-        for c in 0..components_count {
+        for (c, coeff_buf) in coefficient_buffers.iter().enumerate().take(components_count) {
             let comp = &self.reader.components[c];
             let h_samp = comp.h_samp_factor as usize;
             let v_samp = comp.v_samp_factor as usize;
@@ -568,10 +568,10 @@ impl<'a> Jpeg1Decoder<'a> {
             let mut comp_buffer = vec![0.0f32; comp_blocks_w * comp_blocks_h * 64];
             for b in 0..(comp_blocks_w * comp_blocks_h) {
                 let block_offset = b * 64;
-                if block_offset + 64 <= coefficient_buffers[c].len() {
+                if block_offset + 64 <= coeff_buf.len() {
                     let mut block_data = [0i16; 64];
                     block_data
-                        .copy_from_slice(&coefficient_buffers[c][block_offset..block_offset + 64]);
+                        .copy_from_slice(&coeff_buf[block_offset..block_offset + 64]);
                     let mut dequant_coeffs = [0.0f32; 64];
                     dequantize_block_u16(&block_data, quant_table, &mut dequant_coeffs);
                     let mut idct_out = [0.0f32; 64];
@@ -723,10 +723,7 @@ impl<'a> Jpeg1Decoder<'a> {
         &self,
         bit_reader: &mut JpegBitReader,
         block: &mut [i16],
-        ss: u8,
-        se: u8,
-        ah: u8,
-        al: u8,
+        params: &AcProgressiveParams,
         eob_run: &mut u16,
         comp_idx: usize,
     ) -> Result<(), JpeglsError> {
@@ -735,24 +732,24 @@ impl<'a> Jpeg1Decoder<'a> {
             .as_ref()
             .ok_or(JpeglsError::InvalidData)?;
 
-        if ah == 0 {
+        if params.ah == 0 {
             if *eob_run > 0 {
                 *eob_run -= 1;
                 return Ok(());
             }
-            let mut k = ss as usize;
-            while k <= se as usize {
+            let mut k = params.ss as usize;
+            while k <= params.se as usize {
                 let symbol = ac_table.decode(bit_reader)?;
                 let run = (symbol >> 4) as usize;
                 let cat = symbol & 0x0F;
                 if cat > 0 {
                     k += run;
-                    if k > se as usize {
+                    if k > params.se as usize {
                         break;
                     }
                     let bits = bit_reader.read_bits(cat)?;
                     let val = HuffmanEncoder::decode_value_bits(bits, cat);
-                    block[crate::jpeg1::encoder::ZIGZAG_ORDER[k]] = val << al;
+                    block[crate::jpeg1::encoder::ZIGZAG_ORDER[k]] = val << params.al;
                     k += 1;
                 } else if run < 15 {
                     let extra = bit_reader.read_bits(run as u8)?;
@@ -763,15 +760,15 @@ impl<'a> Jpeg1Decoder<'a> {
                 }
             }
         } else {
-            let mut k = ss as usize;
+            let mut k = params.ss as usize;
             if *eob_run > 0 {
-                while k <= se as usize {
+                while k <= params.se as usize {
                     let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
                     if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
                         if block[idx] > 0 {
-                            block[idx] += 1 << al;
+                            block[idx] += 1 << params.al;
                         } else {
-                            block[idx] -= 1 << al;
+                            block[idx] -= 1 << params.al;
                         }
                     }
                     k += 1;
@@ -780,21 +777,21 @@ impl<'a> Jpeg1Decoder<'a> {
                 return Ok(());
             }
 
-            while k <= se as usize {
+            while k <= params.se as usize {
                 let symbol = ac_table.decode(bit_reader)?;
                 let run = (symbol >> 4) as usize;
                 let cat = symbol & 0x0F;
 
                 if cat > 0 {
                     let mut r = run;
-                    while k <= se as usize {
+                    while k <= params.se as usize {
                         let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
                         if block[idx] != 0 {
                             if bit_reader.read_bits(1)? != 0 {
                                 if block[idx] > 0 {
-                                    block[idx] += 1 << al;
+                                    block[idx] += 1 << params.al;
                                 } else {
-                                    block[idx] -= 1 << al;
+                                    block[idx] -= 1 << params.al;
                                 }
                             }
                         } else {
@@ -805,22 +802,22 @@ impl<'a> Jpeg1Decoder<'a> {
                         }
                         k += 1;
                     }
-                    if k <= se as usize {
+                    if k <= params.se as usize {
                         let bits = bit_reader.read_bits(1)?;
                         let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
-                        block[idx] = if bits != 0 { 1 << al } else { -(1 << al) };
+                        block[idx] = if bits != 0 { 1 << params.al } else { -(1 << params.al) };
                         k += 1;
                     }
                 } else if run < 15 {
                     let extra = bit_reader.read_bits(run as u8)?;
                     *eob_run = (1 << run) + extra;
-                    while k <= se as usize {
+                    while k <= params.se as usize {
                         let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
                         if block[idx] != 0 && bit_reader.read_bits(1)? != 0 {
                             if block[idx] > 0 {
-                                block[idx] += 1 << al;
+                                block[idx] += 1 << params.al;
                             } else {
-                                block[idx] -= 1 << al;
+                                block[idx] -= 1 << params.al;
                             }
                         }
                         k += 1;
@@ -829,14 +826,14 @@ impl<'a> Jpeg1Decoder<'a> {
                     break;
                 } else {
                     let mut r = 16;
-                    while k <= se as usize && r > 0 {
+                    while k <= params.se as usize && r > 0 {
                         let idx = crate::jpeg1::encoder::ZIGZAG_ORDER[k];
                         if block[idx] != 0 {
                             if bit_reader.read_bits(1)? != 0 {
                                 if block[idx] > 0 {
-                                    block[idx] += 1 << al;
+                                    block[idx] += 1 << params.al;
                                 } else {
-                                    block[idx] -= 1 << al;
+                                    block[idx] -= 1 << params.al;
                                 }
                             }
                         } else {

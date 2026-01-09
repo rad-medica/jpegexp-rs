@@ -269,7 +269,7 @@ fn test_16bit_signed_lossless() {
     let max = *signed_pixels.iter().max().unwrap();
     println!("Signed pixel range: {} to {}", min, max);
     assert!(min >= -32768 && min <= -32000, "Min should be near -32768");
-    assert!(max >= 32000 && max <= 32767, "Max should be near 32767");
+    assert!(max >= 32000 && max < i16::MAX, "Max should be near 32767");
     
     // Convert signed to unsigned for encoding
     let unsigned_pixels = signed_to_unsigned(&signed_pixels, 16);

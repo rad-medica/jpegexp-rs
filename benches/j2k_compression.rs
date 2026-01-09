@@ -39,7 +39,7 @@ fn generate_test_image(width: usize, height: usize, pattern: &str) -> Vec<u8> {
                     let idx = y * width + x;
                     let fx = x as f32 / width as f32;
                     let fy = y as f32 / height as f32;
-                    let value = (128.0 + 64.0 * (fx * 6.28).sin() + 64.0 * (fy * 6.28).cos()) as u8;
+                    let value = (128.0 + 64.0 * (fx * std::f32::consts::TAU).sin() + 64.0 * (fy * std::f32::consts::TAU).cos()) as u8;
                     pixels[idx] = value;
                 }
             }

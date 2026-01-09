@@ -240,7 +240,7 @@ impl<'a> JpegStreamWriter<'a> {
         interleave_mode: InterleaveMode,
     ) -> Result<(), JpeglsError> {
         self.write_marker(JpegMarkerCode::StartOfScan)?;
-        let length = 2 + 1 + (1 * 2) + 3; // 1 component
+        let length = 2 + 1 + 2 + 3; // 1 component
         self.write_u16(length as u16)?;
 
         self.write_byte(1)?; // 1 component
