@@ -151,11 +151,13 @@ pub struct HTBlockEncoder {
     stripe_height: usize,
     num_quads_x: usize,
     quad_exponents: Vec<u8>, // Max exponent E_q for each quad
+    quad_significance: Vec<bool>, // Track significance (rho != 0) of each quad
 }
 
 impl HTBlockEncoder {
     pub fn new(width: usize, height: usize) -> Self {
         let num_quads_x = (width + 1) / 2;
+        let num_quads_y = (height + 1) / 2;
         Self {
             mel_encoder: MelEncoder::new(),
             magsgn_encoder: MagSgnEncoder::new(),
@@ -163,7 +165,8 @@ impl HTBlockEncoder {
             height,
             stripe_height: 4,
             num_quads_x,
-            quad_exponents: vec![0; num_quads_x * ((height + 1) / 2)],
+            quad_exponents: vec![0; num_quads_x * num_quads_y],
+            quad_significance: vec![false; num_quads_x * num_quads_y],
         }
     }
 
@@ -326,9 +329,20 @@ impl HTBlockEncoder {
         for i in (0..vlc0.bits).rev() {
             self.write_vlc_bit(((vlc0.value >> i) & 1) as u8);
         }
+        
+        // Update significance state for Quad 0
+        self.quad_significance[qy0 * self.num_quads_x + qx] = rho0 != 0;
 
         // Context for Quad 1
-        let context1 = if rho0 != 0 { 1 } else { 0 };
+        // sigma_n: North neighbor of Q1 -> This is Q0
+        let sigma_n = rho0 != 0;
+        // sigma_w: West neighbor of Q1 -> Quad at (qx-1, qy1)
+        let sigma_w = if qx > 0 {
+            self.quad_significance[qy1 * self.num_quads_x + (qx - 1)]
+        } else {
+            false
+        };
+        let context1 = if sigma_n || sigma_w { 1 } else { 0 };
         
         if has_q1 {
             // 3. MEL encoding Quad 1
@@ -341,6 +355,9 @@ impl HTBlockEncoder {
             for i in (0..vlc1.bits).rev() {
                 self.write_vlc_bit(((vlc1.value >> i) & 1) as u8);
             }
+            
+            // Update significance state for Quad 1
+            self.quad_significance[qy1 * self.num_quads_x + qx] = rho1 != 0;
 
             // 5. UVLC encoding
             // u_q encoded is u_q - u_off
@@ -461,37 +478,33 @@ impl HTBlockEncoder {
         }
     }
 
-    fn calculate_context(&self, x: usize, y_base: usize, block: &J2kCodeBlock) -> u8 {
-        // Context based on neighbor significance
-        // Must check ALL 4 pixels of the neighbor quad to match Decoder's rho!=0 check
-        let width = self.width;
-        let height = self.height;
-
-        // Neighbor quads: Left (x-2) and Top (y-2)
-        // We need to check (nx, ny), (nx+1, ny), (nx, ny+1), (nx+1, ny+1)
+    fn calculate_context(&self, x: usize, y_base: usize, _block: &J2kCodeBlock) -> u8 {
+        // Context is 1 if at least one of the two previously encoded quads is significant.
+        // Neighbors: Left (x-2, y) and Top (x, y-2)
+        // In Quad coords: (qx-1, qy) and (qx, qy-1)
         
-        let neighbor_origins = [
-            if x >= 2 { Some((x - 2, y_base)) } else { None }, // Left Quad Origin
-            if y_base >= 2 { Some((x, y_base - 2)) } else { None }, // Top Quad Origin
-        ];
-
-        for origin in neighbor_origins.iter().flatten() {
-            let (ox, oy) = *origin;
-            // Check 2x2 block at ox, oy
-            for dy in 0..2 {
-                for dx in 0..2 {
-                    let nx = ox + dx;
-                    let ny = oy + dy;
-                    if nx < width && ny < height {
-                        let idx = ny * width + nx;
-                        if idx < block.coefficients.len() && block.coefficients[idx] != 0 {
-                            return 1; // Found significant pixel in neighbor quad
-                        }
-                    }
-                }
+        let qx = x / 2;
+        let qy = y_base / 2;
+        
+        let mut context = 0;
+        
+        // Check Left Neighbor (qx-1, qy)
+        if qx > 0 {
+            let idx = qy * self.num_quads_x + (qx - 1);
+            if idx < self.quad_significance.len() && self.quad_significance[idx] {
+                context |= 1;
             }
         }
-        0
+        
+        // Check Top Neighbor (qx, qy-1)
+        if qy > 0 {
+            let idx = (qy - 1) * self.num_quads_x + qx;
+            if idx < self.quad_significance.len() && self.quad_significance[idx] {
+                context |= 1;
+            }
+        }
+        
+        context
     }
 }
 
