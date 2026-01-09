@@ -345,6 +345,10 @@ impl HTBlockEncoder {
             // 5. UVLC encoding
             // u_q encoded is u_q - u_off
             let uvlc = vlc::encode_uvlc(u_q0.saturating_sub(u_off0), u_q1.saturating_sub(u_off1), 0);
+            if qx == 0 && qy0 == 0 {
+                eprintln!("ENC Q(0,0): UVLC (2quad) uq0={} uq1={} value={:04X} bits={}", 
+                          u_q0.saturating_sub(u_off0), u_q1.saturating_sub(u_off1), uvlc.value, uvlc.bits);
+            }
             for i in (0..uvlc.bits).rev() {
                 self.write_vlc_bit(((uvlc.value >> i) & 1) as u8);
             }
@@ -356,8 +360,9 @@ impl HTBlockEncoder {
             // Only Quad 0 UVLC
             let uvlc = vlc::encode_uvlc(u_q0.saturating_sub(u_off0), 0, 0);
             
-            if qx == 0 && qy0 == 0 && self.width == 2 {
-                eprintln!("ENC Q(0,0): UVLC value={:04X} bits={}", uvlc.value, uvlc.bits);
+            if qx == 0 && qy0 == 0 {
+                eprintln!("ENC Q(0,0): UVLC (1quad) uq0={} value={:04X} bits={}", 
+                          u_q0.saturating_sub(u_off0), uvlc.value, uvlc.bits);
             }
             
             for i in (0..uvlc.bits).rev() {
