@@ -193,6 +193,10 @@ name = "test_simple_j2k"
 path = "tests/unit/test_simple_j2k.rs"
 
 [[test]]
+name = "test_vlc_roundtrip"
+path = "tests/unit/test_vlc_roundtrip.rs"
+
+[[test]]
 name = "master_interop"
 path = "tests/interop/master_interop.rs"
 
@@ -216,6 +220,7 @@ thiserror = "2.0.17"
 clap = { version = "4.4", features = ["derive"] }
 
 [dev-dependencies]
+criterion = "0.8.1"
 hex = "0.4"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

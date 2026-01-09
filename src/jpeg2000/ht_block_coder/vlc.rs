@@ -8,46 +8,46 @@ const VLC_TABLE_1: [u16; TABLE_SIZE] = generate_vlc_table(VLC_TBL1_SRC);
 
 const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABLE_SIZE] {
     let mut table = [0u16; TABLE_SIZE];
-    let mut i = 0;
-    while i < TABLE_SIZE {
-        let cwd = (i as u16) & 0x7F;
-        let c_q = (i as u8) >> 7;
-
-        let mut j = 0;
-        let mut found = false;
-        while j < src.len() {
-            let entry = src[j];
-            let s_cq = entry.0;
-            if s_cq == c_q {
-                let s_cwd = entry.5;
-                let s_len = entry.6;
-                // Mask the lookahead `cwd` with the length of the table entry `cwd_len`
-                let mask = (1 << s_len) - 1;
-                if s_cwd == (cwd & mask) {
-                    // Match found
-                    // Format: c_q, rho, u_off, e_k, e_1, cwd, len
-                    let rho = entry.1 as u16;
-                    let u_off = entry.2 as u16;
-                    let e_k = entry.3 as u16;
-                    let e_1 = entry.4 as u16;
-                    let len = entry.6 as u16;
-
-                    // Pack: e_k(4) | e_1(4) | rho(4) | u_off(1) | len(3)
-                    // e_k: bits 12-15
-                    // e_1: bits 8-11
-                    // rho: bits 4-7
-                    // u_off: bit 3
-                    // len: bits 0-2
-                    table[i] = (e_k << 12) | (e_1 << 8) | (rho << 4) | (u_off << 3) | len;
-                    found = true;
+    
+    // Process each VLC entry and populate all matching table indices
+    let mut j = 0;
+    while j < src.len() {
+        let entry = src[j];
+        let s_cq = entry.0;      // Context prefix (3 bits)
+        let rho = entry.1 as u16;
+        let u_off = entry.2 as u16;
+        let e_k = entry.3 as u16;
+        let e_1 = entry.4 as u16;
+        let s_cwd = entry.5;     // Codeword suffix
+        let s_len = entry.6;     // Suffix length
+        
+        // Pack the decoded values once
+        // Pack: e_k(4) | e_1(4) | rho(4) | u_off(1) | suffix_len(3)
+        let packed = (e_k << 12) | (e_1 << 8) | (rho << 4) | (u_off << 3) | (s_len as u16);
+        
+        // For variable-length codes, populate all indices that match the prefix
+        // Index format: c_q (bits 7-9) | cwd_prefix (bits 0-6)
+        // For a code of length s_len, we need to set all entries where the top s_len bits
+        // of the 7-bit cwd field match s_cwd
+        if s_len <= 7 {
+            let base_idx = ((s_cq as usize) << 7) | ((s_cwd as usize) << (7 - s_len));
+            let num_indices = 1usize << (7 - s_len); // 2^(7 - s_len) indices
+            
+            let mut k = 0;
+            while k < num_indices {
+                let idx = base_idx | k;
+                if idx < TABLE_SIZE {
+                    // Only overwrite if empty or this entry is longer (more specific)
+                    let existing = table[idx];
+                    let existing_suffix_len = (existing & 0x7) as u8;
+                    if existing == 0 || s_len > existing_suffix_len {
+                        table[idx] = packed;
+                    }
                 }
+                k += 1;
             }
-            if found {
-                break;
-            }
-            j += 1;
         }
-        i += 1;
+        j += 1;
     }
     table
 }
@@ -57,16 +57,8 @@ const fn generate_vlc_table(src: &[(u8, u8, u8, u8, u8, u16, u8)]) -> [u16; TABL
 /// Decodes a VLC code word into a 4-pixel quad significance pattern (rho),
 /// an embedded context (emb_k) correction, and context for the next quad.
 ///
-/// Arguments:
-/// - `peek`: 16 bits of lookahead from the bitstream.
-/// - `context`: The current context (0 or 1) derived from neighbors.
-///
 /// Returns: `(rho, u_off, e_k, e_1, bits_consumed)`
-/// - `rho`: 4-bit significance pattern (0..15).
-/// - `u_off`: u-value offset (used for magnitude exponent prediction).
-/// - `e_k`: emb_k - embedded magnitude bit indicator per sample.
-/// - `e_1`: emb_1 - "known 1" bit indicator per sample for magnitude reconstruction.
-/// - `bits_consumed`: Number of bits used by the VLC code.
+/// - `bits_consumed`: Total bits used (3 bits for c_q + suffix length).
 pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8, u8) {
     let val = if context == 0 {
         VLC_TABLE_0[(peek >> 6) as usize]
@@ -80,7 +72,9 @@ pub fn decode_vlc(peek: u16, context: u8) -> (u8, u8, u8, u8, u8) {
     let e_1 = ((val >> 8) & 0xF) as u8;
     let e_k = ((val >> 12) & 0xF) as u8;
 
-    let bits_consumed = (val & 0x7) as u8;
+    let suffix_len = (val & 0x7) as u8;
+    // Total bits = 3 (c_q) + suffix_len
+    let bits_consumed = 3 + suffix_len;
 
     (rho, u_off, e_k, e_1, bits_consumed)
 }
@@ -93,48 +87,67 @@ pub struct VlcCodeword {
 
 /// Encode a significance pattern (rho) to a VLC codeword
 /// This is the inverse of decode_vlc
-pub fn encode_vlc(rho: u8, context: u8, u_off: u8) -> (VlcCodeword, u8, u8) {
+/// 
+/// # Parameters
+/// - `rho`: Significance pattern for 4 samples (4 bits)
+/// - `context`: Context (0 or 1)
+/// - `u_off`: U-offset flag (0 or 1)
+/// - `emb_k`: Embedded MSB bits (4 bits, calculated from coefficient magnitudes)
+/// - `emb_1`: Embedded second-MSB bits (4 bits, calculated from coefficient magnitudes)
+/// 
+/// # Returns
+/// VlcCodeword containing the encoded value and bit count
+pub fn encode_vlc(rho: u8, context: u8, u_off: u8, emb_k: u8, emb_1: u8) -> VlcCodeword {
     let src = if context == 0 {
         VLC_TBL0_SRC
     } else {
         VLC_TBL1_SRC
     };
 
-    // Linear search for matching rho and u_off
-    // Note: c_q is implicit in table selection (0 or 1), but source tables include c_q column.
-    // We can ignore column 0 if we select the table correctly.
+    // First try: exact match on all fields
     for &entry in src {
-        // Entry: (c_q, rho, u_off, e_k, e_1, cwd, cwd_len)
-        if entry.1 == rho && entry.2 == u_off {
-            let e_k = entry.3;
-            let e_1 = entry.4;
-            let cwd = entry.5;
-            let len = entry.6;
+        // Entry: (c_q, rho, u_off, e_k, e_1, cwd_suffix, suffix_len)
+        if entry.1 == rho && entry.2 == u_off && entry.3 == emb_k && entry.4 == emb_1 {
+            let c_q = entry.0 as u16;
+            let cwd_suffix = entry.5;
+            let suffix_len = entry.6;
 
-            return (
-                VlcCodeword {
-                    value: cwd,
-                    bits: len,
-                },
-                e_k,
-                e_1,
-            );
+            // Combine c_q (3 bits) and cwd_suffix (suffix_len bits)
+            let value = (c_q << suffix_len) | cwd_suffix;
+            let total_bits = 3 + suffix_len;
+
+            return VlcCodeword {
+                value,
+                bits: total_bits,
+            };
         }
     }
 
-    // Should not happen for valid inputs (rho 0..15)
-    // If rho=0, we shouldn't be calling VLC encode (MEL handles it)
-    // But table has entry for rho=0? (0, 0x0, ...) No, starts with 0x1.
-    // Wait, Table 1 has (2, 0x0...)?
-    // The source table format is:
-    // (c_q, rho, u_off, e_k, e_1, cwd, len)
-    // Looking at TBL0_SRC:
-    // (0, 0x1, ...) -> rho=1
-    // Does it handle rho=0? No.
-    // If rho=0, quad is insignificant, handled by MEL '0'.
-    // If rho!=0, quad is significant, handled by MEL '1' + VLC.
+    // Second try: match on (rho, u_off, e_k) and take first entry
+    // This handles cases where the exact emb_1 pattern isn't in the table
+    for &entry in src {
+        if entry.1 == rho && entry.2 == u_off && entry.3 == emb_k {
+            let c_q = entry.0 as u16;
+            let cwd_suffix = entry.5;
+            let suffix_len = entry.6;
 
-    (VlcCodeword { value: 0, bits: 0 }, 0, 0)
+            let value = (c_q << suffix_len) | cwd_suffix;
+            let total_bits = 3 + suffix_len;
+
+            eprintln!("WARNING: encode_vlc using partial match for rho={:04b} u_off={} emb_k={:04b} emb_1={:04b} (using e_1={:04b})", 
+                      rho, u_off, emb_k, emb_1, entry.4);
+
+            return VlcCodeword {
+                value,
+                bits: total_bits,
+            };
+        }
+    }
+
+    // Fallback/Error case (should not happen for valid inputs)
+    eprintln!("ERROR: encode_vlc failed to find any match for rho={:04b} u_off={} emb_k={:04b} emb_1={:04b} context={}", 
+              rho, u_off, emb_k, emb_1, context);
+    VlcCodeword { value: 0, bits: 0 }
 }
 
 /// Encode magnitude residuals (u_q) for a pair of quads using UVLC

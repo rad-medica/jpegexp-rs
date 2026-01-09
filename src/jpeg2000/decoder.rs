@@ -692,7 +692,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 subband.height = sb_h as u32;
 
                 // Calculate codeblock dimensions (Common logic)
-                let cod = parser.image.cod.as_ref().unwrap();
+                let cod = parser.image.cod.as_ref().ok_or(JpeglsError::InvalidData)?;
                 let nom_w = 1 << (cod.codeblock_width_exp + 2);
                 let nom_h = 1 << (cod.codeblock_height_exp + 2);
 
@@ -750,6 +750,15 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                     block.coefficients.len()
                                 );
                             }
+                            
+                            // Apply zero_bp shift (ISO 15444-15 6.1)
+                            // The decoded values are M_q. Final coefficients are M_q * 2^Z_bp.
+                            let zero_bp = cb_info.zero_bp;
+                            if zero_bp > 0 {
+                                for c in &mut block.coefficients {
+                                    *c <<= zero_bp;
+                                }
+                            }
                         }
                         Err(_) => {
                             if std::env::var("HTJ2K_DEBUG").is_ok() {
@@ -767,7 +776,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                     // Determine max_bit_plane
                     // Epsilon_b (base step size exponent)
-                    let qcd = parser.image.qcd.as_ref().unwrap();
+                    let qcd = parser.image.qcd.as_ref().ok_or(JpeglsError::InvalidData)?;
                     let qcd_idx = if res == 0 {
                         0
                     } else {

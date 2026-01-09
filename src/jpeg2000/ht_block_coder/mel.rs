@@ -31,20 +31,18 @@ impl<'a> MelDecoder<'a> {
             }
 
             self.pos -= 1;
-            let mut byte = self.data[self.pos];
+            let byte = self.data[self.pos];
 
-            // Handle 0xFF stuffing (backward reading)
-            // If we encounter 0x00 and the *next* byte (lower address) is 0xFF,
-            // then this 0x00 is a stuffing byte and should be skipped.
-            // The byte to return is the 0xFF.
-            if self.pos > 0 && byte == 0x00 && self.data[self.pos - 1] == 0xFF {
-                // Skip the stuffing byte 0x00
-                self.pos -= 1;
-                byte = 0xFF;
+            // Bit Stuffing Logic (HTJ2K / ISO 15444-1)
+            // If the *next* byte (lower address, since we read backward) is 0xFF,
+            // then the current byte has a stuffed MSB (0) and only 7 data bits.
+            // Note: In standard J2K, 0xFF is followed by 0x00..0x8F. The MSB of that following byte is 0.
+            if self.pos > 0 && self.data[self.pos - 1] == 0xFF {
+                self.bits_left = 7;
+            } else {
+                self.bits_left = 8;
             }
-
             self.bits_buffer = byte;
-            self.bits_left = 8;
         }
 
         let bit = (self.bits_buffer >> (self.bits_left - 1)) & 1;
@@ -72,18 +70,16 @@ impl<'a> MelDecoder<'a> {
                 }
 
                 // Read backward logic (match read_raw_bit)
-                let mut next_read_pos = temp_pos - 1;
+                let next_read_pos = temp_pos - 1;
                 temp_buffer = self.data[next_read_pos];
 
-                // Stuffing check
-                if next_read_pos > 0 && temp_buffer == 0x00 && self.data[next_read_pos - 1] == 0xFF
-                {
-                    next_read_pos -= 1;
-                    temp_buffer = 0xFF;
+                if next_read_pos > 0 && self.data[next_read_pos - 1] == 0xFF {
+                    temp_left = 7;
+                } else {
+                    temp_left = 8;
                 }
 
                 temp_pos = next_read_pos;
-                temp_left = 8;
             }
             let bit = (temp_buffer >> (temp_left - 1)) & 1;
             peek_value = (peek_value << 1) | (bit as u16);

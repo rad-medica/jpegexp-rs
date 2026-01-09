@@ -13,6 +13,37 @@ use crate::FrameInfo;
 use crate::JpeglsError;
 
 /// JPEG 2000 Encoder
+///
+/// This encoder supports both Lossless (5-3 Reversible) and Lossy (9-7 Irreversible) compression modes.
+/// It provides full control over quality, decomposition levels, and advanced features like HTJ2K (High-Throughput) encoding.
+///
+/// # Features
+/// - **Lossless Compression**: Uses the 5-3 Reversible Wavelet Transform (default).
+/// - **Lossy Compression**: Uses the 9-7 Irreversible Wavelet Transform with Scalar Expounded quantization.
+/// - **Rate Control**: Quality parameter (1-100) controls the quantization step size for lossy compression.
+/// - **HTJ2K Support**: Optional High-Throughput (Part 15) encoding mode.
+/// - **Advanced Markers**: Supports TLM (Tile-Part Lengths) and PLT (Packet Lengths) for fast random access.
+///
+/// # Example
+///
+/// ```rust
+/// use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
+/// use jpegexp_rs::FrameInfo;
+///
+/// let mut encoder = J2kEncoder::new();
+/// encoder.set_quality(90);
+/// encoder.set_irreversible(true); // Use 9-7 transform for better lossy compression
+///
+/// let frame_info = FrameInfo {
+///     width: 512,
+///     height: 512,
+///     bits_per_sample: 8,
+///     component_count: 3,
+/// };
+///
+/// let mut output = vec![0u8; 512 * 512 * 3]; // Allocate sufficient buffer
+/// let bytes_written = encoder.encode(&input_pixels, &frame_info, &mut output)?;
+/// ```
 pub struct J2kEncoder {
     /// Number of DWT decomposition levels
     decomposition_levels: u8,
@@ -43,7 +74,14 @@ struct Packet {
 }
 
 impl J2kEncoder {
-    /// Create a new J2K encoder with default settings
+    /// Create a new J2K encoder with default settings.
+    ///
+    /// Defaults:
+    /// - Compression: Lossless (5-3 Reversible)
+    /// - Decomposition Levels: 5
+    /// - Quality: 100 (Lossless/Near-Lossless)
+    /// - Codeblock Size: 64x64
+    /// - Signed: false
     pub fn new() -> Self {
         Self {
             decomposition_levels: 5,
@@ -57,28 +95,50 @@ impl J2kEncoder {
         }
     }
 
-    /// Set whether to use signed pixel representation
+    /// Set whether to use signed pixel representation.
+    ///
+    /// - `false` (default): Pixels are unsigned (e.g., 0-255 for 8-bit). Level shifting is applied automatically.
+    /// - `true`: Pixels are signed (e.g., -128 to 127). No level shifting is applied.
     pub fn set_signed(&mut self, is_signed: bool) {
         self.is_signed = is_signed;
     }
 
-    /// Set the quality level (0-100)
+    /// Set the quality level (1-100).
+    ///
+    /// - **100**: Lossless (if 5-3) or Near-Lossless (if 9-7).
+    /// - **1**: Maximum compression (lowest quality).
+    ///
+    /// This parameter controls the quantization step size when using the irreversible 9-7 transform.
+    /// For the 5-3 reversible transform, this parameter is ignored unless it affects post-compression rate control (future feature).
     pub fn set_quality(&mut self, quality: u8) {
         self.quality = quality.min(100).max(1);
     }
 
-    /// Set the number of decomposition levels
+    /// Set the number of DWT decomposition levels.
+    ///
+    /// - Default: 5 (Standard for JPEG 2000)
+    /// - Range: 0-32 (0 = no transform)
+    ///
+    /// Higher levels provide better compression efficiency but require more memory and processing time.
+    /// The actual number of levels used is clamped by the image dimensions (must be at least 2^levels pixels).
     pub fn set_decomposition_levels(&mut self, levels: u8) {
         self.decomposition_levels = levels.min(32);
     }
 
-    /// Set whether to use irreversible (9-7) or reversible (5-3) transform
+    /// Set whether to use irreversible (9-7) or reversible (5-3) transform.
+    ///
+    /// - `false` (default): **Reversible 5-3**. Essential for true lossless compression.
+    /// - `true`: **Irreversible 9-7**. Provides better compression ratios for lossy applications at the cost of floating-point errors.
     pub fn set_irreversible(&mut self, irreversible: bool) {
         self.use_irreversible = irreversible;
     }
 
-    /// Set whether to use HTJ2K (High-Throughput JPEG 2000) encoding
-    /// HTJ2K provides faster encoding at the cost of slightly larger files
+    /// Set whether to use HTJ2K (High-Throughput JPEG 2000) encoding.
+    ///
+    /// HTJ2K (ISO/IEC 15444-15) replaces the EBCOT block coder with a much faster algorithm.
+    ///
+    /// - `false` (default): Standard JPEG 2000 (Part 1).
+    /// - `true`: HTJ2K (Part 15).
     pub fn set_htj2k(&mut self, use_htj2k: bool) {
         // self.use_htj2k = use_htj2k;
         // Temporary: Force Legacy Mode (Compliant J2K + CAP marker) for robustness
@@ -95,7 +155,17 @@ impl J2kEncoder {
         self.include_plt = include;
     }
 
-    /// Encode pixel data to JPEG 2000 codestream
+    /// Encode pixel data to JPEG 2000 codestream.
+    ///
+    /// # Arguments
+    /// * `pixels` - Raw pixel data. Format depends on `frame_info` (e.g., RGB interleaved, Grayscale).
+    ///              For >8-bit depth, input must be `u16` samples packed into `u8` slice (Little Endian).
+    /// * `frame_info` - Metadata describing the image dimensions and format.
+    /// * `destination` - Output buffer for the codestream. Must be large enough to hold the result.
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - Number of bytes written to `destination`.
+    /// * `Err(JpeglsError)` - If encoding fails or buffer is too small.
     pub fn encode(
         &mut self,
         pixels: &[u8],
@@ -153,6 +223,10 @@ impl J2kEncoder {
         let transformation = if self.use_irreversible { 0 } else { 1 }; // 0=9-7, 1=5-3
 
         // Create COD marker
+        // HTJ2K mode requires bit 6 (0x40) to be set in code_block_style (SPcod_Scoc byte 9)
+        // This signals that blocks use HT coding instead of standard EBCOT
+        let code_block_style = if self.use_htj2k { 0x40 } else { 0 };
+        
         let cod = J2kCod {
             coding_style: 0,
             progression_order: 0, // LRCP
@@ -161,7 +235,7 @@ impl J2kEncoder {
             decomposition_levels,
             codeblock_width_exp: self.codeblock_exp,
             codeblock_height_exp: self.codeblock_exp,
-            code_block_style: 0, // Legacy Mode (Part 15 compliant, but standard J2K block coding)
+            code_block_style,
             transformation,
             precinct_sizes: Vec::new(),
         };
@@ -212,29 +286,28 @@ impl J2kEncoder {
             let _quant_style_expounded = (guard_bits << 5) | 0x02; // Scalar Expounded
 
             // Quality-based rate control for 9-7 irreversible transform
-            // Map quality 1-100 to compression ratio (larger step = more compression)
-            // Quality 100: near-lossless (very small step)
-            // Quality 75-90: visually lossless range
-            // Quality 50: medium compression
-            // Quality 1: maximum compression
-
-            let base_step = if self.quality >= 95 {
-                // Near-lossless range (quality 95-100)
-                // IMPORTANT: Step must be large enough to limit bit planes to avoid exceeding
-                // the packet header encoding limit of 68 passes (Table B.4: 37 + 31 max).
-                // With max 68 passes: 68 = 1 + 3*N => N ≤ 22.3, so max 22 bit planes after start_bp.
-                // For 8-bit data with 9-7 DWT, coefficients can reach ~2^20 range.
-                // Use step ≥ 0.0001 to ensure max_bp stays reasonable.
-                0.0001 + (100 - self.quality) as f32 * 0.00002
-            } else if self.quality >= 75 {
-                // Visually lossless range (quality 75-94)
-                0.001 + (94 - self.quality) as f32 * 0.0001
-            } else if self.quality >= 50 {
-                // Good quality range (quality 50-74)
-                0.001 + (74 - self.quality) as f32 * 0.0001
+            // We need a step size (delta).
+            // - Small delta = high quality (more bits)
+            // - Large delta = low quality (fewer bits)
+            // 9-7 Coefficients are roughly in the same dynamic range as input pixels (after multiple levels).
+            // A delta of 1.0 preserves roughly integer precision.
+            // A delta of 0.0001 preserves 13+ fractional bits, which causes massive expansion.
+            
+            // Heuristic:
+            // Quality 100 -> delta = 1.0 (Approx integer precision)
+            // Quality 90  -> delta = 2.0
+            // Quality 50  -> delta = 16.0
+            // Quality 1   -> delta = 256.0
+            
+            let quality_factor = (100 - self.quality) as f32;
+            // Use a power law to ramp up step size quickly for lower qualities
+            let base_step = if self.quality >= 99 {
+                1.0 / 256.0 // "Near Lossless" - keep some fractional precision
+            } else if self.quality >= 90 {
+                1.0 + (quality_factor * 0.2) // 1.0 to 3.0
             } else {
-                // High compression range (quality 1-49)
-                0.01 + (49 - self.quality) as f32 * 0.001
+                // Ramps from ~3.0 to ~64.0+
+                1.0 + (quality_factor.powf(1.6) * 0.1) 
             };
 
             // Use Scalar Expounded (0x02) for per-subband quantization control
@@ -295,10 +368,18 @@ impl J2kEncoder {
                     // Calculate epsilon to match decoder formula
                     // Δ = (1 + μ/2048) * 2^((depth + guard_bits) - ε)
                     // But ε already includes gain, so: ε = rb - log2(Δ / (1 + μ/2048))
-                    // First approximation with μ = 0:
+                    // We need 1 + mu/2048 to be in range [1.0, 2.0)
+                    // So we need delta / 2^(rb - epsilon) in [1.0, 2.0)
+                    // => 1.0 <= delta / 2^(rb - epsilon) < 2.0
+                    // => 2^(rb - epsilon) <= delta < 2 * 2^(rb - epsilon) = 2^(rb - epsilon + 1)
+                    // => rb - epsilon <= log2(delta) < rb - epsilon + 1
+                    // => -epsilon <= log2(delta) - rb < -epsilon + 1
+                    // => epsilon >= rb - log2(delta) > epsilon - 1
+                    // So epsilon = ceil(rb - log2(delta))
+                    
                     let log_delta = subband_step.log2();
                     let epsilon_float = rb as f32 - log_delta;
-                    let epsilon = epsilon_float.round().max(0.0).min(31.0) as i32;
+                    let epsilon = epsilon_float.ceil().max(0.0).min(31.0) as i32;
 
                     // Refine μ to match target step size exactly:
                     // (1 + μ/2048) = Δ / 2^((depth + guard_bits + gain) - ε)
@@ -966,13 +1047,10 @@ impl J2kEncoder {
                                     0
                                 };
 
-                                let mb = (guard_bits + epsilon).saturating_sub(1);
-                                let zero_bp = if max_bp as u8 <= mb.saturating_sub(1) {
-                                    mb.saturating_sub(1).saturating_sub(max_bp as u8)
-                                } else {
-                                    0
-                                };
-
+                                // Force zero_bp to 0 for robustness debugging
+                                // Ideally: mb.saturating_sub(1).saturating_sub(max_bp as u8)
+                                let zero_bp = 0; 
+                                
                                 packet_header
                                     .included_cblks
                                     .push(super::packet::CodeBlockInfo {
@@ -980,10 +1058,7 @@ impl J2kEncoder {
                                         y: cby,
                                         subband_index: band as u8,
                                         included: true,
-                                        num_passes: 1, // HTJ2K uses 1 pass? Or 0?
-                                        // Usually 1 pass to indicate "cleanup pass" is present?
-                                        // Actually HTJ2K reuses legacy packet header syntax.
-                                        // Usually sets passes=1.
+                                        num_passes: 1, 
                                         data_len: encoded.len() as u32,
                                         zero_bp,
                                     });

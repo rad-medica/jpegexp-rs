@@ -53,6 +53,19 @@ fn roundtrip_test(width: u32, height: u32, depth: u8, components: u8) {
     
     // Check exact match (Lossless)
     let mismatch = pixels.iter().zip(decoded_pixels.iter()).filter(|(a, b)| a != b).count();
+    
+    if mismatch > 0 {
+        println!("Mismatch count: {}", mismatch);
+        let mut printed = 0;
+        for (i, (a, b)) in pixels.iter().zip(decoded_pixels.iter()).enumerate() {
+            if a != b {
+                println!("  idx {}: expected {}, got {}", i, a, b);
+                printed += 1;
+                if printed > 10 { break; }
+            }
+        }
+    }
+
     assert_eq!(mismatch, 0, "Pixel mismatch count: {}", mismatch);
 }
 

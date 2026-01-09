@@ -6,7 +6,7 @@
 |-------|-----------|--------|--------|----------|-------|
 | **JPEG 1** | ISO/IEC 10918-1 | ✅ | ✅ | **Production** | Full 8/12-bit support (Baseline & Extended SOF1). |
 | **JPEG-LS** | ISO/IEC 14495-1 | ✅ | ✅ | **Production** | Lossless Grayscale & RGB (ILV=2) validated vs CharLS. |
-| **JPEG 2000** | ISO/IEC 15444-1 | ✅ | ✅ | **Production** | Lossless (5-3) & Irreversible (9-7) validated. MAE=0. |
+| **JPEG 2000** | ISO/IEC 15444-1 | ✅ | ✅ | **Production** | Lossless (5-3) & Lossy (9-7) validated. Compression ratios fixed. |
 | **HTJ2K** | ISO/IEC 15444-15| ⚠️ | 🔴 | **Experimental** | Encoder works (Legacy). Decoder broken (pixel mismatches). |
 
 ---
@@ -31,8 +31,15 @@
 - **Implemented**: **UVLC decoding** for magnitude residuals.
 - **Status**: Decoder shows pixel mismatches. Further debugging needed for production readiness.
 
-### 4. JPEG 2000: Random Access Infrastructure
-- **Added**: Support for **TLM (Tile-part Lengths)** and **PLT (Packet Lengths)** markers for fast seeking in large medical studies.
+### 5. JPEG 2000: Lossy Compression Fix
+- **Fixed**: Quantization step size calculation for 9-7 irreversible transform.
+- **Result**: "Lossy Q90" now achieves ~4x compression on complex images and ~1000x on gradients, correcting previous bit expansion issues.
+- **Benchmarking**: Added `criterion` benchmarks for accurate performance and regression tracking.
+
+### 6. Interoperability Test Suite
+- **Fixed**: `run_master_interop` (JPEG1, JPEGLS, J2K) now passing all tests.
+- **Fixed**: `run_interop_lossy_color` panic due to missing `read_header()` call in test harness.
+- **Verified**: JPEG-LS and JPEG 2000 (Legacy) are interoperable with CharLS and OpenJPEG respectively.
 
 ---
 

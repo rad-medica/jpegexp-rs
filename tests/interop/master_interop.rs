@@ -332,10 +332,14 @@ fn run_jpeg1_test(w: u32, h: u32, bit_depth: u32, components: u32, metrics: &mut
         let encoded = fs::read(temp_jpg).unwrap(); m.file_size = encoded.len();
         let start_dec = Instant::now();
         let mut decoder = Jpeg1Decoder::new(&encoded);
-        let mut dec_pix = vec![0u8; pixels.len()];
-        match decoder.decode(&mut dec_pix) {
-            Ok(_) => { m.decode_time = start_dec.elapsed(); m.mae = calculate_mae(&pixels, &dec_pix, bit_depth); }
-            Err(e) => m.status = format!("Dec Fail: {:?}", e),
+        if decoder.read_header().is_ok() {
+            let mut dec_pix = vec![0u8; pixels.len()];
+            match decoder.decode(&mut dec_pix) {
+                Ok(_) => { m.decode_time = start_dec.elapsed(); m.mae = calculate_mae(&pixels, &dec_pix, bit_depth); }
+                Err(e) => m.status = format!("Dec Fail: {:?}", e),
+            }
+        } else {
+            m.status = "Header Fail".to_string();
         }
     } else { m.status = "Ext Enc Fail".to_string(); }
     print_metric_row(&m); metrics.push(m);

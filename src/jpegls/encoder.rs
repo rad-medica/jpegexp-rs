@@ -119,6 +119,9 @@ impl<'a> JpeglsEncoder<'a> {
                         true,
                     )?;
                 } else {
+                    // SAFETY: align_to is safe because we check the head and tail slices.
+                    // If head or tail are not empty, the slice was not properly aligned or sized
+                    // for u16 reinterpretation, and we return InvalidData.
                     let (head, body, tail) = unsafe { source.align_to::<u16>() };
                     if !head.is_empty() || !tail.is_empty() {
                         return Err(JpeglsError::InvalidData);
@@ -148,6 +151,9 @@ impl<'a> JpeglsEncoder<'a> {
             let _bytes_written = if frame_info.bits_per_sample <= 8 {
                 self.encode_scan_typed::<u8>(source, &frame_info, pc, coding_parameters, false)?
             } else {
+                // SAFETY: align_to is safe because we check the head and tail slices.
+                // If head or tail are not empty, the slice was not properly aligned or sized
+                // for u16 reinterpretation, and we return InvalidData.
                 let (head, body, tail) = unsafe { source.align_to::<u16>() };
                 if !head.is_empty() || !tail.is_empty() {
                     return Err(JpeglsError::InvalidData);

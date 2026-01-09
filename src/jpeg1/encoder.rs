@@ -147,19 +147,19 @@ impl Jpeg1Encoder {
         for block_y in (0..height).step_by(8) {
             for block_x in (0..width).step_by(8) {
                 if self.restart_interval > 0 && mcus_encoded > 0 && (mcus_encoded % self.restart_interval as usize == 0) && mcus_encoded < total_mcus {
-                    let bw = bit_writer_opt.as_mut().unwrap();
+                    let bw = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
                     bw.flush()?;
                     let len = bw.len();
                     let _ = bit_writer_opt.take();
                     writer.advance(len);
-                    let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).unwrap();
+                    let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).map_err(|_| JpeglsError::InvalidOperation)?;
                     writer.write_marker(marker)?;
                     next_restart_index += 1;
                     bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
                     self.huffman.dc_previous_value = [0; 4];
                 }
 
-                let bit_writer = bit_writer_opt.as_mut().unwrap();
+                let bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
 
                 if components_count == 1 {
                     let mut block_data = [0.0f32; 64];
@@ -266,19 +266,19 @@ impl Jpeg1Encoder {
         for block_y in (0..height).step_by(8) {
             for block_x in (0..width).step_by(8) {
                 if self.restart_interval > 0 && mcus_encoded > 0 && (mcus_encoded % self.restart_interval as usize == 0) && mcus_encoded < total_mcus {
-                    let bw = bit_writer_opt.as_mut().unwrap();
+                    let bw = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
                     bw.flush()?;
                     let len = bw.len();
                     let _ = bit_writer_opt.take();
                     writer.advance(len);
-                    let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).unwrap();
+                    let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).map_err(|_| JpeglsError::InvalidOperation)?;
                     writer.write_marker(marker)?;
                     next_restart_index += 1;
                     bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
                     self.huffman.dc_previous_value = [0; 4];
                 }
 
-                let bit_writer = bit_writer_opt.as_mut().unwrap();
+                let bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
 
                 if components_count == 1 {
                     let mut block_data = [0.0f32; 64];
@@ -393,7 +393,7 @@ impl Jpeg1Encoder {
             writer.write_byte(0)?;
 
             let mut bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
-            let mut bit_writer = bit_writer_opt.as_mut().unwrap();
+            let mut bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
 
             self.huffman.dc_previous_value[pred_idx] = 0;
             let mut mcus_encoded = 0;
@@ -407,11 +407,11 @@ impl Jpeg1Encoder {
                         let len = bit_writer.len();
                         let _ = bit_writer_opt.take();
                         writer.advance(len);
-                        let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).unwrap();
+                        let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).map_err(|_| JpeglsError::InvalidOperation)?;
                         writer.write_marker(marker)?;
                         next_restart_index += 1;
                         bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
-                        bit_writer = bit_writer_opt.as_mut().unwrap();
+                        bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
                         self.huffman.dc_previous_value[pred_idx] = 0;
                     }
 

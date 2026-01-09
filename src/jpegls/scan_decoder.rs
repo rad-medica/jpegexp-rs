@@ -263,6 +263,10 @@ impl<'a> ScanDecoder<'a> {
             let bytes_ptr = samples_slice.as_ptr() as *const u8;
             let bytes_len = width * components * std::mem::size_of::<T>();
 
+            // SAFETY:
+            // 1. `bytes_ptr` is derived from `curr_line` which is a valid slice of length `bytes_len` (in bytes).
+            // 2. `destination_row` is a mutable slice of length `bytes_len` (verified above).
+            // 3. `copy_nonoverlapping` is used for performance; regions are disjoint by definition (decoding buffer vs output buffer).
             unsafe {
                 std::ptr::copy_nonoverlapping(bytes_ptr, destination_row.as_mut_ptr(), bytes_len);
             }

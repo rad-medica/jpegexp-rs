@@ -120,6 +120,16 @@ impl<'a> JpegStreamReader<'a> {
         self.position
     }
 
+    /// Reads the entire header sequence from Start of Image until Start of Scan.
+    ///
+    /// # Arguments
+    /// * `spiff_header` - Output parameter for optional SPIFF header if found.
+    ///
+    /// # Errors
+    /// Returns `JpeglsError` if:
+    /// - Start of Image marker is missing
+    /// - Any segment is malformed
+    /// - Unexpected markers are encountered
     pub fn read_header(
         &mut self,
         spiff_header: &mut Option<SpiffHeader>,
@@ -177,6 +187,10 @@ impl<'a> JpegStreamReader<'a> {
         Ok(())
     }
 
+    /// Reads a single byte from the stream.
+    ///
+    /// # Errors
+    /// Returns `JpeglsError::InvalidData` if end of stream is reached.
     pub fn read_u8(&mut self) -> Result<u8, JpeglsError> {
         if self.position >= self.source.len() {
             return Err(JpeglsError::InvalidData);
@@ -191,12 +205,20 @@ impl<'a> JpegStreamReader<'a> {
         self.read_u8()
     }
 
+    /// Reads a big-endian u16 from the stream.
+    ///
+    /// # Errors
+    /// Returns `JpeglsError::InvalidData` if fewer than 2 bytes remain.
     pub fn read_u16(&mut self) -> Result<u16, JpeglsError> {
         let b1 = self.read_u8()? as u16;
         let b2 = self.read_u8()? as u16;
         Ok((b1 << 8) | b2)
     }
 
+    /// Reads a big-endian u32 from the stream.
+    ///
+    /// # Errors
+    /// Returns `JpeglsError::InvalidData` if fewer than 4 bytes remain.
     pub fn read_u32(&mut self) -> Result<u32, JpeglsError> {
         let b1 = self.read_u8()? as u32;
         let b2 = self.read_u8()? as u32;
@@ -205,6 +227,10 @@ impl<'a> JpegStreamReader<'a> {
         Ok((b1 << 24) | (b2 << 16) | (b3 << 8) | b4)
     }
 
+    /// Peeks at the next marker without advancing the position.
+    ///
+    /// # Errors
+    /// Returns `JpeglsError::InvalidData` if next bytes are not a valid marker.
     pub fn peek_marker(&self) -> Result<JpegMarkerCode, JpeglsError> {
         if self.position + 1 >= self.source.len() {
             return Err(JpeglsError::InvalidData);
@@ -215,6 +241,10 @@ impl<'a> JpegStreamReader<'a> {
         JpegMarkerCode::try_from(self.source[self.position + 1])
     }
 
+    /// Reads and consumes the next marker.
+    ///
+    /// # Errors
+    /// Returns `JpeglsError::InvalidData` if next bytes are not a valid marker.
     pub fn read_marker(&mut self) -> Result<JpegMarkerCode, JpeglsError> {
         if self.read_u8()? != JPEG_MARKER_START_BYTE {
             return Err(JpeglsError::InvalidData);

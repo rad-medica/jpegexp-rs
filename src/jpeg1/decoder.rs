@@ -34,11 +34,14 @@ impl<'a> Jpeg1Decoder<'a> {
     }
 
     pub fn decode_u16(&mut self, destination: &mut [u16]) -> Result<(), JpeglsError> {
+        let frame_info = self.reader.frame_info();
+        if frame_info.bits_per_sample == 0 {
+            return Err(JpeglsError::InvalidData);
+        }
+
         if self.reader.is_lossless {
             return self.decode_lossless_u16(destination);
         }
-
-        let frame_info = self.reader.frame_info();
         let width = frame_info.width as usize;
         let height = frame_info.height as usize;
         let components_count = self.reader.components.len();
@@ -343,11 +346,14 @@ impl<'a> Jpeg1Decoder<'a> {
     }
 
     pub fn decode(&mut self, destination: &mut [u8]) -> Result<(), JpeglsError> {
+        let frame_info = self.reader.frame_info();
+        if frame_info.bits_per_sample == 0 {
+            return Err(JpeglsError::InvalidData);
+        }
+
         if self.reader.is_lossless {
             return self.decode_lossless(destination);
         }
-
-        let frame_info = self.reader.frame_info();
         let width = frame_info.width as usize;
         let height = frame_info.height as usize;
         let components_count = self.reader.components.len();

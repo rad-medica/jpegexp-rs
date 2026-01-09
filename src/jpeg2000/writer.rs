@@ -44,7 +44,7 @@ impl<'a> J2kWriter<'a> {
         // Bit 14 (MSB-first in 32-bit word) = 0x00020000
         // This is equivalent to bit 17 in LSB-first notation
         let pcap = if use_htj2k {
-            0x00020000u32 // Bit 14 MSB-first
+            0x0002_0000_u32 // Bit 14 MSB-first
         } else {
             0
         };
@@ -116,7 +116,7 @@ impl<'a> J2kWriter<'a> {
         self.writer.write_byte(cod.decomposition_levels)?;
         self.writer.write_byte(cod.codeblock_width_exp)?;
         self.writer.write_byte(cod.codeblock_height_exp)?;
-        self.writer.write_byte(0)?; // Code-block style
+        self.writer.write_byte(cod.code_block_style)?; // SPcod_Scoc byte 9: code-block style
         self.writer.write_byte(cod.transformation)?;
 
         Ok(())

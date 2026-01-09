@@ -11,6 +11,7 @@ pub struct MelEncoder {
     current_byte: u8,
     bits_in_byte: u8,
     k: i32, // State index (exponent)
+    last_byte_was_ff: bool,
 }
 
 impl MelEncoder {
@@ -20,22 +21,20 @@ impl MelEncoder {
             current_byte: 0,
             bits_in_byte: 0,
             k: 0,
+            last_byte_was_ff: false,
         }
     }
 
     /// Write a single bit
-    fn write_bit(&mut self, bit: u8) {
+    pub fn write_bit(&mut self, bit: u8) {
         self.current_byte = (self.current_byte << 1) | (bit & 1);
         self.bits_in_byte += 1;
 
-        if self.bits_in_byte == 8 {
-            // Handle 0xFF byte stuffing
-            if self.current_byte == 0xFF {
-                self.buffer.push(0xFF);
-                self.buffer.push(0x00);
-            } else {
-                self.buffer.push(self.current_byte);
-            }
+        let limit = if self.last_byte_was_ff { 7 } else { 8 };
+
+        if self.bits_in_byte == limit {
+            self.buffer.push(self.current_byte);
+            self.last_byte_was_ff = self.current_byte == 0xFF;
             self.current_byte = 0;
             self.bits_in_byte = 0;
         }
@@ -59,7 +58,9 @@ impl MelEncoder {
     pub fn flush(&mut self) {
         if self.bits_in_byte > 0 {
             // Pad with zeros
-            let padding = 8 - self.bits_in_byte;
+            // If limit was 7, we shift by (7 - bits). If 8, (8 - bits).
+            let limit = if self.last_byte_was_ff { 7 } else { 8 };
+            let padding = limit - self.bits_in_byte;
             self.current_byte <<= padding;
             self.buffer.push(self.current_byte);
         }
@@ -83,6 +84,7 @@ pub struct MagSgnEncoder {
     buffer: Vec<u8>,
     current_byte: u8,
     bits_in_byte: u8,
+    last_byte_was_ff: bool,
 }
 
 impl MagSgnEncoder {
@@ -91,6 +93,7 @@ impl MagSgnEncoder {
             buffer: Vec::new(),
             current_byte: 0,
             bits_in_byte: 0,
+            last_byte_was_ff: false,
         }
     }
 
@@ -99,8 +102,11 @@ impl MagSgnEncoder {
         self.current_byte = (self.current_byte << 1) | (bit & 1);
         self.bits_in_byte += 1;
 
-        if self.bits_in_byte == 8 {
+        let limit = if self.last_byte_was_ff { 7 } else { 8 };
+
+        if self.bits_in_byte == limit {
             self.buffer.push(self.current_byte);
+            self.last_byte_was_ff = self.current_byte == 0xFF;
             self.current_byte = 0;
             self.bits_in_byte = 0;
         }
@@ -116,7 +122,8 @@ impl MagSgnEncoder {
     /// Flush remaining bits to buffer
     pub fn flush(&mut self) {
         if self.bits_in_byte > 0 {
-            let padding = 8 - self.bits_in_byte;
+            let limit = if self.last_byte_was_ff { 7 } else { 8 };
+            let padding = limit - self.bits_in_byte;
             self.current_byte <<= padding;
             self.buffer.push(self.current_byte);
         }
@@ -139,9 +146,6 @@ impl Default for MagSgnEncoder {
 pub struct HTBlockEncoder {
     mel_encoder: MelEncoder,
     magsgn_encoder: MagSgnEncoder,
-    vlc_buffer: Vec<u8>,
-    vlc_bits: u8,
-    vlc_current: u8,
     width: usize,
     height: usize,
     stripe_height: usize,
@@ -155,9 +159,6 @@ impl HTBlockEncoder {
         Self {
             mel_encoder: MelEncoder::new(),
             magsgn_encoder: MagSgnEncoder::new(),
-            vlc_buffer: Vec::new(),
-            vlc_bits: 0,
-            vlc_current: 0,
             width,
             height,
             stripe_height: 4,
@@ -168,18 +169,16 @@ impl HTBlockEncoder {
 
     /// Write VLC bits (encoded backwards from end of packet)
     fn write_vlc_bit(&mut self, bit: u8) {
-        self.vlc_current = (self.vlc_current >> 1) | ((bit & 1) << 7);
-        self.vlc_bits += 1;
-
-        if self.vlc_bits == 8 {
-            self.vlc_buffer.push(self.vlc_current);
-            self.vlc_current = 0;
-            self.vlc_bits = 0;
-        }
+        // VLC bits are part of the MEL/VLC interleaved stream.
+        // We write them to the same mel_encoder.
+        self.mel_encoder.write_bit(bit);
     }
 
     /// Encode an entire code-block
     pub fn encode_block(&mut self, block: &J2kCodeBlock) -> Result<Vec<u8>, ()> {
+        eprintln!("ENC: encode_block called for block ({},{}) {}x{}", 
+                  block.x, block.y, self.width, self.height);
+        
         // HTJ2K encoding flow:
         // 1. Process quads in stripe order
         // 2. For each quad pair (within a stripe):
@@ -198,38 +197,70 @@ impl HTBlockEncoder {
         self.mel_encoder.flush();
         self.magsgn_encoder.flush();
 
-        // Flush VLC buffer (reversed)
-        if self.vlc_bits > 0 {
-            self.vlc_current >>= 8 - self.vlc_bits;
-            self.vlc_buffer.push(self.vlc_current);
-        }
-
         // Combine streams:
         // MagSgn grows from start, MEL/VLC grows from end
         let mut output = self.magsgn_encoder.get_buffer().to_vec();
 
-        // Append VLC (reversed) and MEL (reversed)
+        // Append MEL/VLC (reversed)
+        // Since we wrote Quads 0..N, and Decoder reads Quad 0..N from end,
+        // we must reverse the byte stream so Quad 0 is at the end.
         let mel_data = self.mel_encoder.get_buffer();
-        let vlc_data = &self.vlc_buffer;
 
-        // Interleave MEL and VLC at the end
-        // Standard says: concatenated Scup consists of VLC then MEL (both reversed if needed)
-        // Actually it's more like: [MagSgn...][...VLC reversed][...MEL reversed]
-        for &b in vlc_data.iter().rev() {
-            output.push(b);
-        }
         for &b in mel_data.iter().rev() {
             output.push(b);
         }
-
-        // Add length information at the end (Scup) as per Part 15?
-        // OpenHTJ2K does:
-        // fwd_buf[Lcup - 1] = Scup >> 4;
-        // fwd_buf[Lcup - 2] |= Scup & 0x0F;
-        // We'll skip the length suffix for now or add it if needed for decoder compatibility.
-        // Most decoders expect Scup info in the packet header or suffix.
+        
+        eprintln!("ENC: encode_block finished for block ({},{}), output len={}", 
+                  block.x, block.y, output.len());
+        
+        if block.x == 0 && block.y == 0 && self.width == 2 && self.height == 2 {
+            eprintln!("ENC: First 2x2 block output (hex): {:02X?}", output);
+        }
 
         Ok(output)
+    }
+
+    /// Calculate embedded bits (emb_k and emb_1) from quad coefficients
+    /// 
+    /// For HTJ2K encoding:
+    /// - bit_k: 1 if we want to skip transmitting the MSB in MagSgn (embed it implicitly)
+    /// - bit_1: The actual value of the bit at position m (where m = u_val - bit_k)
+    /// 
+    /// For lossless coding:
+    /// - All significant samples have their MSB = 1
+    /// - We set bit_k = 1 to skip transmitting this known bit
+    /// - bit_1 then represents the MSB value (which is 1 for significant samples)
+    /// 
+    /// # Parameters
+    /// - `rho`: Significance pattern (which samples are non-zero)
+    /// - `u_val`: Exponent for the quad (MSB position of largest sample + 1)
+    /// - `coeffs`: The 4 coefficient values in the quad
+    /// 
+    /// # Returns
+    /// - `emb_k`: For each significant sample, 1 if MSB should be skipped
+    /// - `emb_1`: For each sample, the value of the bit at position m
+    fn calculate_emb_bits(&self, rho: u8, u_val: u8, coeffs: &[i32; 4]) -> (u8, u8) {
+        let mut emb_k = 0u8;
+        let mut emb_1 = 0u8;
+        
+        for i in 0..4 {
+            if (rho >> i) & 1 == 1 {
+                let mag = coeffs[i].unsigned_abs();
+                
+                // For lossless: all significant samples have MSB = 1
+                // We can skip transmitting it (bit_k = 1)
+                emb_k |= 1 << i;
+                
+                // bit_1 is the value at position m = u_val - 1 (since bit_k = 1)
+                // This is the MSB itself, which is 1 for significant samples
+                if u_val > 0 {
+                    let bit_at_m = ((mag >> (u_val - 1)) & 1) as u8;
+                    emb_1 |= bit_at_m << i;
+                }
+            }
+        }
+        
+        (emb_k, emb_1)
     }
 
     fn encode_quad_pair(&mut self, x: usize, y_base: usize, block: &J2kCodeBlock) -> Result<(), ()> {
@@ -245,7 +276,16 @@ impl HTBlockEncoder {
         let u0 = e_max_actual0.max(kappa0);
         let u_q0 = u0 - kappa0;
         let u_off0 = if u_q0 > 0 { 1 } else { 0 };
-        self.quad_exponents[qy0 * self.num_quads_x + qx] = e_max_actual0;
+        // Store u0 (reconstructed exponent), NOT e_max_actual0, to match decoder state
+        self.quad_exponents[qy0 * self.num_quads_x + qx] = u0;
+
+        // Calculate embedded bits from actual coefficient magnitudes
+        let (emb_k0, emb_1_0) = self.calculate_emb_bits(rho0, u0, &quad_coeffs0);
+
+        if qx == 0 && qy0 == 0 {
+             eprintln!("ENC Q(0,0): rho={:04b} E_max={} kappa={} u={} u_q={} u_off={} emb_k={:04b} emb_1={:04b}", 
+                       rho0, e_max_actual0, kappa0, u0, u_q0, u_off0, emb_k0, emb_1_0);
+        }
 
         // Quad 1 info
         let has_q1 = y_base + 2 < self.height;
@@ -254,57 +294,72 @@ impl HTBlockEncoder {
         } else {
             (0, 0, [0i32; 4])
         };
-        let (u1, u_q1, u_off1) = if has_q1 {
+        let (u1, u_q1, u_off1, emb_k1, emb_1_1) = if has_q1 {
             let gamma1 = if rho1.count_ones() > 1 { 1 } else { 0 };
             let kappa1 = self.get_kappa(qx, qy1, gamma1);
             let u1 = e_max_actual1.max(kappa1);
             let u_q1 = u1 - kappa1;
             let u_off1 = if u_q1 > 0 { 1 } else { 0 };
-            self.quad_exponents[qy1 * self.num_quads_x + qx] = e_max_actual1;
-            (u1, u_q1, u_off1)
+            // Store u1, matching decoder
+            self.quad_exponents[qy1 * self.num_quads_x + qx] = u1;
+            let (emb_k1, emb_1_1) = self.calculate_emb_bits(rho1, u1, &quad_coeffs1);
+            (u1, u_q1, u_off1, emb_k1, emb_1_1)
         } else {
-            (0, 0, 0)
+            (0, 0, 0, 0, 0)
         };
 
-        // 1. MEL encoding
+        // 1. MEL encoding Quad 0
         let context0 = self.calculate_context(x, y_base, block);
         if context0 == 0 {
             self.mel_encoder.encode(rho0 != 0);
         }
 
-        // 2. VLC encoding
-        // Quad 0 VLC
-        let (vlc0, emb_k0, _e1_0) = vlc::encode_vlc(rho0, context0, u_off0);
+        // 2. VLC encoding Quad 0
+        // Pass calculated emb_k and emb_1 to encode_vlc
+        let vlc0 = vlc::encode_vlc(rho0, context0, u_off0, emb_k0, emb_1_0);
+        
+        if qx == 0 && qy0 == 0 {
+             eprintln!("ENC Q(0,0): context={} vlc_value={:04X} vlc_bits={} coeffs={:?}", 
+                       context0, vlc0.value, vlc0.bits, quad_coeffs0);
+        }
+        
         for i in (0..vlc0.bits).rev() {
             self.write_vlc_bit(((vlc0.value >> i) & 1) as u8);
         }
 
         // Context for Quad 1
-        let context1 = (rho0 >> 1) | (rho0 & 1);
+        let context1 = if rho0 != 0 { 1 } else { 0 };
+        
         if has_q1 {
-            // Quad 1 VLC
-            let (vlc1, ek1, _e1_1) = vlc::encode_vlc(rho1, context1, u_off1);
-            for i in (0..vlc1.bits).rev() {
-                self.write_vlc_bit(((vlc1.value >> i) & 1) as u8);
-            }
-
-            // UVLC encoding for u_q residuals
-            let uvlc = vlc::encode_uvlc(u_q0, u_q1, 0);
-            for i in (0..uvlc.bits).rev() {
-                self.write_vlc_bit(((uvlc.value >> i) & 1) as u8);
-            }
-
-            // 3. MEL encoding for Quad 1 (simplified)
+            // 3. MEL encoding Quad 1
             if context1 == 0 {
                 self.mel_encoder.encode(rho1 != 0);
             }
 
-            // 4. MagSgn encoding
+            // 4. VLC encoding Quad 1
+            let vlc1 = vlc::encode_vlc(rho1, context1, u_off1, emb_k1, emb_1_1);
+            for i in (0..vlc1.bits).rev() {
+                self.write_vlc_bit(((vlc1.value >> i) & 1) as u8);
+            }
+
+            // 5. UVLC encoding
+            // u_q encoded is u_q - u_off
+            let uvlc = vlc::encode_uvlc(u_q0.saturating_sub(u_off0), u_q1.saturating_sub(u_off1), 0);
+            for i in (0..uvlc.bits).rev() {
+                self.write_vlc_bit(((uvlc.value >> i) & 1) as u8);
+            }
+
+            // 6. MagSgn encoding (forward stream, independent of MEL/VLC order)
             self.emit_quad_magsgn(rho0, u0, emb_k0, &quad_coeffs0);
-            self.emit_quad_magsgn(rho1, u1, ek1, &quad_coeffs1);
+            self.emit_quad_magsgn(rho1, u1, emb_k1, &quad_coeffs1);
         } else {
             // Only Quad 0 UVLC
-            let uvlc = vlc::encode_uvlc(u_q0, 0, 0);
+            let uvlc = vlc::encode_uvlc(u_q0.saturating_sub(u_off0), 0, 0);
+            
+            if qx == 0 && qy0 == 0 && self.width == 2 {
+                eprintln!("ENC Q(0,0): UVLC value={:04X} bits={}", uvlc.value, uvlc.bits);
+            }
+            
             for i in (0..uvlc.bits).rev() {
                 self.write_vlc_bit(((uvlc.value >> i) & 1) as u8);
             }
@@ -319,11 +374,16 @@ impl HTBlockEncoder {
             return 1;
         }
         let mut max_e = 0u8;
+        
+        // NE neighbor (qx+1, qy-1) availability:
+        // Match decoder logic: valid only if qy is even (top of stripe)
+        let ne_available = (qy % 2 == 0) && (qx + 1 < self.num_quads_x) && (qy > 0);
+
         let neighbors = [
-            if qx > 0 && qy > 0 { Some((qx - 1, qy - 1)) } else { None },
-            if qy > 0 { Some((qx, qy - 1)) } else { None },
-            if qx + 1 < self.num_quads_x && qy > 0 { Some((qx + 1, qy - 1)) } else { None },
-            if qx > 0 { Some((qx - 1, qy)) } else { None },
+            if qx > 0 && qy > 0 { Some((qx - 1, qy - 1)) } else { None }, // NW
+            if qy > 0 { Some((qx, qy - 1)) } else { None },             // N
+            if ne_available { Some((qx + 1, qy - 1)) } else { None },   // NE
+            if qx > 0 { Some((qx - 1, qy)) } else { None },             // W
         ];
 
         for neighbor in neighbors.iter().flatten() {
@@ -368,51 +428,61 @@ impl HTBlockEncoder {
             return;
         }
 
-        // Sign bits first
-        for (i, &c) in coeffs.iter().enumerate() {
-            if (rho >> i) & 1 == 1 {
-                self.magsgn_encoder.write_bit(if c < 0 { 1 } else { 0 });
-            }
-        }
-
-        // Magnitude bits with EMB optimization
-        // E_k = u_val - (emb_k bit i)
+        // Process each sample in the quad
         for (i, &c) in coeffs.iter().enumerate() {
             if (rho >> i) & 1 == 1 {
                 let mag = c.unsigned_abs();
                 let bit_k = (emb_k >> i) & 1;
                 let e_k = u_val.saturating_sub(bit_k);
 
+                // Debug logging
+                let coord_x = (i % 2);
+                let coord_y = (i / 2);
+                if coord_x == 0 && coord_y == 0 {
+                    eprintln!("ENC sample[0,0]: coeff={} mag={} u_val={} bit_k={} e_k={} bits_to_write={}", 
+                              c, mag, u_val, bit_k, e_k, e_k);
+                }
+
+                // Write Magnitude bits (MSB to LSB)
                 if e_k > 0 {
-                    // Write bits from e_k-1 down to 0 (for lossless)
                     for b in (0..e_k).rev() {
                         self.magsgn_encoder.write_bit(((mag >> b) & 1) as u8);
                     }
                 }
+
+                // Write Sign bit
+                self.magsgn_encoder.write_bit(if c < 0 { 1 } else { 0 });
             }
         }
     }
 
     fn calculate_context(&self, x: usize, y_base: usize, block: &J2kCodeBlock) -> u8 {
         // Context based on neighbor significance
+        // Must check ALL 4 pixels of the neighbor quad to match Decoder's rho!=0 check
         let width = self.width;
         let height = self.height;
 
-        let neighbors = [
-            if x >= 2 { Some((x - 2, y_base)) } else { None },
-            if y_base >= 2 {
-                Some((x, y_base - 2))
-            } else {
-                None
-            },
+        // Neighbor quads: Left (x-2) and Top (y-2)
+        // We need to check (nx, ny), (nx+1, ny), (nx, ny+1), (nx+1, ny+1)
+        
+        let neighbor_origins = [
+            if x >= 2 { Some((x - 2, y_base)) } else { None }, // Left Quad Origin
+            if y_base >= 2 { Some((x, y_base - 2)) } else { None }, // Top Quad Origin
         ];
 
-        for neighbor in neighbors.iter().flatten() {
-            let (nx, ny) = *neighbor;
-            if nx < width && ny < height {
-                let idx = ny * width + nx;
-                if idx < block.coefficients.len() && block.coefficients[idx] != 0 {
-                    return 1;
+        for origin in neighbor_origins.iter().flatten() {
+            let (ox, oy) = *origin;
+            // Check 2x2 block at ox, oy
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let nx = ox + dx;
+                    let ny = oy + dy;
+                    if nx < width && ny < height {
+                        let idx = ny * width + nx;
+                        if idx < block.coefficients.len() && block.coefficients[idx] != 0 {
+                            return 1; // Found significant pixel in neighbor quad
+                        }
+                    }
                 }
             }
         }
