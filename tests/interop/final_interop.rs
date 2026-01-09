@@ -5,11 +5,22 @@ use jpegexp_rs::FrameInfo;
 use std::process::Command;
 use std::path::Path;
 
-const OPJ_COMPRESS: &str = "openjpeg/openjpeg-v2.5.2-windows-x64/bin/opj_compress.exe";
-const OPJ_DECOMPRESS: &str = "openjpeg/openjpeg-v2.5.2-windows-x64/bin/opj_decompress.exe";
+const OPJ_COMPRESS: &str = "libs/bin/opj_compress.exe";
+const OPJ_DECOMPRESS: &str = "libs/bin/opj_decompress.exe";
 
 fn find_openjpeg_binary(name: &str) -> Option<String> {
-    // Try the hardcoded path first
+    // Try libs/bin first (centralized location)
+    let libs_path = if name == "opj_compress" {
+        "libs/bin/opj_compress.exe"
+    } else {
+        "libs/bin/opj_decompress.exe"
+    };
+    
+    if Path::new(libs_path).exists() {
+        return Some(libs_path.to_string());
+    }
+    
+    // Try the hardcoded path (legacy)
     let hardcoded = if name == "opj_compress" {
         OPJ_COMPRESS
     } else {
@@ -21,6 +32,12 @@ fn find_openjpeg_binary(name: &str) -> Option<String> {
     }
     
     // Try PATH
+    let exe_name = format!("{}.exe", name);
+    if Command::new(&exe_name).arg("-h").output().is_ok() {
+        return Some(exe_name);
+    }
+    
+    // Try without .exe extension (Linux/Mac)
     if Command::new(name).arg("-h").output().is_ok() {
         return Some(name.to_string());
     }
