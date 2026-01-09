@@ -184,13 +184,13 @@ fn test_j2k_lossless_roundtrip_constant() {
 }
 
 #[test]
-#[ignore = "MQ coder index out of bounds - needs investigation"]
 fn test_j2k_mq_roundtrip_simple() {
     // Test MQ coder directly for encoding/decoding of known sequence
     use jpegexp_rs::jpeg2000::mq_coder::MqCoder;
 
     let mut encoder = MqCoder::new();
     encoder.init_contexts(19);
+    encoder.init_encoder(); // ✅ FIXED: Initialize encoder before use
 
     // Encode a simple sequence: 0, 1, 0, 0, 1, 1
     let symbols = [0u8, 1, 0, 0, 1, 1];
