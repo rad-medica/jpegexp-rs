@@ -1,12 +1,5 @@
 use super::mq_coder::MqCoder;
 
-#[derive(Debug)]
-enum PassType {
-    SigProp,
-    MagRef,
-    Cleanup,
-}
-
 pub struct BitPlaneCoder<'a> {
     pub width: u32,
     pub height: u32,

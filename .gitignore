@@ -1,5 +1,5 @@
 # External Libraries
-/libs/bin/
+/libs/bin/*
 /libs/openhtj2k_src/*
 /libs/openjpeg_src/*
 /libs/libjpeg-turbo_src/*

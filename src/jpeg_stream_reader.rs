@@ -49,8 +49,9 @@ pub struct JpegStreamReader<'a> {
     parameters: CodingParameters,
     preset_coding_parameters: JpeglsPcParameters,
     spiff_header: Option<SpiffHeader>,
-    pub quantization_tables: [[u8; 64]; 4],
+    pub quantization_tables: [[u16; 64]; 4],
     pub huffman_tables_dc: [Option<crate::jpeg1::huffman::HuffmanTable>; 4],
+
     pub huffman_tables_ac: [Option<crate::jpeg1::huffman::HuffmanTable>; 4],
     pub components: Vec<JpegComponent>,
     pub restart_interval: u16,
@@ -77,8 +78,9 @@ impl<'a> JpegStreamReader<'a> {
             parameters: CodingParameters::default(),
             preset_coding_parameters: JpeglsPcParameters::default(),
             spiff_header: None,
-            quantization_tables: [[0u8; 64]; 4],
+            quantization_tables: [[0u16; 64]; 4],
             huffman_tables_dc: [const { None }; 4],
+
             huffman_tables_ac: [const { None }; 4],
             components: Vec::new(),
             restart_interval: 0,
@@ -148,7 +150,11 @@ impl<'a> JpegStreamReader<'a> {
                 JpegMarkerCode::StartOfFrameBaseline => {
                     self.read_sof0_segment()?;
                 }
+                JpegMarkerCode::StartOfFrameExtendedSequential => {
+                    self.read_sof1_segment()?;
+                }
                 JpegMarkerCode::StartOfFrameProgressive => {
+
                     self.read_sof2_segment()?;
                 }
                 JpegMarkerCode::StartOfFrameLossless => {
@@ -446,6 +452,11 @@ impl<'a> JpegStreamReader<'a> {
         Ok(())
     }
 
+    fn read_sof1_segment(&mut self) -> Result<(), JpeglsError> {
+        self.read_sof0_segment()
+    }
+
+
     fn read_sof3_segment(&mut self) -> Result<(), JpeglsError> {
         // SOF3 is syntactically identical to SOF0 in terms of header structure,
         // but it implies lossless process.
@@ -466,16 +477,31 @@ impl<'a> JpegStreamReader<'a> {
             let pq_tq = self.read_u8()?;
             let precision = pq_tq >> 4;
             let id = (pq_tq & 0x0F) as usize;
-            if id >= 4 || precision != 0 {
+            if id >= 4 {
                 return Err(JpeglsError::ParameterValueNotSupported);
             }
-            for i in 0..64 {
-                self.quantization_tables[id][i] = self.read_u8()?;
+            if precision == 0 {
+                // 8-bit precision
+                for i in 0..64 {
+                    self.quantization_tables[id][i] = self.read_u8()? as u16;
+                }
+                remaining -= 65;
+            } else if precision == 1 {
+                // 16-bit precision
+                if remaining < 129 {
+                    return Err(JpeglsError::InvalidData);
+                }
+                for i in 0..64 {
+                    self.quantization_tables[id][i] = self.read_u16()?;
+                }
+                remaining -= 129;
+            } else {
+                return Err(JpeglsError::ParameterValueNotSupported);
             }
-            remaining -= 65;
         }
         Ok(())
     }
+
 
     pub fn read_dht_segment(&mut self) -> Result<(), JpeglsError> {
         let length = self.read_u16()? as usize;

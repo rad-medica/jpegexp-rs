@@ -25,6 +25,10 @@ pub struct J2kEncoder {
     quality: u8,
     /// Use HTJ2K (High-Throughput JPEG 2000) encoding
     use_htj2k: bool,
+    /// Include TLM (Tile-part Lengths) marker
+    include_tlm: bool,
+    /// Include PLT (Packet Lengths) marker
+    include_plt: bool,
 }
 
 /// Encoded packet data structure
@@ -45,6 +49,8 @@ impl J2kEncoder {
             codeblock_exp: 4,        // 64x64 codeblocks
             quality: 100,
             use_htj2k: false, // Default to standard JPEG 2000
+            include_tlm: true, // Default to including TLM for better random access
+            include_plt: true, // Default to including PLT for better random access
         }
     }
 
@@ -67,6 +73,16 @@ impl J2kEncoder {
     /// HTJ2K provides faster encoding at the cost of slightly larger files
     pub fn set_htj2k(&mut self, use_htj2k: bool) {
         self.use_htj2k = use_htj2k;
+    }
+
+    /// Set whether to include TLM marker
+    pub fn set_include_tlm(&mut self, include: bool) {
+        self.include_tlm = include;
+    }
+
+    /// Set whether to include PLT marker
+    pub fn set_include_plt(&mut self, include: bool) {
+        self.include_plt = include;
     }
 
     /// Encode pixel data to JPEG 2000 codestream
@@ -602,15 +618,50 @@ impl J2kEncoder {
                 .then(a.component.cmp(&b.component))
         });
 
-        // Write SOT (Start of Tile)
-        // Calculate total length first
-        let total_packet_len: usize = packets
+        // Calculate packet lengths for PLT
+        let packet_lengths: Vec<u32> = packets
             .iter()
-            .map(|p| p.header_data.len() + p.body_data.len())
-            .sum();
-        let tile_total_len = 12 + 2 + total_packet_len as u32; // SOT + SOD + Data
+            .map(|p| (p.header_data.len() + p.body_data.len()) as u32)
+            .collect();
 
-        writer.write_sot(0, tile_total_len, 0, 1)?;
+        // Calculate total tile length (SOT through EOC, or just through data?)
+        // ISO 15444-1: Psot is length from SOT to EOC inclusive (if last tile-part)
+        // Or length from SOT to end of tile-part.
+        // For single tile-part, it's length until EOI.
+        let total_packet_len: usize = packet_lengths.iter().sum::<u32>() as usize;
+
+        // PLT length (if included)
+        let mut plt_len = 0;
+        if self.include_plt {
+            let mut encoded_lengths_len = 0;
+            for &len in &packet_lengths {
+                let mut remaining = len;
+                encoded_lengths_len += 1;
+                remaining >>= 7;
+                while remaining > 0 {
+                    encoded_lengths_len += 1;
+                    remaining >>= 7;
+                }
+            }
+            plt_len = 2 + 2 + 1 + encoded_lengths_len; // Marker (2) + Lplt (2) + Zplt (1) + data
+        }
+
+        let tile_part_header_len = 12 + plt_len; // SOT (12) + PLT
+        let tile_total_len = tile_part_header_len + 2 + total_packet_len as usize + 2; // + SOD (2) + Packets + EOC (2)
+
+        // Write TLM (if included) in main header
+        if self.include_tlm {
+            writer.write_tlm(0, tile_total_len as u32, 1)?;
+        }
+
+        // Write SOT (Start of Tile)
+        // Set Psot = 0 for single tile-part as per standard recommendation
+        writer.write_sot(0, 0, 0, 1)?;
+
+        // Write PLT (if included)
+        if self.include_plt {
+            writer.write_plt(&packet_lengths)?;
+        }
 
         // Write SOD (Start of Data)
         writer.write_sod()?;
@@ -1253,6 +1304,41 @@ mod tests {
         assert_eq!(encoded[1], 0x4F, "Should have SOC marker");
         assert_eq!(encoded[len - 2], 0xFF, "Should end with FF");
         assert_eq!(encoded[len - 1], 0xD9, "Should have EOC marker");
+    }
+
+    #[test]
+    fn test_encoder_includes_tlm_plt() {
+        let width = 16;
+        let height = 16;
+        let components = 1;
+
+        let pixels = vec![0u8; width * height * components];
+        let frame_info = FrameInfo {
+            width: width as u32,
+            height: height as u32,
+            bits_per_sample: 8,
+            component_count: components as i32,
+        };
+
+        let mut encoded = vec![0u8; 8192];
+        let mut encoder = J2kEncoder::new();
+        encoder.set_include_tlm(true);
+        encoder.set_include_plt(true);
+
+        let result = encoder.encode(&pixels, &frame_info, &mut encoded).unwrap();
+        let written = &encoded[..result];
+
+        // Check for TLM (0xFF55)
+        assert!(
+            written.windows(2).any(|w| w == [0xFF, 0x55]),
+            "TLM marker not found"
+        );
+
+        // Check for PLT (0xFF58)
+        assert!(
+            written.windows(2).any(|w| w == [0xFF, 0x58]),
+            "PLT marker not found"
+        );
     }
 
     #[test]

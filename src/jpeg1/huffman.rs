@@ -12,6 +12,10 @@ pub const STD_LUMINANCE_DC_LENGTHS: [u8; 16] = [0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0,
 
 pub const STD_LUMINANCE_DC_VALUES: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
+pub const EXT_LUMINANCE_DC_LENGTHS: [u8; 16] = [0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+pub const EXT_LUMINANCE_DC_VALUES: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+
 pub const STD_LUMINANCE_AC_LENGTHS: [u8; 16] = [0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125];
 
 pub const STD_LUMINANCE_AC_VALUES: [u8; 162] = [
@@ -109,7 +113,12 @@ impl HuffmanTable {
         Self::build_from_dht(&STD_LUMINANCE_DC_LENGTHS, &STD_LUMINANCE_DC_VALUES)
     }
 
+    pub fn extended_luminance_dc() -> Self {
+        Self::build_from_dht(&EXT_LUMINANCE_DC_LENGTHS, &EXT_LUMINANCE_DC_VALUES)
+    }
+
     pub fn standard_luminance_ac() -> Self {
+
         Self::build_from_dht(&STD_LUMINANCE_AC_LENGTHS, &STD_LUMINANCE_AC_VALUES)
     }
 
@@ -303,8 +312,10 @@ impl HuffmanEncoder {
         if v == 0 {
             return 0;
         }
-        (16 - v.abs().leading_zeros()) as u8
+        let abs_v = v.unsigned_abs();
+        (16 - abs_v.leading_zeros()) as u8
     }
+
     pub fn get_diff_bits(v: i16, cat: u8) -> (u16, u8) {
         if cat == 0 {
             return (0, 0);

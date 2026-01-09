@@ -70,47 +70,42 @@ mod jpegls_decoder_validation {
         test_charls_decode("rect_32x16_gray_gradient", 32, 16, 1, 8);
     }
 
-    // ============= RGB TESTS (IGNORED) =============
-    // RGB/multi-component images use sample-interleave mode which requires triplet
-    // processing not yet implemented. See src/jpegls/mod.rs for details.
+    // ============= RGB TESTS (ENABLED) =============
+    // RGB/multi-component images use sample-interleave mode.
+    // Fixed issues with context sharing and run interruption.
 
     #[test]
-    #[ignore = "RGB sample-interleave supported but compliance issue with CharLS images"]
     fn test_tiny_8x8_rgb_gradient() {
         test_charls_decode("tiny_8x8_rgb_gradient", 8, 8, 3, 8);
     }
 
     #[test]
-    #[ignore = "RGB sample-interleave supported but compliance issue with CharLS images"]
     fn test_small_16x16_rgb_gradient() {
         test_charls_decode("small_16x16_rgb_gradient", 16, 16, 3, 8);
     }
 
     #[test]
-    #[ignore = "RGB sample-interleave supported but compliance issue with CharLS images"]
     fn test_small_32x32_rgb_gradient() {
         test_charls_decode("small_32x32_rgb_gradient", 32, 32, 3, 8);
     }
 
     #[test]
-    #[ignore = "RGB sample-interleave supported but compliance issue with CharLS images"]
     fn test_medium_64x64_rgb_gradient() {
         test_charls_decode("medium_64x64_rgb_gradient", 64, 64, 3, 8);
     }
 
     #[test]
-    #[ignore = "RGB sample-interleave supported but compliance issue with CharLS images"]
     fn test_small_16x16_rgb_noise() {
         test_charls_decode("small_16x16_rgb_noise", 16, 16, 3, 8);
     }
 
     #[test]
-    #[ignore = "RGB sample-interleave supported but compliance issue with CharLS images"]
     fn test_small_16x16_rgb_checker() {
         test_charls_decode("small_16x16_rgb_checker", 16, 16, 3, 8);
     }
 
     // ============= 16-BIT GRAYSCALE TESTS =============
+
 
     #[test]
     fn test_small_16x16_gray16_gradient() {

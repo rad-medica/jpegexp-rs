@@ -171,6 +171,100 @@ impl<'a> J2kWriter<'a> {
         self.writer.write_marker(JpegMarkerCode::StartOfData) // 0xFF93
     }
 
+    /// Write TLM (Tile-part Lengths) marker
+    /// Usually placed in the main header to help decoders with random access
+    pub fn write_tlm(
+        &mut self,
+        tile_index: u16,
+        tile_len: u32,
+        num_tiles: u32,
+    ) -> Result<(), JpeglsError> {
+        self.writer.write_marker(JpegMarkerCode::TilePartLengths)?;
+
+        // Stlm byte structure:
+        // Bits 0-1 (ST): Size of Ttlm (tile index)
+        //   0b00 = 0 bytes, 0b01 = 1 byte, 0b10 = 2 bytes
+        // Bit 6 (SP): Size of Ptlm (tile-part length)
+        //   0 = 2 bytes, 1 = 4 bytes
+        let st = if num_tiles <= 1 {
+            0
+        } else if num_tiles <= 256 {
+            1
+        } else {
+            2
+        };
+        let sp = if tile_len <= 65535 { 0 } else { 1 };
+        let stlm = (sp << 6) | st;
+
+        let st_bytes = match st {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            _ => 0,
+        };
+        let sp_bytes = if sp == 0 { 2 } else { 4 };
+
+        // Length: Ltlm (2) + Ztlm (1) + Stlm (1) + (ST + SP) * n entries
+        // Here we write 1 entry
+        let payload_len = 2 + (st_bytes + sp_bytes);
+        self.writer.write_u16(payload_len as u16 + 2)?;
+        self.writer.write_byte(0)?; // Ztlm: index of this marker
+        self.writer.write_byte(stlm)?;
+
+        if st == 1 {
+            self.writer.write_byte(tile_index as u8)?;
+        } else if st == 2 {
+            self.writer.write_u16(tile_index)?;
+        }
+
+        if sp == 0 {
+            self.writer.write_u16(tile_len as u16)?;
+        } else {
+            self.writer.write_u32(tile_len)?;
+        }
+
+        Ok(())
+    }
+
+    /// Write PLT (Packet Lengths) marker
+    /// Usually placed in the tile-part header (after SOT)
+    pub fn write_plt(&mut self, packet_lengths: &[u32]) -> Result<(), JpeglsError> {
+        if packet_lengths.is_empty() {
+            return Ok(());
+        }
+
+        self.writer.write_marker(JpegMarkerCode::PacketLengths)?;
+
+        let mut encoded_lengths = Vec::new();
+        for &len in packet_lengths {
+            let mut bytes = Vec::new();
+            let mut remaining = len;
+
+            // Variable length encoding (7 bits per byte, MSB is continuation bit)
+            // LSB-first calculation
+            bytes.push((remaining & 0x7F) as u8);
+            remaining >>= 7;
+
+            while remaining > 0 {
+                bytes.push(0x80 | (remaining & 0x7F) as u8);
+                remaining >>= 7;
+            }
+
+            // Write in reverse (MSB first in stream)
+            for &b in bytes.iter().rev() {
+                encoded_lengths.push(b);
+            }
+        }
+
+        // Length: Lplt (2) + Zplt (1) + encoded lengths
+        let payload_len = 1 + encoded_lengths.len();
+        self.writer.write_u16(payload_len as u16 + 2)?;
+        self.writer.write_byte(0)?; // Zplt: index of this marker
+        self.write_bytes(&encoded_lengths)?;
+
+        Ok(())
+    }
+
     // Helper to access internal buffer to write raw data (packets)
     pub fn write_bytes(&mut self, data: &[u8]) -> Result<(), JpeglsError> {
         for &b in data {

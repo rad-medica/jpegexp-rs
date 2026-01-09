@@ -13,6 +13,10 @@ name = "jpegexp"
 path = "src/bin/jpegexp.rs"
 
 [[test]]
+name = "universal_codec_test"
+path = "tests/integration/universal_codec_test.rs"
+
+[[test]]
 name = "j2k_roundtrip_test"
 path = "tests/integration/j2k_roundtrip_test.rs"
 
@@ -191,6 +195,10 @@ path = "tests/unit/test_simple_j2k.rs"
 [[test]]
 name = "master_interop"
 path = "tests/interop/master_interop.rs"
+
+[[test]]
+name = "test_jpeg1_12bit"
+path = "tests/integration/test_jpeg1_12bit.rs"
 
 [[bench]]
 name = "j2k_compression"

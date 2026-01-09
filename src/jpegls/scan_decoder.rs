@@ -29,9 +29,10 @@ pub struct ScanDecoder<'a> {
     valid_bits: i32,
     read_cache: usize,
 
-    // Contexts
-    regular_mode_contexts: Vec<Vec<RegularModeContext>>,
-    run_mode_contexts: Vec<Vec<RunModeContext>>,
+    // Contexts (shared across components in a scan)
+    regular_mode_contexts: Vec<RegularModeContext>,
+    run_mode_contexts: Vec<RunModeContext>,
+
 
     // Scan state
     run_index: Vec<usize>,
@@ -83,21 +84,16 @@ impl<'a> ScanDecoder<'a> {
             frame_info.component_count as usize
         };
 
-        let mut regular_mode_contexts = Vec::with_capacity(num_components);
-        let mut run_mode_contexts = Vec::with_capacity(num_components);
         let mut run_index = Vec::with_capacity(num_components);
-
         for _ in 0..num_components {
-            regular_mode_contexts.push(vec![RegularModeContext::new(range); 365]);
-            // Per JPEG-LS spec section 4.5.2:
-            // Context 0 (Rb != Ra): RIType = 0
-            // Context 1 (Rb == Ra): RIType = 1
-            run_mode_contexts.push(vec![
-                RunModeContext::new(0, range), // context 0: different
-                RunModeContext::new(1, range), // context 1: similar
-            ]);
             run_index.push(0);
         }
+
+        let regular_mode_contexts = vec![RegularModeContext::new(range); 365];
+        let run_mode_contexts = vec![
+            RunModeContext::new(0, range), // context 0: different
+            RunModeContext::new(1, range), // context 1: similar
+        ];
 
         let mut decoder = Self {
             frame_info,
@@ -122,6 +118,7 @@ impl<'a> ScanDecoder<'a> {
             #[cfg(debug_assertions)]
             pixels_decoded: 0,
         };
+
 
         decoder.fill_read_cache()?;
 
@@ -383,21 +380,15 @@ impl<'a> ScanDecoder<'a> {
                 current_buf_idx += run_len * components;
 
                 // Re-sync Rb/Rd after run
-                // After run ending at pixel_idx, we need to update rb/rd to match regular mode indexing
-                // Regular mode uses: current_buf_idx = (pixel_idx + 1) * components
-                // rb reads from prev_line[current_buf_idx + c]
-                // rd reads from prev_line[current_buf_idx + components + c]
                 if pixel_idx < width {
-                    let is_last = pixel_idx == width - 1;
                     for c in 0..components {
-                        rb[c] = prev_line[(pixel_idx + 1) * components + c].to_i32();
-                        if is_last {
-                            rd[c] = rb[c];
-                        } else {
-                            rd[c] = prev_line[(pixel_idx + 2) * components + c].to_i32();
-                        }
+                        // Initialize rb to Top-Left and rd to Top neighbor
+                        // The regular loop will then shift them: rc=rb, rb=rd, rd=TopRight
+                        rb[c] = prev_line[pixel_idx * components + c].to_i32();
+                        rd[c] = prev_line[(pixel_idx + 1) * components + c].to_i32();
                     }
                 }
+
             }
         }
         Ok(())
@@ -407,7 +398,7 @@ impl<'a> ScanDecoder<'a> {
         &mut self,
         qs: i32,
         predicted: i32,
-        component_index: usize,
+        _component_index: usize,
     ) -> Result<i32, JpeglsError> {
         let pos_before = self.position;
         let valid_bits_before = self.valid_bits;
@@ -420,7 +411,7 @@ impl<'a> ScanDecoder<'a> {
         let near_lossless = self.coding_parameters.near_lossless;
 
         {
-            let context = &self.regular_mode_contexts[component_index][ctx_index];
+            let context = &self.regular_mode_contexts[ctx_index];
             k = context.compute_golomb_coding_parameter(31)?;
             context_c = context.c();
         }
@@ -437,11 +428,11 @@ impl<'a> ScanDecoder<'a> {
         let bits_from_cache = valid_bits_before - self.valid_bits;
         #[allow(unused_variables)]
         let bits_consumed = bits_from_bytes + bits_from_cache;
-        debug_log!("      decode_regular: comp={}, qs={}, ctx_idx={}, k={}, map_val={}, error={}, pos {}→{}, vb {}→{}, bits={}",
-                   component_index, qs, ctx_index, k, map_val, error_value, pos_before, self.position, valid_bits_before, self.valid_bits, bits_consumed);
+        debug_log!("      decode_regular: qs={}, ctx_idx={}, k={}, map_val={}, error={}, pos {}→{}, vb {}→{}, bits={}",
+                   qs, ctx_index, k, map_val, error_value, pos_before, self.position, valid_bits_before, self.valid_bits, bits_consumed);
 
         {
-            let context = &mut self.regular_mode_contexts[component_index][ctx_index];
+            let context = &mut self.regular_mode_contexts[ctx_index];
             if k == 0 {
                 error_value ^= context.get_error_correction(near_lossless);
             }
@@ -460,6 +451,7 @@ impl<'a> ScanDecoder<'a> {
         );
         Ok(reconstructed)
     }
+
 
     fn decode_mapped_error_value(&mut self, k: i32) -> Result<i32, JpeglsError> {
         self.decode_mapped_error_value_with_limit(k, self._limit)
@@ -825,71 +817,91 @@ impl<'a> ScanDecoder<'a> {
                 start_index + run_length
             );
             let px_offset = base_offset + (start_index + run_length) * components;
-            let mut _interruption_found = false;
 
-            // Loop through components to find the one that interrupted (or decode until mismatch)
-            for c in 0..components {
-                let idx = px_offset + c;
-                let ra = curr_line[idx - components].to_i32();
+            if self.coding_parameters.interleave_mode == InterleaveMode::Sample {
+                // In sample-interleaved mode, ALL components of the interrupting pixel
+                // are coded using the interruption context (context 0).
+                // See T.87 Section 4.5.2 and CharLS implementation.
+                for c in 0..components {
+                    let idx = px_offset + c;
+                    let ra = curr_line[idx - components].to_i32();
+                    let rb_val = prev_line[idx].to_i32();
 
-                let rb_val = prev_line[idx].to_i32();
-
-                let val = self.decode_run_interruption_pixel::<T>(ra, rb_val, c)?;
-                curr_line[idx] = T::from_i32(val);
-
-                if !T::is_near(val, ra, self.coding_parameters.near_lossless) {
-                    _interruption_found = true;
-
-                    // Decrement run index (shared)
-                    if self.run_index[comp0_idx] > 0 {
-                        self.run_index[comp0_idx] -= 1;
-                    }
-
-                    // Decode remaining components of this pixel using Regular Mode
-                    for next_c in (c + 1)..components {
-                        let next_idx = px_offset + next_c;
-
-                        let r_a = curr_line[next_idx - components].to_i32();
-                        let r_up = prev_line[next_idx].to_i32();
-                        let r_up_left = prev_line[next_idx - components].to_i32();
-
-                        let r_up_right = if start_index + run_length == width - 1 {
-                            r_up
-                        } else {
-                            prev_line[next_idx + components].to_i32()
-                        };
-
-                        let d1 = r_up_right - r_up;
-                        let d2 = r_up - r_up_left;
-                        let d3 = r_up_left - r_a;
-
-                        let q1 = self.quantize_gradient(d1);
-                        let q2 = self.quantize_gradient(d2);
-                        let q3 = self.quantize_gradient(d3);
-
-                        let qs = self.compute_context_id(q1, q2, q3);
-                        let predicted = self.compute_predicted_value(r_a, r_up, r_up_left);
-
-                        let decoded_val = self.decode_regular::<T>(qs, predicted, next_c)?;
-                        curr_line[next_idx] = T::from_i32(decoded_val);
-                    }
-
-                    break;
+                    // Always use context 0 and prediction Rb for interleaved interruption
+                    let val = self.decode_interleaved_interruption_component::<T>(ra, rb_val, c)?;
+                    curr_line[idx] = T::from_i32(val);
                 }
+            } else {
+                // For non-interleaved or line-interleaved, components are coded
+                // according to their individual Ra == Rb relationship.
+                for c in 0..components {
+                    let idx = px_offset + c;
+                    let ra = curr_line[idx - components].to_i32();
+                    let rb_val = prev_line[idx].to_i32();
+
+                    let val = self.decode_run_interruption_pixel::<T>(ra, rb_val, c)?;
+                    curr_line[idx] = T::from_i32(val);
+                }
+            }
+
+            // Decrement shared run index
+            if self.run_index[comp0_idx] > 0 {
+                self.run_index[comp0_idx] -= 1;
             }
 
             run_length += 1;
         }
 
+
         debug_log!("        Returning run_length={}", run_length);
         Ok(run_length)
+    }
+
+    fn decode_interleaved_interruption_component<T: crate::jpegls::traits::JpeglsSample>(
+        &mut self,
+        ra: i32,
+        rb: i32,
+        _comp: usize,
+    ) -> Result<i32, JpeglsError> {
+        let context_index = 0; // Always context 0 for interleaved interruption
+        let sign = if (rb - ra) >= 0 { 1 } else { -1 };
+
+        let k: i32;
+        let ri_type: i32;
+        {
+            let context = &self.run_mode_contexts[context_index];
+            k = context.compute_golomb_coding_parameter();
+            ri_type = context.run_interruption_type();
+        }
+
+        // For run mode, limit is adjusted by J[run_index]
+        let run_limit = self._limit - crate::constants::J[self.run_index[0]] - 1;
+
+        let e_mapped_error = self.decode_mapped_error_value_with_limit(k, run_limit)?;
+
+        let temp = e_mapped_error + ri_type;
+
+        let error_value: i32;
+        {
+            let context = &mut self.run_mode_contexts[context_index];
+            error_value = context.decode_error_value(temp, k);
+            let reset_threshold = self.reset_threshold;
+            context.update_variables(error_value, e_mapped_error, reset_threshold);
+        }
+
+        let reconstructed = T::compute_reconstructed_sample(rb, error_value * sign);
+
+        debug_log!("      Interleaved interruption: ra={}, rb={}, e_mapped={}, error={}, reconstructed={}",
+                   ra, rb, e_mapped_error, error_value, reconstructed);
+
+        Ok(reconstructed)
     }
 
     fn decode_run_interruption_pixel<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         ra: i32,
         rb: i32,
-        comp: usize,
+        _comp: usize,
     ) -> Result<i32, JpeglsError> {
         let near_lossless = self.coding_parameters.near_lossless;
         let (context_index, sign) = if (ra - rb).abs() <= near_lossless {
@@ -901,7 +913,7 @@ impl<'a> ScanDecoder<'a> {
         let k: i32;
         let ri_type: i32;
         {
-            let context = &self.run_mode_contexts[comp][context_index];
+            let context = &self.run_mode_contexts[context_index];
             k = context.compute_golomb_coding_parameter();
             ri_type = context.run_interruption_type();
         }
@@ -916,7 +928,7 @@ impl<'a> ScanDecoder<'a> {
 
         let error_value: i32;
         {
-            let context = &mut self.run_mode_contexts[comp][context_index];
+            let context = &mut self.run_mode_contexts[context_index];
             error_value = context.decode_error_value(temp, k);
             let reset_threshold = self.reset_threshold;
             context.update_variables(error_value, e_mapped_error, reset_threshold);
@@ -928,9 +940,10 @@ impl<'a> ScanDecoder<'a> {
             T::compute_reconstructed_sample(rb, error_value * sign)
         };
 
-        debug_log!("      Run interruption: comp={}, ra={}, rb={}, e_mapped={}, temp={}, error={}, reconstructed={}",
-                   comp, ra, rb, e_mapped_error, temp, error_value, reconstructed);
+        debug_log!("      Run interruption: ra={}, rb={}, e_mapped={}, temp={}, error={}, reconstructed={}",
+                   ra, rb, e_mapped_error, temp, error_value, reconstructed);
 
         Ok(reconstructed)
     }
+
 }

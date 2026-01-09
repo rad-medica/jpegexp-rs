@@ -123,7 +123,18 @@ impl<'a> JpegStreamWriter<'a> {
         Ok(())
     }
 
+    pub fn write_dqt_u16(&mut self, table_id: u8, table: &[u16; 64]) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::DefineQuantizationTable)?;
+        self.write_u16(2 + 1 + 128)?;
+        self.write_byte(0x10 | (table_id & 0x0F))?; // Precision 1 (16-bit), ID
+        for &val in table {
+            self.write_u16(val)?;
+        }
+        Ok(())
+    }
+
     pub fn write_dht(
+
         &mut self,
         table_class: u8,
         table_id: u8,
@@ -144,7 +155,19 @@ impl<'a> JpegStreamWriter<'a> {
     }
 
     pub fn write_sof0_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
-        self.write_marker(JpegMarkerCode::StartOfFrameBaseline)?;
+        self.write_sof_segment(JpegMarkerCode::StartOfFrameBaseline, frame_info)
+    }
+
+    pub fn write_sof1_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
+        self.write_sof_segment(JpegMarkerCode::StartOfFrameExtendedSequential, frame_info)
+    }
+
+    fn write_sof_segment(
+        &mut self,
+        marker: JpegMarkerCode,
+        frame_info: &FrameInfo,
+    ) -> Result<(), JpeglsError> {
+        self.write_marker(marker)?;
         let length = 2 + 1 + 2 + 2 + 1 + (frame_info.component_count as usize * 3);
         self.write_u16(length as u16)?;
         self.write_byte(frame_info.bits_per_sample as u8)?;
@@ -161,6 +184,7 @@ impl<'a> JpegStreamWriter<'a> {
         }
         Ok(())
     }
+
 
     pub fn write_sos_segment(&mut self, component_count: u8) -> Result<(), JpeglsError> {
         self.write_marker(JpegMarkerCode::StartOfScan)?;

@@ -118,6 +118,10 @@ pub enum JpegMarkerCode {
     StartOfData = 0x93,
     /// COM: J2K Comment
     J2kComment = 0x64,
+    /// TLM: Tile-part lengths
+    TilePartLengths = 0x55,
+    /// PLT: Packet lengths
+    PacketLengths = 0x58,
 }
 
 impl std::convert::TryFrom<u8> for JpegMarkerCode {
@@ -177,6 +181,8 @@ impl std::convert::TryFrom<u8> for JpegMarkerCode {
             0x92 => Ok(Self::EndOfPacketHeader),
             0x93 => Ok(Self::StartOfData),
             0x64 => Ok(Self::J2kComment),
+            0x55 => Ok(Self::TilePartLengths),
+            0x58 => Ok(Self::PacketLengths),
 
             _ => Err(JpeglsError::InvalidData),
         }

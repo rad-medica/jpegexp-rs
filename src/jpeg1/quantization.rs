@@ -17,7 +17,19 @@ pub const STD_CHROMINANCE_QUANT_TABLE: [u8; BLOCK_DIM] = [
     99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
 ];
 
-/// Quantizes DCT coefficients using a quantization table.
+/// Quantizes DCT coefficients using a quantization table (8-bit or 16-bit).
+pub fn quantize_block_u16(
+    dct_block: &[f32; BLOCK_DIM],
+    quant_table: &[u16; BLOCK_DIM],
+    output: &mut [i16; BLOCK_DIM],
+) {
+    for i in 0..BLOCK_DIM {
+        let q_val = quant_table[i] as f32;
+        output[i] = (dct_block[i] / q_val).round() as i16;
+    }
+}
+
+/// Quantizes DCT coefficients using an 8-bit quantization table.
 pub fn quantize_block(
     dct_block: &[f32; BLOCK_DIM],
     quant_table: &[u8; BLOCK_DIM],
@@ -26,6 +38,18 @@ pub fn quantize_block(
     for i in 0..BLOCK_DIM {
         let q_val = quant_table[i] as f32;
         output[i] = (dct_block[i] / q_val).round() as i16;
+    }
+}
+
+/// De-quantizes DCT coefficients using a 16-bit quantization table.
+pub fn dequantize_block_u16(
+    quant_block: &[i16; BLOCK_DIM],
+    quant_table: &[u16; BLOCK_DIM],
+    output: &mut [f32; BLOCK_DIM],
+) {
+    for i in 0..BLOCK_DIM {
+        let q_val = quant_table[i] as f32;
+        output[i] = quant_block[i] as f32 * q_val;
     }
 }
 
@@ -40,6 +64,7 @@ pub fn dequantize_block(
         output[i] = quant_block[i] as f32 * q_val;
     }
 }
+
 
 /// Scales a quantization table by a quality factor (1-100).
 pub fn get_scaled_quant_table(base_table: &[u8; BLOCK_DIM], quality: u32) -> [u8; BLOCK_DIM] {

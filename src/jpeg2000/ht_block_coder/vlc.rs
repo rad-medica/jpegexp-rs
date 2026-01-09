@@ -1,4 +1,4 @@
-use super::vlc_tables::{VLC_TBL0_SRC, VLC_TBL1_SRC};
+use super::vlc_tables::{UVLC_TBL0_SRC, UVLC_TBL1_SRC, VLC_TBL0_SRC, VLC_TBL1_SRC};
 
 const TABLE_SIZE: usize = 1024;
 
@@ -150,4 +150,24 @@ pub fn encode_vlc(rho: u8, context: u8, u_off: u8) -> (VlcCodeword, u8, u8) {
     // If rho!=0, quad is significant, handled by MEL '1' + VLC.
 
     (VlcCodeword { value: 0, bits: 0 }, 0, 0)
+}
+
+/// Encode magnitude residuals (u_q) for a pair of quads using UVLC
+pub fn encode_uvlc(u_q0: u8, u_q1: u8, context: u8) -> VlcCodeword {
+    let src = if context == 0 {
+        UVLC_TBL0_SRC
+    } else {
+        UVLC_TBL1_SRC
+    };
+
+    let idx = (u_q0 as usize) + ((u_q1 as usize) << 5);
+    if idx < src.len() {
+        let val = src[idx];
+        VlcCodeword {
+            value: val >> 8,
+            bits: (val & 0xFF) as u8,
+        }
+    } else {
+        VlcCodeword { value: 0, bits: 0 }
+    }
 }
