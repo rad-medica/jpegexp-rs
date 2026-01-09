@@ -175,14 +175,16 @@ impl J2kImage {
             if !is_reversible {
                 let qcd = self.qcd.as_ref().unwrap();
                 let depth = self.components[comp_idx].depth;
-                let guard_bits = (qcd.quant_style >> 5) & 0x07;
                 let val = qcd.step_sizes[0];
                 let eps = ((val >> 11) & 0x1F) as i32;
                 let mu = (val & 0x7FF) as i32;
+                // Δ = 2^(depth - epsilon) * (1 + mu/2048)
+                // Note: ISO 15444-1 Eq. E.3 says R_b = R_I for LL band. Guard bits are NOT added to exponent.
                 let s_ll =
-                    (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth + guard_bits) as i32 - eps);
+                    (1.0 + mu as f32 / 2048.0) * 2.0f32.powi((depth) as i32 - eps);
 
                 if std::env::var("J2K_DEBUG").is_ok() {
+                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
                     eprintln!(
                         "DEC step[0] (LL ONCE): eps={}, mu={}, depth={}, guard={}, delta={:.6}",
                         eps, mu, depth, guard_bits, s_ll
@@ -284,9 +286,9 @@ impl J2kImage {
                             }
                         };
 
-                        // Δ = 2^(depth + guard_bits + gain - epsilon) * (1 + mu/2048)
+                        // Δ = 2^(depth + gain - epsilon) * (1 + mu/2048)
                         let delta = (1.0 + mu as f32 / 2048.0)
-                            * 2.0f32.powi((depth + guard_bits) as i32 + gain - eps);
+                            * 2.0f32.powi((depth) as i32 + gain - eps);
 
                         if std::env::var("J2K_DEBUG").is_ok() {
                             eprintln!("DEC step[{}]: eps={}, mu={}, depth={}, guard={}, gain={}, delta={:.6}",
@@ -390,12 +392,28 @@ impl J2kImage {
             (self.width * self.height * self.component_count) as usize
                 * bytes_per_sample
         ];
+        // DEBUG: Log first few reconstructed coefficients
+        if std::env::var("J2K_DEBUG").is_ok() && !component_buffers.is_empty() {
+            eprintln!("FINAL RECON: First 10 component_buffers[0]: {:?}", 
+                &component_buffers[0][..component_buffers[0].len().min(10)]);
+        }
+        
         for i in 0..(self.width * self.height) as usize {
             for c in 0..self.component_count as usize {
-                let depth = self.components.get(c).map_or(8, |info| info.depth);
-                let level_offset = (1i32 << (depth - 1)) as i32;
+                let comp_info = self.components.get(c);
+                let depth = comp_info.map_or(8, |info| info.depth);
+                let is_signed = comp_info.map_or(false, |info| info.is_signed);
+                
+                // Apply DC level shift only for unsigned components (ISO/IEC 15444-1 Section G.1.1)
+                let level_offset = if is_signed { 0 } else { (1i32 << (depth - 1)) as i32 };
                 let val = component_buffers[c][i] + level_offset;
                 let clamped = val.clamp(0, (1i32 << depth) - 1) as u32;
+                
+                // DEBUG: Log first few conversions
+                if std::env::var("J2K_DEBUG").is_ok() && i < 5 && c == 0 {
+                    eprintln!("PIXEL[{}]: coeff={}, depth={}, is_signed={}, offset={}, val={}, clamped={}", 
+                        i, component_buffers[c][i], depth, is_signed, level_offset, val, clamped);
+                }
                 if max_depth > 8 {
                     out[(i * self.component_count as usize + c) * 2] = clamped as u8;
                     out[(i * self.component_count as usize + c) * 2 + 1] = (clamped >> 8) as u8;
