@@ -436,8 +436,8 @@ impl HTBlockEncoder {
                 let e_k = u_val.saturating_sub(bit_k);
 
                 // Debug logging
-                let coord_x = (i % 2);
-                let coord_y = (i / 2);
+                let coord_x = i % 2;
+                let coord_y = i / 2;
                 if coord_x == 0 && coord_y == 0 {
                     eprintln!("ENC sample[0,0]: coeff={} mag={} u_val={} bit_k={} e_k={} bits_to_write={}", 
                               c, mag, u_val, bit_k, e_k, e_k);

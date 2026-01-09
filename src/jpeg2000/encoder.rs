@@ -1041,15 +1041,15 @@ impl J2kEncoder {
                                     .map(|v| v.abs())
                                     .max()
                                     .unwrap_or(0);
-                                let max_bp = if max_val > 0 {
+                                let _max_bp = if max_val > 0 {
                                     32 - max_val.leading_zeros() - 1
                                 } else {
                                     0
                                 };
 
                                 // Force zero_bp to 0 for robustness debugging
-                                // Ideally: mb.saturating_sub(1).saturating_sub(max_bp as u8)
-                                let zero_bp = 0; 
+                                // Ideally: mb.saturating_sub(1).saturating_sub(_max_bp as u8)
+                                let zero_bp = 0;
                                 
                                 packet_header
                                     .included_cblks
