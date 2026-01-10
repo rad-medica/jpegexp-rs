@@ -5,10 +5,70 @@ fn main() {
     println!("Benchmarking IDCT implementations...");
 
     let input = [
-        10.0, 5.0, -2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        10.0,
+        5.0,
+        -2.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     ]; // Simple mock DCT coefficients
 
     let iterations = 1_000_000;
@@ -24,7 +84,8 @@ fn main() {
     let duration_baseline = start.elapsed();
     println!(
         "Baseline (Float) IDCT: {:?} for {} iterations",
-        duration_baseline, iterations
+        duration_baseline,
+        iterations
     );
 
     // Benchmark Fixed Point
@@ -38,7 +99,8 @@ fn main() {
     let duration_fixed = start.elapsed();
     println!(
         "Fixed Point IDCT: {:?} for {} iterations",
-        duration_fixed, iterations
+        duration_fixed,
+        iterations
     );
 
     // Calc speedup

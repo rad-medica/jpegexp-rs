@@ -203,7 +203,7 @@ impl Jpeg1Encoder {
             }
         }
 
-        let mut bw = bit_writer_opt.unwrap();
+        let mut bw = bit_writer_opt.take().ok_or(JpeglsError::InvalidOperation)?;
         bw.flush()?;
         let encoded_len = bw.len();
         writer.advance(encoded_len);
@@ -322,7 +322,7 @@ impl Jpeg1Encoder {
             }
         }
 
-        let mut bw = bit_writer_opt.unwrap();
+        let mut bw = bit_writer_opt.take().ok_or(JpeglsError::InvalidOperation)?;
         bw.flush()?;
         let encoded_len = bw.len();
         writer.advance(encoded_len);

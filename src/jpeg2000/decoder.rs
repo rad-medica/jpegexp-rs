@@ -59,13 +59,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
         let codestream = {
             let mut jp2_reader =
                 crate::jpeg2000::jp2::Jp2Reader::new(self.parser.reader.remaining_data());
-            jp2_reader.find_codestream().unwrap_or_default()
+            jp2_reader.find_codestream()?
         };
 
         let icc_profile = {
             let mut jp2_reader =
                 crate::jpeg2000::jp2::Jp2Reader::new(self.parser.reader.remaining_data());
-            jp2_reader.find_icc_profile().unwrap_or_default()
+            jp2_reader.find_icc_profile()?
         };
 
         if let Some(cs) = codestream {
@@ -614,28 +614,29 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                 }
 
                 if std::env::var("J2K_DEBUG").is_ok() {
-                    let qcd = parser.image.qcd.as_ref().unwrap();
-                    let qcd_idx = if res == 0 {
-                        0
-                    } else {
-                        1 + (res - 1) * 3 + cb_info.subband_index as usize
-                    };
-                    let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
-                        (qcd.step_sizes[qcd_idx] >> 11) as u8
-                    } else {
-                        8
-                    };
-                    let guard_bits = (qcd.quant_style >> 5) & 0x07;
-                    let m_b = (guard_bits + epsilon_b).saturating_sub(1);
-                    let max_bit_plane_calc = m_b.saturating_sub(cb_info.zero_bp);
-                    eprintln!(
-                        "DECODE_BODY: res={} subband={} pos={} len={} data={:02X?}",
-                        res, cb_info.subband_index, pos_before, data_len, &data
-                    );
-                    eprintln!(
-                        "  -> qcd_idx={} eps_b={} guard={} mb={} zero_bp={} max_bp={}",
-                        qcd_idx, epsilon_b, guard_bits, m_b, cb_info.zero_bp, max_bit_plane_calc
-                    );
+                    if let Some(qcd) = parser.image.qcd.as_ref() {
+                        let qcd_idx = if res == 0 {
+                            0
+                        } else {
+                            1 + (res - 1) * 3 + cb_info.subband_index as usize
+                        };
+                        let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
+                            (qcd.step_sizes[qcd_idx] >> 11) as u8
+                        } else {
+                            8
+                        };
+                        let guard_bits = (qcd.quant_style >> 5) & 0x07;
+                        let m_b = (guard_bits + epsilon_b).saturating_sub(1);
+                        let max_bit_plane_calc = m_b.saturating_sub(cb_info.zero_bp);
+                        eprintln!(
+                            "DECODE_BODY: res={} subband={} pos={} len={} data={:02X?}",
+                            res, cb_info.subband_index, pos_before, data_len, &data
+                        );
+                        eprintln!(
+                            "  -> qcd_idx={} eps_b={} guard={} mb={} zero_bp={} max_bp={}",
+                            qcd_idx, epsilon_b, guard_bits, m_b, cb_info.zero_bp, max_bit_plane_calc
+                        );
+                    }
                 }
 
                 let tile = &mut parser.image.tiles[isot as usize];

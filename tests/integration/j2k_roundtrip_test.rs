@@ -63,7 +63,11 @@ fn test_j2k_lossless_roundtrip_grayscale() {
                     if cb_count > 0 || sb.width > 0 {
                         println!(
                             "      Subband {} {:?} ({}x{}): {} codeblocks",
-                            s_idx, sb.orientation, sb.width, sb.height, cb_count
+                            s_idx,
+                            sb.orientation,
+                            sb.width,
+                            sb.height,
+                            cb_count
                         );
                         for cb in &sb.codeblocks {
                             let coeff_sum: i64 = cb.coefficients.iter().map(|&x| x as i64).sum();
@@ -84,9 +88,9 @@ fn test_j2k_lossless_roundtrip_grayscale() {
         }
     }
 
-    let reconstructed = decoded_image
-        .reconstruct_pixels()
-        .expect("Reconstruction should succeed");
+    let reconstructed = decoded_image.reconstruct_pixels().expect(
+        "Reconstruction should succeed",
+    );
 
     println!("Reconstructed pixels: {:?}", reconstructed);
     println!("Decoded {} pixels", reconstructed.len());
@@ -103,7 +107,10 @@ fn test_j2k_lossless_roundtrip_grayscale() {
         if diff > 0 && i < 20 {
             println!(
                 "  Pixel {}: orig={}, recon={}, diff={}",
-                i, orig_val, recon_val, diff
+                i,
+                orig_val,
+                recon_val,
+                diff
             );
         }
         total_diff += diff as u64;
@@ -157,9 +164,9 @@ fn test_j2k_lossless_roundtrip_constant() {
     let mut reader = JpegStreamReader::new(&encoded);
     let mut decoder = J2kDecoder::new(&mut reader);
     let decoded_image = decoder.decode().expect("Decoding should succeed");
-    let reconstructed = decoded_image
-        .reconstruct_pixels()
-        .expect("Reconstruction should succeed");
+    let reconstructed = decoded_image.reconstruct_pixels().expect(
+        "Reconstruction should succeed",
+    );
 
     // Calculate MAE
     let mut total_diff = 0u64;
@@ -943,9 +950,11 @@ fn test_j2k_coefficient_roundtrip() {
     // Compare LL coefficient
     let ll_coeff = comp.resolutions[0].subbands[0].codeblocks[0].coefficients[0];
     assert_eq!(
-        ll_coeff, expected_coeffs[0],
+        ll_coeff,
+        expected_coeffs[0],
         "LL coefficient mismatch: expected {}, got {}",
-        expected_coeffs[0], ll_coeff
+        expected_coeffs[0],
+        ll_coeff
     );
 }
 
@@ -980,7 +989,8 @@ fn test_j2k_single_coeff_73() {
         Ok(coefficients) => {
             println!("  Decoded: {:?}", coefficients);
             assert_eq!(
-                coefficients[0], 73,
+                coefficients[0],
+                73,
                 "Should decode to 73, got {}",
                 coefficients[0]
             );

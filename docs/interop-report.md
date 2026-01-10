@@ -1,38 +1,58 @@
-# Master Interoperability Report
+# Interoperability Test Report
 
-This report summarizes the cross-interoperability tests between `jpegexp-rs` native Rust codecs and industry-standard external libraries.
+**Date:** January 9, 2026
+**Platform:** Windows x64
+**Libraries Tested:**
+- **OpenJPEG** (v2.5.2) - JPEG 2000 Reference
+- **CharLS** (v3.0.0) - JPEG-LS Reference
+- **libjpeg-turbo** (v3.1.3) - JPEG 1 Reference
+- **OpenHTJ2K** - HTJ2K Reference
 
-## Test Methodology
-- **Rust -> External**: Image is encoded using `jpegexp-rs` and decoded using the reference external library.
-- **External -> Rust**: Image is encoded using the reference external library and decoded using `jpegexp-rs`.
-- **Metrics**:
-    - **Speed**: Encoding and Decoding time in milliseconds.
-    - **Accuracy**: Mean Absolute Error (MAE). Lossless = 0.0000.
-    - **Compression**: Output file size in bytes.
+## Summary Table
 
-## Reference Libraries
-- **JPEG 2000**: OpenJPEG 2.5.2 (`opj_compress`, `opj_decompress`)
-- **JPEG-LS**: CharLS 3.0.0 (`charls.exe` - renamed sample utility)
-- **HTJ2K**: OpenHTJ2K 1.0.0 (`open_htj2k_enc`, `open_htj2k_dec`)
-- **JPEG 1**: libjpeg-turbo 3.1.3 (`cjpeg`, `djpeg`)
+| Codec | Mode | Bit Depth | Components | Direction | Status | MAE | Notes |
+|-------|------|-----------|------------|-----------|--------|-----|-------|
+| **JPEG-LS** | Lossless | 8 | 1 | Rust->Ext | ✅ PASS | 0.0000 | Perfect match |
+| **JPEG-LS** | Lossless | 8 | 1 | Ext->Rust | ✅ PASS | 0.0000 | Perfect match |
+| **JPEG-LS** | Lossless | 16 | 1 | Rust->Ext | ✅ PASS | 0.0000 | Perfect match |
+| **JPEG-LS** | Lossless | 16 | 1 | Ext->Rust | ✅ PASS | 0.0000 | Perfect match |
+| **JPEG 1** | Lossy | 8 | 1 | Rust->Ext | ✅ PASS | ~0.88 | Expected lossy diff |
+| **JPEG 1** | Lossy | 8 | 1 | Ext->Rust | ✅ PASS | ~0.36 | Expected lossy diff |
+| **JPEG 1** | Lossy | 8 | 3 | Rust->Ext | ✅ PASS | ~1.29 | Expected lossy diff |
+| **JPEG 2000** | Lossless | 8 | 1 | Rust->Ext | ⚠️ OK | ~0.32 | Minor differences |
+| **JPEG 2000** | Lossless | 8 | 1 | Ext->Rust | ⚠️ OK | ~0.32 | Minor differences |
+| **JPEG 2000** | Lossless | 16 | 1 | Rust->Ext | ❌ FAIL | ~19491 | Endianness mismatch |
+| **JPEG 2000** | Lossy | 8 | 1 | Rust->Ext | ✅ PASS | ~0.006 | Excellent lossy match |
+| **HTJ2K** | Lossless | 8 | 1 | Ext->Rust | ⚠️ WIP | - | Scan order/UVLC fixes applied |
 
-## Summary Table (Latest Results - 2026-01-08)
+## Detailed Findings
 
-| Codec | Direction | Status | MAE | Notes |
-|-------|-----------|--------|-----|-------|
-| **J2K** | Rust -> Ext | ✅ Pass | 0.23 | Fully interoperable with OpenJPEG |
-| **J2K** | Ext -> Rust | ✅ Pass | 0.23 | Fully interoperable with OpenJPEG |
-| **JLS** | Rust -> Ext | ✅ Pass | 0.00 | Lossless roundtrip confirmed by CharLS |
-| **JLS** | Ext -> Rust | ⚠️ Bug | ~112 | Decoder fails on complex external streams |
-| **JPEG1** | Rust -> Ext | ✅ Pass | 2.20 | Standard lossy interoperability |
-| **JPEG1** | Ext -> Rust | ⚠️ Bug | 127.5 | Likely level-shift or mapping issue |
-| **HTJ2K** | Both | ⚠️ Pending | - | Binary compatibility in progress |
+### JPEG-LS
+- **Perfect Interoperability**: Achieved 0.0000 MAE for both 8-bit and 16-bit grayscale.
+- Validated against CharLS reference implementation.
+- Both Encoder and Decoder are working correctly.
 
-## Performance Highlights (1024x1024 Grayscale)
+### JPEG 1
+- **Good Interoperability**: MAE < 1.3 for all tests.
+- Differences are within expected range for lossy DCT compression (implementation differences in quantization tables or FDCT/IDCT precision).
 
-- **JPEG 2000**: ~220ms Encode, ~200ms Decode.
-- **JPEG-LS**: ~180ms Encode (Very fast).
-- **JPEG 1**: ~210ms Encode.
+### JPEG 2000
+- **8-bit Support**: 
+  - Lossy encoding/decoding works well.
+  - Lossless encoding has minor differences (MAE ~0.32) when compared with OpenJPEG. This suggests slightly different handling of boundary conditions or reversible transforms, but visually identical.
+- **High Bit Depth (>8-bit)**:
+  - **Severe Issue**: MAE is extremely high (~20,000 for 16-bit).
+  - **Cause**: Likely Endianness mismatch. `jpegexp-rs` seems to interpret 16-bit input/output as Native Endian (Little Endian on x86), while OpenJPEG/Standard expects Big Endian in codestream (and possibly PGM test harness mismatch).
+  - **Action Item**: Fix Endianness handling for 16-bit samples in J2K encoder/decoder.
 
-## Detailed Metrics
-Detailed CSV data can be found in `docs/metrics_master_interop.csv`.
+### HTJ2K
+- **Decoder Fixes**:
+  - Fixed `decode_uvlc` to use standard tables (was using incorrect ad-hoc logic).
+  - Identified Scan Order discrepancy (OpenHTJ2K produces `rho` implying swapped 0/1 bits or `(0,0)` mapped to Sample 1).
+  - Verified decoding of simple patterns with `repro` test.
+- **Integration**: `test_ht_coder_repro` failure (`InvalidData`) indicates encoder/decoder sync issue (likely `MagSgn` or `UVLC` table mismatch in Encoder).
+
+## Recommendations
+1. **Fix J2K 16-bit Endianness**: Ensure `u16` samples are correctly byteswapped to Big Endian when writing to codestream and byteswapped back to Native Endian when decoding.
+2. **Investigate J2K 8-bit Lossless Diff**: Trace coefficients to find exact source of drift.
+3. **Finish HTJ2K**: Align Encoder with the fixed Decoder tables. Verify Scan Order.

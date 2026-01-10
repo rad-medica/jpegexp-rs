@@ -2,7 +2,7 @@
 
 This document tracks the backlog of planned features, improvements, and known issues for `jpegexp-rs`.
 
-**Last Updated**: 2026-01-09 (Post-HTJ2K Structural Fixes)
+**Last Updated**: 2026-01-09 (Post-Lossy Quantization Fix)
 
 ## 🔥 Critical Issues (**FIXED** - CI Ready)
 
@@ -11,15 +11,24 @@ This document tracks the backlog of planned features, improvements, and known is
 - [x] **Unsafe**: Documented invariants for 20 unsafe blocks
 - [x] **Unwrap**: Eliminated 57 unwraps in core library
 
-- [ ] **HTJ2K Decoder Bug Fix**: 🔴 **HIGH PRIORITY** - Fix pixel mismatch issues in HTJ2K decoder (VLC/UVLC/EMB reconstruction).
-  - Current status: 4 test failures in `test_htj2k_comprehensive` (8/12/16-bit gray, 8-bit RGB)
-  - Verified: Roundtrip for single coefficients passes (`test_ht_coder_repro.rs`), proving core logic is sound.
-  - Remaining issues: Integration tests show bitstream desynchronization (`0 -> 255` sign flip). This suggests `MEL/VLC` decoding is slightly off for complex patterns or block boundaries.
-  - Fixes Applied: 
-    - Corrected VLC tables.
-    - Implemented proper Bit Stuffing in Mel/MagSgn streams.
-    - Fixed Context Model to check all neighbors.
-    - Synced Decoder `quad_exponents` state with Encoder.
+- [ ] **HTJ2K Decoder Bug Fix**: 🔴 **HIGH PRIORITY** - Fix remaining pixel mismatch issues in HTJ2K decoder.
+  - Current status: 4 test failures in `test_htj2k_comprehensive` with ~99% pixel mismatches
+    - `test_htj2k_8bit_gray`: 4079/4096 pixels wrong (~99.6%)
+    - `test_htj2k_12bit_gray`: 7973/8192 pixels wrong
+    - `test_htj2k_16bit_gray`: 8186/8192 pixels wrong
+    - `test_htj2k_8bit_rgb`: 12268/12288 pixels wrong
+  - **Architectural Improvements Completed (2026-01-09)**:
+    - ✅ **MEL Decoder**: Completely rewritten for forward reading with MSB-first bit packing
+    - ✅ **VLC Decoder**: Completely rewritten for backward reading with LSB-first bit packing (`rev_buf` pattern)
+    - ✅ **Buffer Handling**: Added required termination bytes (0xFF, 0x0F masking)
+    - ✅ **Decode Loop**: Restructured to match OpenHTJ2K pattern (MEL override, proper vlcval chaining)
+    - ✅ **Crashes Fixed**: Eliminated "Invalid Scup" warnings and shift overflow panics
+  - **Remaining Investigation Needed**:
+    - VLC/UVLC table data format verification against OpenHTJ2K
+    - Context calculation correctness
+    - Magnitude/sign bit reconstruction
+    - UVLC u_q decoding
+  - Decoder architecture now matches OpenHTJ2K reference implementation, but systematic pixel errors indicate a subtle table format or reconstruction issue.
 - [ ] **RPC Mode**: Support Reduced Resolution (RPC) Transfer Syntax (.202).
 - [ ] **Document all public APIs**: Add `///` doc comments with examples
   - [x] `src/jpeg2000/encoder.rs` (J2kEncoder)
@@ -78,13 +87,14 @@ This document tracks the backlog of planned features, improvements, and known is
 | **CI-01** | Build | 8 clippy errors blocking CI | 🔴 **BLOCKING** |
 | **CI-02** | Testing | Interop tests don't run in Ubuntu CI | 🔴 **CRITICAL** |
 | **CI-03** | Tooling | rustfmt version incompatibility | 🟡 Minor |
-| **J2K-01** | Encoder | Lossy quantization quality mismatch | 🟢 Fixed |
+| **J2K-01** | Encoder | Lossy quantization formula (guard_bits) | 🟢 **Fixed 2026-01-09** - PSNR 13→51 dB |
 | **J2K-02** | Encoder | 12-bit Color artifacts >32x32 blocks | 🟢 Working |
 | **JLS-01** | Encoder | No RGB Interleave support | 🟢 Fixed - CharLS interop verified |
 | **JLS-02** | Interop | CharLS RGB interop bit over-consumption | 🟢 Fixed (Context sharing) |
 | **JLS-03** | Decoder | Grayscale regression (Rb/Rd init) | 🟢 Fixed |
 | **HT-01** | Encoder | Native Magnitude Encoding missing | 🟢 Fixed (EMB implemented) |
-| **HT-02** | Decoder | HTJ2K pixel mismatch in reconstruction | 🔴 Active - 4 tests failing |
+| **HT-02** | Decoder | HTJ2K decoder architecture mismatch | 🟢 Fixed (MEL/VLC rewritten 2026-01-09) |
+| **HT-03** | Decoder | HTJ2K pixel reconstruction errors | 🔴 Active - ~99% pixels wrong (table/reconstruction issue) |
 | **J1-01** | Decoder | Some standard RGB JPEGs fail to decode | 🟢 Low Priority |
 | **J1-02** | Encoder | 12-bit SOF1 requires custom Huffman for high quality | 🟡 Research |
 | **LIB-01** | Quality | 57 unwrap/expect calls in library code | 🟡 Needs cleanup |

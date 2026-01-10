@@ -1,5 +1,0 @@
-Codec,Direction,Mode,Width,Height,Components,BitDepth,EncTime_ms,DecTime_ms,Size,MAE,Status
-J1,Rust->Ext,Lossy,512,512,3,8,156,74,11458,1.2916,OK
-J1,Ext->Rust,Lossy,512,512,3,8,36,103,9143,0.9203,OK
-J1,Rust->Ext,Lossy,1024,1024,3,8,613,89,33949,0.9711,OK
-J1,Ext->Rust,Lossy,1024,1024,3,8,37,332,27435,0.8986,OK

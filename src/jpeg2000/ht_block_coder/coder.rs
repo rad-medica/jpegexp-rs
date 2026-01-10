@@ -97,6 +97,7 @@ impl<'a> HTBlockCoder<'a> {
         Ok(())
     }
 
+    #[allow(unused_assignments)]
     fn decode_quad_pair(
         &mut self,
         x: usize,

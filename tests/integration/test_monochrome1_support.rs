@@ -91,7 +91,7 @@ fn generate_xray_chest_pattern(width: usize, height: usize) -> Vec<u16> {
             // Simulate X-ray appearance:
             // Center (lungs/air): High transmission = Dark on film = High pixel value in MONOCHROME2
             // Edges (ribs/bone): Low transmission = Bright on film = Low pixel value in MONOCHROME2
-            let normalized = (dist / max_dist).min(1.0);
+            let _normalized = (dist / max_dist).min(1.0);
             
             // MONOCHROME2 values (before inversion):
             // Lungs (center): 3000 (dark)

@@ -150,9 +150,9 @@ mod jpegls_decoder_validation {
         let mut decoder = jpegexp_rs::jpegls::JpeglsDecoder::new(&jls_data);
 
         // Read header
-        decoder
-            .read_header()
-            .unwrap_or_else(|e| panic!("Failed to read header for {}: {}", name, e));
+        decoder.read_header().unwrap_or_else(|e| {
+            panic!("Failed to read header for {}: {}", name, e)
+        });
 
         let frame_info = decoder.frame_info();
 
@@ -160,12 +160,14 @@ mod jpegls_decoder_validation {
         assert_eq!(frame_info.width, width, "Width mismatch for {}", name);
         assert_eq!(frame_info.height, height, "Height mismatch for {}", name);
         assert_eq!(
-            frame_info.component_count, components as i32,
+            frame_info.component_count,
+            components as i32,
             "Component count mismatch for {}",
             name
         );
         assert_eq!(
-            frame_info.bits_per_sample, bit_depth as i32,
+            frame_info.bits_per_sample,
+            bit_depth as i32,
             "Bit depth mismatch for {}",
             name
         );
@@ -210,7 +212,9 @@ mod jpegls_decoder_validation {
                         eprintln!("  Max diff: {}", max_diff);
                         eprintln!(
                             "  First mismatch at byte {}: got {}, expected {}",
-                            idx, got, expected
+                            idx,
+                            got,
+                            expected
                         );
                         eprintln!(
                             "  Decoded {} bytes, expected {} bytes",
@@ -226,7 +230,10 @@ mod jpegls_decoder_validation {
                 eprintln!("✗ {}: FAIL - Decode error: {}", name, e);
                 eprintln!(
                     "  Frame info: {}x{}, {} components, {} bits",
-                    width, height, components, bit_depth
+                    width,
+                    height,
+                    components,
+                    bit_depth
                 );
                 eprintln!("  JLS file size: {} bytes", jls_data.len());
                 panic!("Failed to decode {}: {}", name, e);

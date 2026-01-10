@@ -301,13 +301,22 @@ impl J2kEncoder {
             
             let quality_factor = (100 - self.quality) as f32;
             // Use a power law to ramp up step size quickly for lower qualities
+            // Lower step = higher quality (more bits preserved)
+            // Quality 100 -> step ~0.25 (near-lossless)
+            // Quality 90  -> step ~0.5 (high quality, PSNR > 40 dB)
+            // Quality 50  -> step ~4.0 (moderate quality)
+            // Quality 1   -> step ~64+ (maximum compression)
             let base_step = if self.quality >= 99 {
-                1.0 / 256.0 // "Near Lossless" - keep some fractional precision
+                0.25 // Near Lossless - keep most precision
             } else if self.quality >= 90 {
-                1.0 + (quality_factor * 0.2) // 1.0 to 3.0
+                // Q90-98: step from 0.5 to 0.3
+                0.3 + (quality_factor * 0.02)
+            } else if self.quality >= 70 {
+                // Q70-89: step from 0.5 to 2.0
+                0.5 + ((100 - self.quality) as f32 - 10.0) * 0.1
             } else {
-                // Ramps from ~3.0 to ~64.0+
-                1.0 + (quality_factor.powf(1.6) * 0.1) 
+                // Q1-69: step from ~2.0 to ~64.0+
+                2.0 + (quality_factor.powf(1.5) * 0.08)
             };
 
             // Use Scalar Expounded (0x02) for per-subband quantization control
@@ -315,15 +324,20 @@ impl J2kEncoder {
             quant_style = (guard_bits << 5) | 0x02;
 
             // Calculate step sizes for each subband
-            // IMPORTANT: Like the lossless encoder, epsilon must include the implicit subband gain
-            // The decoder uses: Δ = (1 + μ/2048) * 2^(depth + guard_bits - ε)
-            // Where ε already includes the gain for the subband type:
+            // ISO 15444-1 Annex E defines the dequantization formula as:
+            //   Δ_b = 2^(R_b - ε_b) * (1 + μ_b/2048)
+            // Where R_b is the subband dynamic range:
+            //   R_b = depth + gain_b
+            // And gain_b depends on the subband type:
             //   - LL subband: gain = 0
             //   - HL/LH subbands: gain = 1
             //   - HH subband: gain = 2
             //
+            // Note: Guard bits are NOT part of R_b. They only affect the number of 
+            // magnitude bits available for coding, not the quantization formula.
+            //
             // For a desired step size Δ_target:
-            //   ε = (depth + guard_bits + gain) - log2(Δ_target / (1 + μ/2048))
+            //   ε = R_b - log2(Δ_target / (1 + μ/2048))
             //
             // Two-step calculation:
             //   1. Calculate ε assuming μ ≈ 0
@@ -340,8 +354,8 @@ impl J2kEncoder {
                         if band_type < 2 { 1 } else { 2 }  // HL/LH: gain=1, HH: gain=2
                     };
 
-                    // Calculate rb = depth + guard_bits + gain (implicit in epsilon)
-                    let rb = depth as i32 + guard_bits as i32 + gain;
+                    // R_b = depth + gain (per ISO 15444-1 Annex E)
+                    let rb = depth as i32 + gain;
 
                     // Calculate perceptually-weighted step size
                     let subband_step = if i == 0 {
@@ -365,38 +379,23 @@ impl J2kEncoder {
                         base_step * band_factor * level_factor
                     };
 
-                    // Calculate epsilon to match decoder formula
-                    // Δ = (1 + μ/2048) * 2^((depth + guard_bits) - ε)
-                    // But ε already includes gain, so: ε = rb - log2(Δ / (1 + μ/2048))
-                    // We need 1 + mu/2048 to be in range [1.0, 2.0)
-                    // So we need delta / 2^(rb - epsilon) in [1.0, 2.0)
-                    // => 1.0 <= delta / 2^(rb - epsilon) < 2.0
-                    // => 2^(rb - epsilon) <= delta < 2 * 2^(rb - epsilon) = 2^(rb - epsilon + 1)
-                    // => rb - epsilon <= log2(delta) < rb - epsilon + 1
-                    // => -epsilon <= log2(delta) - rb < -epsilon + 1
-                    // => epsilon >= rb - log2(delta) > epsilon - 1
-                    // So epsilon = ceil(rb - log2(delta))
-                    
+                    // Calculate epsilon to match decoder formula:
+                    // Δ = 2^(R_b - ε) * (1 + μ/2048)
+                    // We need (1 + μ/2048) to be in range [1.0, 2.0)
+                    // So epsilon = ceil(R_b - log2(Δ))
                     let log_delta = subband_step.log2();
                     let epsilon_float = rb as f32 - log_delta;
                     let epsilon = epsilon_float.ceil().max(0.0).min(31.0) as i32;
 
                     // Refine μ to match target step size exactly:
-                    // (1 + μ/2048) = Δ / 2^((depth + guard_bits + gain) - ε)
-                    // Note: The gain is in ε, so we use (depth + guard_bits + gain) here
-                    let scale = 2.0f32.powi(depth as i32 + guard_bits as i32 + gain - epsilon);
+                    // (1 + μ/2048) = Δ / 2^(R_b - ε)
+                    let scale = 2.0f32.powi(rb - epsilon);
                     let mu_float = (subband_step / scale - 1.0) * 2048.0;
                     let mu = mu_float.round().max(0.0).min(2047.0) as i32;
 
                     // Pack epsilon (5 bits) and mu (11 bits) into u16
                     let packed = ((epsilon as u16) << 11) | (mu as u16);
 
-                    if std::env::var("J2K_DEBUG").is_ok() {
-                        eprintln!(
-                            "Subband {}: gain={}, rb={}, step={:.6}, eps={}, mu={}, packed=0x{:04X}",
-                            i, gain, rb, subband_step, epsilon, mu, packed
-                        );
-                    }
 
                     packed
                 })
@@ -463,13 +462,6 @@ impl J2kEncoder {
 
         // Apply RCT (Reversible Color Transform) if 3 components and not using irreversible transform
         if components == 3 && !self.use_irreversible {
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("RCT: Applying RCT to {}x{} image", width, height);
-                eprintln!(
-                    "RCT BEFORE: R[0]={}, G[0]={}, B[0]={}",
-                    component_data[0][0], component_data[1][0], component_data[2][0]
-                );
-            }
             for i in 0..width * height {
                 let r = component_data[0][i];
                 let g = component_data[1][i];
@@ -483,36 +475,9 @@ impl J2kEncoder {
                 component_data[1][i] = u;
                 component_data[2][i] = v;
             }
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "RCT AFTER: Y[0]={}, U[0]={}, V[0]={}",
-                    component_data[0][0], component_data[1][0], component_data[2][0]
-                );
-                eprintln!(
-                    "RCT AFTER: Y[1]={}, U[1]={}, V[1]={}",
-                    component_data[0][1], component_data[1][1], component_data[2][1]
-                );
-                let mid = width * height / 2;
-                eprintln!(
-                    "RCT AFTER: Y[{}]={}, U[{}]={}, V[{}]={}",
-                    mid,
-                    component_data[0][mid],
-                    mid,
-                    component_data[1][mid],
-                    mid,
-                    component_data[2][mid]
-                );
-            }
         }
         // Apply ICT (Irreversible Color Transform) if 3 components and using irreversible transform
         else if components == 3 && self.use_irreversible {
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("ICT: Applying ICT to {}x{} image", width, height);
-                eprintln!(
-                    "ICT BEFORE: R[0]={}, G[0]={}, B[0]={}",
-                    component_data[0][0], component_data[1][0], component_data[2][0]
-                );
-            }
             for i in 0..width * height {
                 let r = component_data[0][i] as f32;
                 let g = component_data[1][i] as f32;
@@ -527,48 +492,9 @@ impl J2kEncoder {
                 component_data[1][i] = cb as i32;
                 component_data[2][i] = cr as i32;
             }
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "ICT AFTER: Y[0]={}, Cb[0]={}, Cr[0]={}",
-                    component_data[0][0], component_data[1][0], component_data[2][0]
-                );
-                eprintln!(
-                    "ICT AFTER: Y[1]={}, Cb[1]={}, Cr[1]={}",
-                    component_data[0][1], component_data[1][1], component_data[2][1]
-                );
-                let mid = width * height / 2;
-                eprintln!(
-                    "ICT AFTER: Y[{}]={}, Cb[{}]={}, Cr[{}]={}",
-                    mid,
-                    component_data[0][mid],
-                    mid,
-                    component_data[1][mid],
-                    mid,
-                    component_data[2][mid]
-                );
-            }
         }
 
         for (comp_idx, mut comp_data) in component_data.into_iter().enumerate() {
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "COMPONENT {}: Processing {} pixels, first 4: {:?}",
-                    comp_idx,
-                    comp_data.len(),
-                    &comp_data[..comp_data.len().min(4)]
-                );
-                let mid = comp_data.len() / 2;
-                eprintln!(
-                    "COMPONENT {}: Mid 4: {:?}",
-                    comp_idx,
-                    &comp_data[mid..comp_data.len().min(mid + 4)]
-                );
-                eprintln!(
-                    "COMPONENT {}: Last 4: {:?}",
-                    comp_idx,
-                    &comp_data[comp_data.len().saturating_sub(4)..]
-                );
-            }
             // Apply forward 2D DWT
             let coeffs = if self.use_irreversible {
                 // Convert to float
@@ -658,28 +584,9 @@ impl J2kEncoder {
                 self.apply_forward_dwt_2d(&mut comp_data, width, height)?
             };
 
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "COMPONENT {}: After DWT, first 10 coeffs: {:?}",
-                    comp_idx,
-                    &coeffs[..coeffs.len().min(10)]
-                );
-            }
 
             // Encode component into packets
             // ...
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "COMPONENT {}: Encoding packets with {} coefficients",
-                    comp_idx,
-                    coeffs.len()
-                );
-                eprintln!(
-                    "COMPONENT {}: First 10 coeffs: {:?}",
-                    comp_idx,
-                    &coeffs[..coeffs.len().min(10)]
-                );
-            }
             let comp_packets = self.encode_component_packets(
                 &coeffs,
                 width,
@@ -691,13 +598,6 @@ impl J2kEncoder {
                 comp_idx as u8,
                 &step_sizes,
             )?;
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "COMPONENT {}: Generated {} packets",
-                    comp_idx,
-                    comp_packets.len()
-                );
-            }
             packets.extend(comp_packets);
         }
 
@@ -779,15 +679,6 @@ impl J2kEncoder {
         width: usize,
         height: usize,
     ) -> Result<Vec<i32>, JpeglsError> {
-        if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!(
-                "apply_forward_dwt_2d: width={} height={} data_len={} first_4={:?}",
-                width,
-                height,
-                data.len(),
-                &data[..data.len().min(4)]
-            );
-        }
         let mut result = data.to_vec();
         let mut current_w = width;
         let mut current_h = height;
@@ -859,12 +750,6 @@ impl J2kEncoder {
         let mut packets = Vec::new();
         let num_resolutions = (num_levels + 1) as usize;
 
-        if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!(
-                "encode_component_packets: comp={} width={} height={} levels={} resolutions={}",
-                comp_idx, width, height, num_levels, num_resolutions
-            );
-        }
 
         // Iterate through resolutions (lowest to highest)
         for res in 0..num_resolutions {
@@ -878,12 +763,6 @@ impl J2kEncoder {
 
             let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels as usize, res);
 
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!(
-                    "  RES {}: LL size {}x{}, {} bands",
-                    res, ll_w, ll_h, num_bands
-                );
-            }
 
             for band in 0..num_bands {
                 let (sb_w, sb_h) = if res == 0 {
@@ -929,16 +808,6 @@ impl J2kEncoder {
                     sb_idx,
                 );
 
-                if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!(
-                        "    BAND {}: Extracted {}x{} subband, {} coeffs, first 10: {:?}",
-                        band,
-                        sb_w,
-                        sb_h,
-                        sb_coeffs.len(),
-                        &sb_coeffs[..sb_coeffs.len().min(10)]
-                    );
-                }
 
                 // Calculate epsilon for this subband
                 // For lossy mode (irreversible), use the epsilon from QCD step_sizes
@@ -1128,17 +997,6 @@ impl J2kEncoder {
                 body_data: packet_body,
             });
 
-            if std::env::var("J2K_DEBUG").is_ok() {
-                let p = packets.last().unwrap();
-                eprintln!(
-                    "ENC: Created packet for res={} comp={} header_len={} body_len={} cblks={}",
-                    res,
-                    comp_idx,
-                    p.header_data.len(),
-                    p.body_data.len(),
-                    packet_header.included_cblks.len()
-                );
-            }
         }
 
         Ok(packets)
@@ -1225,17 +1083,12 @@ impl J2kEncoder {
                     }
                 };
 
-                // The epsilon in QCD already includes the subband gain, so we use the decoder's formula:
-                // Δ = 2^(depth + guard_bits + gain - epsilon) * (1 + mantissa/2048)
+                // ISO 15444-1 Annex E dequantization formula:
+                // Δ = 2^(R_b - epsilon) * (1 + mantissa/2048)
+                // Where R_b = depth + gain (guard bits are NOT part of R_b)
                 let delta = (1.0 + (mantissa as f32) / 2048.0)
-                    * 2.0f32.powi(_depth as i32 + _guard_bits as i32 + gain - epsilon);
+                    * 2.0f32.powi(_depth as i32 + gain - epsilon);
 
-                if std::env::var("J2K_DEBUG").is_ok() {
-                    eprintln!(
-                        "Quantize97: res={}, band={}, qcd_idx={}, eps={}, mu={}, gain={}, delta={:.6}",
-                        res, band, qcd_idx, epsilon, mantissa, gain, delta
-                    );
-                }
 
                 let inv_delta = 1.0 / delta;
 
@@ -1288,9 +1141,6 @@ impl J2kEncoder {
         // For resolution 0, return LL coefficients
         if res == 0 {
             let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels, 0);
-            if std::env::var("J2K_DEBUG").is_ok() {
-                eprintln!("EXTRACT: Res 0 LL {}x{} at (0,0)", ll_w, ll_h);
-            }
             let mut ll_coeffs = Vec::with_capacity(ll_w * ll_h);
             for y in 0..ll_h {
                 for x in 0..ll_w {
@@ -1324,12 +1174,6 @@ impl J2kEncoder {
             _ => (0, 0, 0, 0),
         };
 
-        if std::env::var("J2K_DEBUG").is_ok() {
-            eprintln!(
-                "EXTRACT: Res {} subband {} {}x{} at ({},{})",
-                res, sb_idx, sb_w, sb_h, start_x, start_y
-            );
-        }
 
         let mut sb_coeffs = Vec::with_capacity(sb_w * sb_h);
         for y in 0..sb_h {

@@ -1,16 +1,5 @@
-// ...existing code...
-// --- BitIoError definition and impls ---
-
-#[derive(Debug, Clone)]
-pub struct BitIoError;
-
-impl std::fmt::Display for BitIoError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Bit IO error")
-    }
-}
-
-impl std::error::Error for BitIoError {}
+// Re-export BitIoError from main error module for public use
+pub use crate::error::BitIoError;
 
 pub struct J2kBitReader<'a, 'b> {
     reader: &'a mut crate::jpeg_stream_reader::JpegStreamReader<'b>,
@@ -31,7 +20,7 @@ impl<'a, 'b> J2kBitReader<'a, 'b> {
 
     pub fn read_bit(&mut self) -> Result<u8, BitIoError> {
         if self.bits_count == 0 {
-            let b = self.reader.read_u8().map_err(|_| BitIoError)?;
+            let b = self.reader.read_u8().map_err(|_| BitIoError::EndOfStream)?;
 
             if self.last_byte == 0xFF {
                 // Stuffed byte: MSB is stuffed 0, bits 6..0 are data

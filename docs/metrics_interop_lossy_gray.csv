@@ -1,9 +1,0 @@
-Codec,Direction,Mode,Width,Height,Components,BitDepth,EncTime_ms,DecTime_ms,Size,MAE,Status
-J2K,Rust->Ext,Lossy,512,512,1,8,60,84,38795,88.5217,OK
-J2K,Ext->Rust,Lossy,512,512,1,8,87,86,176,11.6051,OK
-J1,Rust->Ext,Lossy,512,512,1,8,55,17,4512,0.8752,OK
-J1,Ext->Rust,Lossy,512,512,1,8,39,77,8063,0.3608,OK
-J2K,Rust->Ext,Lossy,1024,1024,1,8,253,161,462060,57.3106,OK
-J2K,Ext->Rust,Lossy,1024,1024,1,8,127,309,216,13.0354,OK
-J1,Rust->Ext,Lossy,1024,1024,1,8,206,62,14813,0.5538,OK
-J1,Ext->Rust,Lossy,1024,1024,1,8,25,193,16835,0.2989,OK

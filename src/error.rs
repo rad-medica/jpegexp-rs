@@ -79,6 +79,28 @@ pub enum JpeglsError {
     #[error("Invalid parameter mapping table continuation")]
     InvalidParameterMappingTableContinuation = 38,
 
+    // JPEG 2000 specific errors
+    #[error("JPEG 2000 container not found")]
+    Jpeg2000ContainerNotFound = 50,
+    #[error("Invalid JPEG 2000 tile")]
+    InvalidJpeg2000Tile = 51,
+    #[error("Missing quantization information")]
+    MissingQuantizationInfo = 52,
+    #[error("Missing coding style information")]
+    MissingCodingStyleInfo = 53,
+    #[error("Invalid codeblock size")]
+    InvalidCodeblockSize = 54,
+    #[error("Bit stream ended unexpectedly")]
+    BitStreamTooShort = 55,
+    #[error("Invalid packet header")]
+    InvalidPacketHeader = 56,
+    #[error("Insufficient tile data")]
+    InsufficientTileData = 57,
+    #[error("VLC table lookup failed")]
+    VlcTableError = 58,
+    #[error("MEL decoder error")]
+    MelDecoderError = 59,
+
     // Logic errors
     #[error("Invalid operation")]
     InvalidOperation = 100,
@@ -108,8 +130,24 @@ pub enum JpeglsError {
     InvalidArgumentEncodingOptions = 112,
 }
 
-impl From<crate::jpeg2000::bit_io::BitIoError> for JpeglsError {
-    fn from(_: crate::jpeg2000::bit_io::BitIoError) -> Self {
-        JpeglsError::InvalidData
+/// Errors that can occur during bit-stream operations
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitIoError {
+    #[error("End of bit stream reached")]
+    EndOfStream,
+    #[error("Buffer overflow")]
+    BufferOverflow,
+    #[error("Invalid bit alignment")]
+    InvalidAlignment,
+}
+
+impl From<BitIoError> for JpeglsError {
+    fn from(err: BitIoError) -> Self {
+        match err {
+            BitIoError::EndOfStream => JpeglsError::BitStreamTooShort,
+            BitIoError::BufferOverflow => JpeglsError::DestinationTooSmall,
+            BitIoError::InvalidAlignment => JpeglsError::InvalidData,
+        }
     }
 }
+

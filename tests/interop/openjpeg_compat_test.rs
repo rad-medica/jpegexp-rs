@@ -330,7 +330,7 @@ fn test_openjpeg_color() {
     
     let width = 64u32;
     let height = 64u32;
-    let components = 3;
+    let _components = 3;
     
     let mut original: Vec<u8> = Vec::with_capacity((width * height * 3) as usize);
     for y in 0..height {

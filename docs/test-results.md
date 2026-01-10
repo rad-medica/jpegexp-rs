@@ -1,6 +1,6 @@
 # Test Results & Validation
 
-**Date**: January 8, 2026
+**Date**: January 9, 2026
 **Platform**: Windows x64 / Rust 1.83
 
 This document aggregates test results from the comprehensive test suite (`tests/`).
@@ -78,6 +78,28 @@ These tests are excluded from default runs (`cargo test`) due to execution time 
 ---
 
 ## 🧪 Special Investigations
+
+### JPEG 2000 Lossy Quantization Fix (2026-01-09)
+**Issue**: PSNR was only 13.24 dB for Q90 quality (expected > 40 dB).
+**Root Cause**: The quantization formula incorrectly included `guard_bits` in the epsilon calculation:
+- **Incorrect**: `R_b = depth + guard_bits + gain`
+- **Correct (ISO 15444-1 Annex E)**: `R_b = depth + gain`
+
+**Fix**: Updated `src/jpeg2000/encoder.rs` to use the standard-compliant formula:
+```rust
+// Before (wrong)
+let rb = depth as i32 + guard_bits as i32 + gain;
+
+// After (correct per ISO 15444-1)
+let rb = depth as i32 + gain;
+```
+
+**Verification**:
+- `cargo test --release --test repro_j2k_lossy`: PSNR = **50.93 dB** (was 13.24 dB)
+- `cargo test --release --test final_interop`: Bidirectional OpenJPEG interop **MAE = 0.0**
+- All lossless tests continue to pass with **MAE = 0.0**
+
+---
 
 ### RGB Lossless Fix (2026-01-08)
 **Issue**: RGB images >16x16 showed corruption.

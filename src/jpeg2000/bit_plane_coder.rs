@@ -1,4 +1,5 @@
 use super::mq_coder::MqCoder;
+use crate::JpeglsError;
 
 pub struct BitPlaneCoder<'a> {
     pub width: u32,
@@ -416,7 +417,7 @@ impl<'a> BitPlaneCoder<'a> {
         start_bp: u8,
         num_passes: u8,
         orient: u8,
-    ) -> Result<Vec<i32>, String> {
+    ) -> Result<Vec<i32>, JpeglsError> {
         self.mq.init_decoder(data);
         self.reset_flags();
         self.state.fill(0);

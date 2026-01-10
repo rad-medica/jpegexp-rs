@@ -3,6 +3,7 @@
 
 use super::vlc;
 use crate::jpeg2000::image::J2kCodeBlock;
+use crate::JpeglsError;
 
 /// MEL (Magnitude Exponent Logic) encoder
 /// Encodes run-lengths of insignificant quads
@@ -370,7 +371,7 @@ impl HTBlockEncoder {
     }
 
     /// Encode an entire code-block
-    pub fn encode_block(&mut self, block: &J2kCodeBlock) -> Result<Vec<u8>, ()> {
+    pub fn encode_block(&mut self, block: &J2kCodeBlock) -> Result<Vec<u8>, JpeglsError> {
         eprintln!("ENC: encode_block called for block ({},{}) {}x{}", 
                   block.x, block.y, self.width, self.height);
         
@@ -564,7 +565,7 @@ impl HTBlockEncoder {
         (emb_k, emb_1)
     }
 
-    fn encode_quad_pair(&mut self, x: usize, y_base: usize, block: &J2kCodeBlock) -> Result<(), ()> {
+    fn encode_quad_pair(&mut self, x: usize, y_base: usize, block: &J2kCodeBlock) -> Result<(), JpeglsError> {
         let qx = x / 2;
         let qy0 = y_base / 2;
         let qy1 = qy0 + 1;

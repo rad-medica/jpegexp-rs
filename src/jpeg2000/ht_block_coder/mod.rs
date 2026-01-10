@@ -3,4 +3,5 @@ pub mod encoder;
 pub mod mag_sgn;
 pub mod mel;
 pub mod vlc;
+pub mod vlc_ohtj2k;
 pub mod vlc_tables;
