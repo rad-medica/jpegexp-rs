@@ -722,25 +722,89 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     block.layer_data.push(data.clone());
                     block.layers_decoded = (layer + 1) as u8;
 
-                    // HTJ2K uses the same packet data for MEL and MagSgn/VLC
-                    // The splitting is implicit: MEL grows backward from end, MagSgn forward from start
+                    // HTJ2K cleanup pass structure (ISO 15444-15):
+                    // - First Pcup bytes: MagSgn data (forward stream)
+                    // - Last Scup bytes: MEL+VLC data (backward stream) + 2 bytes for Scup value
+                    // Scup = (data[len-1] << 4) + (data[len-2] & 0x0F)
+                    
+                    let lcup = data.len();
+                    if lcup < 2 {
+                        // Empty or too small - skip
+                        subband.codeblocks.push(block);
+                        continue;
+                    }
+                    
+                    // Parse Scup (Suffix Length Indicator)
+                    // ISO 15444-15: Scup is encoded at the end of the stream.
+                    // It is a sequence of bytes where the last byte has MSB=0, and preceding bytes have MSB=1.
+                    // We scan backwards from the end.
+                    let mut scup = 0usize;
+                    let mut shift = 0;
+                    let mut idx = lcup - 1;
+                    
+                    // First byte (last in stream)
+                    if idx < data.len() {
+                        let b = data[idx];
+                        scup |= (b & 0x7F) as usize;
+                        shift += 7;
+                        
+                        // Scan backwards for bytes with MSB 1
+                        while idx > 0 {
+                            idx -= 1;
+                            let b_prev = data[idx];
+                            if (b_prev & 0x80) != 0 {
+                                // Continuation byte (part of Scup)
+                                scup |= ((b_prev & 0x7F) as usize) << shift;
+                                shift += 7;
+                            } else {
+                                // Found byte with MSB 0 (Payload). Stop.
+                                break;
+                            }
+                        }
+                    }
+                    let pcup = (idx + 1).saturating_sub(scup);
+                    
+                    if std::env::var("HTJ2K_DEBUG").is_ok() {
+                        eprintln!(
+                            "[HTJ2K] Decoding block [{},{}] {}x{} Lcup={} Scup={} Pcup={}",
+                            block.x, block.y, block.width, block.height, lcup, scup, pcup
+                        );
+                    }
+                    
+                    // Validate Scup (must be >= 2 and <= Lcup and <= 4079)
+                    if scup < 2 || scup > lcup || scup > 4079 {
+                        eprintln!("[HTJ2K] WARNING: Invalid Scup={}, using whole buffer", scup);
+                        // Fall back to old behavior
+                        let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
+                            &data,
+                            &data,
+                            block.width as usize,
+                            block.height as usize,
+                        );
+                        let _ = coder.decode_block(&mut block);
+                        subband.codeblocks.push(block);
+                        continue;
+                    }
+                    
+                    // Clone data to make it mutable for buffer modification
+                    let mut data_copy = data.to_vec();
+
+                    // ModDcup: Set termination bytes (required by HTJ2K spec)
+                    // This ensures MEL and VLC decoders terminate properly
+                    data_copy[lcup - 1] = 0xFF;
+                    data_copy[lcup - 2] |= 0x0F;
+
+                    // MEL/VLC data: bytes [pcup .. lcup-1] (Scup-1 bytes)
+                    // MagSgn data: bytes [0 .. pcup]
+                    let mel_vlc_data = &data_copy[pcup..lcup-1];
+                    let magsgn_data = &data_copy[..pcup];
+
                     let mut coder = crate::jpeg2000::ht_block_coder::coder::HTBlockCoder::new(
-                        &data,
-                        &data,
+                        mel_vlc_data,
+                        magsgn_data,
                         block.width as usize,
                         block.height as usize,
                     );
-
-                    if std::env::var("HTJ2K_DEBUG").is_ok() {
-                        eprintln!(
-                            "[HTJ2K] Decoding block [{},{}] {}x{} len={}",
-                            block.x,
-                            block.y,
-                            block.width,
-                            block.height,
-                            data.len()
-                        );
-                    }
 
                     match coder.decode_block(&mut block) {
                         Ok(_) => {
