@@ -26,6 +26,72 @@ impl LosslessPredictor {
     }
 }
 
+pub struct Jpeg1LosslessEncoder;
+
+impl Jpeg1LosslessEncoder {
+    /// Encodes a single component of a lossless scan.
+    /// Returns the encoded bitstream length in bytes.
+    pub fn encode_component(
+        predictor_id: u8,
+        width: usize,
+        height: usize,
+        bit_depth: u8,
+        pixels: &[i32],
+        writer: &mut crate::jpeg1::huffman::JpegBitWriter,
+        huffman_encoder: &mut HuffmanEncoder,
+        huffman_table: &HuffmanTable,
+        component_index: usize,
+    ) -> Result<(), JpeglsError> {
+        if pixels.len() != width * height {
+            return Err(JpeglsError::InvalidData);
+        }
+
+        for y in 0..height {
+            for x in 0..width {
+                let current_pixel = pixels[y * width + x];
+
+                // Calculate prediction using same logic as decoder
+                let ra = if x > 0 {
+                    pixels[y * width + x - 1]
+                } else if y > 0 {
+                    pixels[(y - 1) * width + x]
+                } else {
+                    1 << (bit_depth - 1)
+                };
+
+                let rb = if y > 0 {
+                    pixels[(y - 1) * width + x]
+                } else {
+                    ra
+                };
+
+                let rc = if x > 0 && y > 0 {
+                    pixels[(y - 1) * width + x - 1]
+                } else {
+                    rb
+                };
+
+                let px = if x == 0 && y == 0 {
+                    1 << (bit_depth - 1)
+                } else if y == 0 {
+                    ra // Special case for first row: use predictor 1
+                } else if x == 0 {
+                    rb // Special case for first column: use predictor 2
+                } else {
+                    LosslessPredictor::predict(predictor_id, ra, rb, rc)
+                };
+
+                // Calculate difference
+                let diff = current_pixel - px;
+
+                // Encode difference using Huffman
+                huffman_encoder.encode_value(diff as i16, writer, huffman_table, component_index)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct Jpeg1LosslessDecoder;
 
 impl Jpeg1LosslessDecoder {

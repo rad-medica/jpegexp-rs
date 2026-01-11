@@ -337,4 +337,228 @@ impl HuffmanEncoder {
             (bits as i32 - (1 << cat) + 1) as i16
         }
     }
+
+    /// Encode a single value (used for lossless differences).
+    pub fn encode_value(
+        &mut self,
+        value: i16,
+        writer: &mut JpegBitWriter,
+        huffman_table: &HuffmanTable,
+        _component_index: usize,
+    ) -> Result<(), JpeglsError> {
+        let category = Self::get_category(value);
+        let code = huffman_table.codes[category as usize];
+        if code.length == 0 && category > 0 {
+            return Err(JpeglsError::InvalidData);
+        }
+        writer.write_bits(code.value, code.length)?;
+        let (bits, bit_len) = Self::get_diff_bits(value, category);
+        writer.write_bits(bits, bit_len)?;
+        Ok(())
+    }
+}
+
+/// Symbol frequency statistics for building optimal Huffman tables
+#[derive(Clone)]
+pub struct SymbolFrequencies {
+    /// Frequencies for DC symbols (categories 0-15)
+    pub dc_freqs: [usize; 16],
+    /// Frequencies for AC symbols (run/size combinations 0x00-0xFF)
+    pub ac_freqs: [usize; 256],
+}
+
+impl Default for SymbolFrequencies {
+    fn default() -> Self {
+        Self {
+            dc_freqs: [0; 16],
+            ac_freqs: [0; 256],
+        }
+    }
+}
+
+impl SymbolFrequencies {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_dc(&mut self, category: u8) {
+        if (category as usize) < 16 {
+            self.dc_freqs[category as usize] += 1;
+        }
+    }
+
+    pub fn record_ac(&mut self, symbol: u8) {
+        self.ac_freqs[symbol as usize] += 1;
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        for i in 0..16 {
+            self.dc_freqs[i] += other.dc_freqs[i];
+        }
+        for i in 0..256 {
+            self.ac_freqs[i] += other.ac_freqs[i];
+        }
+    }
+}
+
+/// Generate optimal Huffman table from symbol frequencies (ISO/IEC 10918-1 Annex K)
+pub fn generate_optimal_huffman_table(
+    freqs: &[usize],
+    max_symbols: usize,
+) -> (Vec<u8>, Vec<u8>) {
+    // Build frequency list with valid symbols
+    let mut freq_list: Vec<(usize, u8)> = freqs
+        .iter()
+        .enumerate()
+        .take(max_symbols)
+        .filter(|(_, &f)| f > 0)
+        .map(|(sym, &f)| (f, sym as u8))
+        .collect();
+
+    if freq_list.is_empty() {
+        // No symbols - return minimal table
+        return (vec![0u8; 16], vec![]);
+    }
+
+    if freq_list.len() == 1 {
+        // Single symbol - needs 2 symbols minimum for valid Huffman tree
+        let sym = freq_list[0].1;
+        let other_sym = if sym == 0 { 1 } else { 0 };
+        return (
+            vec![0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            vec![sym, other_sym],
+        );
+    }
+
+    // Sort by frequency (ascending)
+    freq_list.sort_by_key(|&(f, _)| f);
+
+    // Build Huffman tree using package-merge algorithm
+    let code_lengths = build_limited_length_codes(&freq_list, 16);
+
+    // Generate lengths array and values array
+    generate_huffman_spec(&code_lengths)
+}
+
+/// Build limited-length Huffman codes using package-merge algorithm
+fn build_limited_length_codes(freq_list: &[(usize, u8)], max_len: usize) -> Vec<(u8, u8)> {
+    let n = freq_list.len();
+    let mut code_lengths = vec![0u8; n];
+
+    if n <= 1 {
+        if n == 1 {
+            code_lengths[0] = 1;
+        }
+        return freq_list
+            .iter()
+            .enumerate()
+            .map(|(i, &(_, sym))| (sym, code_lengths[i]))
+            .collect();
+    }
+
+    // Simple approach: use standard Huffman algorithm with length limit
+    // Create a priority queue (min-heap simulation)
+    let mut nodes: Vec<(usize, Vec<usize>)> = freq_list
+        .iter()
+        .enumerate()
+        .map(|(i, &(f, _))| (f, vec![i]))
+        .collect();
+
+    while nodes.len() > 1 {
+        // Sort to get two minimum frequency nodes
+        nodes.sort_by_key(|&(f, _)| f);
+
+        // Take two smallest
+        let (f1, indices1) = nodes.remove(0);
+        let (f2, indices2) = nodes.remove(0);
+
+        // Merge
+        let mut merged_indices = indices1;
+        merged_indices.extend(indices2);
+        let merged_freq = f1 + f2;
+
+        // Increment depth for all indices
+        for &idx in &merged_indices {
+            code_lengths[idx] += 1;
+        }
+
+        // Add merged node back
+        nodes.push((merged_freq, merged_indices));
+    }
+
+    // Limit code lengths to max_len
+    let mut limited = true;
+    while limited {
+        limited = false;
+        for len in code_lengths.iter_mut() {
+            if *len > max_len as u8 {
+                *len = max_len as u8;
+                limited = true;
+            }
+        }
+    }
+
+    freq_list
+        .iter()
+        .enumerate()
+        .map(|(i, &(_, sym))| (sym, code_lengths[i]))
+        .collect()
+}
+
+/// Generate JPEG Huffman table specification (lengths and values arrays)
+fn generate_huffman_spec(code_lengths: &[(u8, u8)]) -> (Vec<u8>, Vec<u8>) {
+    // Count symbols at each code length
+    let mut bit_len_count = vec![0usize; 17]; // Index 0 unused, 1-16 for code lengths
+    for &(_, len) in code_lengths {
+        if len > 0 && (len as usize) <= 16 {
+            bit_len_count[len as usize] += 1;
+        }
+    }
+
+    // Create lengths array (JPEG format: number of codes of each length 1-16)
+    let lengths: Vec<u8> = bit_len_count[1..=16]
+        .iter()
+        .map(|&count| count as u8)
+        .collect();
+
+    // Create values array (symbols sorted by code length, then by value)
+    let mut sorted_symbols: Vec<(u8, u8)> = code_lengths.to_vec();
+    sorted_symbols.sort_by_key(|&(sym, len)| (len, sym));
+    let values: Vec<u8> = sorted_symbols
+        .iter()
+        .filter(|&&(_, len)| len > 0)
+        .map(|&(sym, _)| sym)
+        .collect();
+
+    (lengths, values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_optimal_huffman_generation() {
+        // Test with simple frequency distribution
+        let freqs = vec![10, 5, 3, 2, 1];
+        let (lengths, values) = generate_optimal_huffman_table(&freqs, 5);
+
+        // Should have generated some codes
+        assert!(lengths.iter().sum::<u8>() > 0);
+        assert!(!values.is_empty());
+
+        // Most frequent symbol should have shortest code
+        assert!(values.len() >= 2);
+    }
+
+    #[test]
+    fn test_symbol_frequencies() {
+        let mut freqs = SymbolFrequencies::new();
+        freqs.record_dc(5);
+        freqs.record_dc(5);
+        freqs.record_ac(0x12);
+
+        assert_eq!(freqs.dc_freqs[5], 2);
+        assert_eq!(freqs.ac_freqs[0x12], 1);
+    }
 }

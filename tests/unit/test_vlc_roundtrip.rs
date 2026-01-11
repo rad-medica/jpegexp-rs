@@ -15,14 +15,14 @@ fn test_vlc_roundtrip_all_entries() {
         let expected_value = ((c_q as u16) << suffix_len) | cwd_suffix;
         let expected_bits = 3 + suffix_len;
         
-        if encoded.value != expected_value {
+        if encoded.value != expected_value as u32 {
             eprintln!("Entry {}: c_q={} rho={:04b} u_off={} e_k={:04b} e_1={:04b} cwd_suffix=0x{:02X} suffix_len={}",
                       j, c_q, rho, u_off, e_k, e_1, cwd_suffix, suffix_len);
             eprintln!("  Encoded: value=0x{:04X} bits={}", encoded.value, encoded.bits);
             eprintln!("  Expected: value=0x{:04X} bits={}", expected_value, expected_bits);
         }
         
-        assert_eq!(encoded.value, expected_value, 
+        assert_eq!(encoded.value, expected_value as u32, 
                    "Encode mismatch for c_q={} rho={:04b} u_off={} e_k={:04b} e_1={:04b}: got 0x{:04X}, expected 0x{:04X}",
                    c_q, rho, u_off, e_k, e_1, encoded.value, expected_value);
         assert_eq!(encoded.bits, expected_bits,

@@ -204,6 +204,34 @@ path = "tests/interop/master_interop.rs"
 name = "test_jpeg1_12bit"
 path = "tests/integration/test_jpeg1_12bit.rs"
 
+[[test]]
+name = "test_jpeg1_interop"
+path = "tests/integration/test_jpeg1_interop.rs"
+
+[[test]]
+name = "test_j2k_interop"
+path = "tests/integration/test_j2k_interop.rs"
+
+[[test]]
+name = "test_htj2k_interop"
+path = "tests/integration/test_htj2k_interop.rs"
+
+[[test]]
+name = "test_jpeg1_lossless"
+path = "tests/integration/test_jpeg1_lossless.rs"
+
+[[test]]
+name = "test_jpeg1_10bit"
+path = "tests/integration/test_jpeg1_10bit.rs"
+
+[[test]]
+name = "test_jpeg1_subsampling"
+path = "tests/integration/test_jpeg1_subsampling.rs"
+
+[[test]]
+name = "test_jpeg1_optimized_huffman"
+path = "tests/integration/test_jpeg1_optimized_huffman.rs"
+
 [[bench]]
 name = "j2k_compression"
 path = "benches/j2k_compression.rs"

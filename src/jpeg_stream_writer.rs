@@ -155,17 +155,34 @@ impl<'a> JpegStreamWriter<'a> {
     }
 
     pub fn write_sof0_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
-        self.write_sof_segment(JpegMarkerCode::StartOfFrameBaseline, frame_info)
+        self.write_sof_segment(JpegMarkerCode::StartOfFrameBaseline, frame_info, None)
     }
 
     pub fn write_sof1_segment(&mut self, frame_info: &FrameInfo) -> Result<(), JpeglsError> {
-        self.write_sof_segment(JpegMarkerCode::StartOfFrameExtendedSequential, frame_info)
+        self.write_sof_segment(JpegMarkerCode::StartOfFrameExtendedSequential, frame_info, None)
+    }
+
+    pub fn write_sof0_segment_with_sampling(
+        &mut self,
+        frame_info: &FrameInfo,
+        sampling_factors: &[(u8, u8)],
+    ) -> Result<(), JpeglsError> {
+        self.write_sof_segment(JpegMarkerCode::StartOfFrameBaseline, frame_info, Some(sampling_factors))
+    }
+
+    pub fn write_sof1_segment_with_sampling(
+        &mut self,
+        frame_info: &FrameInfo,
+        sampling_factors: &[(u8, u8)],
+    ) -> Result<(), JpeglsError> {
+        self.write_sof_segment(JpegMarkerCode::StartOfFrameExtendedSequential, frame_info, Some(sampling_factors))
     }
 
     fn write_sof_segment(
         &mut self,
         marker: JpegMarkerCode,
         frame_info: &FrameInfo,
+        sampling_factors: Option<&[(u8, u8)]>,
     ) -> Result<(), JpeglsError> {
         self.write_marker(marker)?;
         let length = 2 + 1 + 2 + 2 + 1 + (frame_info.component_count as usize * 3);
@@ -177,11 +194,61 @@ impl<'a> JpegStreamWriter<'a> {
 
         for i in 0..frame_info.component_count {
             self.write_byte((i + 1) as u8)?;
-            self.write_byte(0x11)?; // Sampling factors 1x1
-                                    // Use Quantization Table 0 for Y (component 0), Table 1 for Cb/Cr (components 1, 2)
+            
+            // Get sampling factors: (h_samp << 4) | v_samp
+            let sampling = if let Some(factors) = sampling_factors {
+                let (h, v) = factors.get(i as usize).copied().unwrap_or((1, 1));
+                ((h & 0x0F) << 4) | (v & 0x0F)
+            } else {
+                0x11 // Default 1x1
+            };
+            self.write_byte(sampling)?;
+            
+            // Use Quantization Table 0 for Y (component 0), Table 1 for Cb/Cr (components 1, 2)
             let q_table_id = if i == 0 { 0 } else { 1 };
             self.write_byte(q_table_id)?;
         }
+        Ok(())
+    }
+
+    pub fn write_sof3_segment(
+        &mut self,
+        frame_info: &FrameInfo,
+        _predictor: u8,
+    ) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::StartOfFrameLossless)?;
+        let length = 2 + 1 + 2 + 2 + 1 + (frame_info.component_count as usize * 3);
+        self.write_u16(length as u16)?;
+        self.write_byte(frame_info.bits_per_sample as u8)?;
+        self.write_u16(frame_info.height as u16)?;
+        self.write_u16(frame_info.width as u16)?;
+        self.write_byte(frame_info.component_count as u8)?;
+
+        for i in 0..frame_info.component_count {
+            self.write_byte((i + 1) as u8)?;
+            self.write_byte(0x11)?; // Sampling factors 1x1
+            self.write_byte(0)?; // No quantization table for lossless
+        }
+        Ok(())
+    }
+
+    pub fn write_sos_segment_lossless(
+        &mut self,
+        component_count: u8,
+        predictor: u8,
+    ) -> Result<(), JpeglsError> {
+        self.write_marker(JpegMarkerCode::StartOfScan)?;
+        let length = 2 + 1 + (component_count as usize * 2) + 3;
+        self.write_u16(length as u16)?;
+        self.write_byte(component_count)?;
+        for i in 0..component_count {
+            self.write_byte(i + 1)?; // Component selector
+            let table_sel = if i == 0 { 0x00 } else { 0x11 };
+            self.write_byte(table_sel)?;
+        }
+        self.write_byte(predictor)?; // Ss: predictor selection (1-7)
+        self.write_byte(0)?; // Se: 0 for lossless
+        self.write_byte(0)?; // Ah/Al: point transform (0)
         Ok(())
     }
 
