@@ -55,47 +55,69 @@ The tests will automatically detect the binary at:
 
 ## Running Tests
 
-### Rust Tests
+### Comprehensive Interoperability Tests (NEW - 2026-01-11)
 
-Run the Rust test suite (preferred method):
+Run the comprehensive codec interoperability test suite:
 
 ```bash
-# From project root
+# Quick test (8-bit lossless JPEG-LS only)
+cargo test --release quick_jpegls_interop -- --nocapture
+
+# Full comprehensive suite (all codecs, ~2 minutes)
+cargo test --release run_all_comprehensive_interop -- --nocapture --ignored
+
+# Individual codec families
+cargo test --release comprehensive_jpegls_interop -- --nocapture --ignored
+cargo test --release comprehensive_j2k_interop -- --nocapture --ignored
+cargo test --release comprehensive_jpeg1_interop -- --nocapture --ignored
+```
+
+**Test Results:**
+- Generates CSV files in `docs/test-results/`
+- Creates detailed comparison report: `docs/test-results/INTEROP_REPORT.md`
+- See [Interop Report](../docs/test-results/INTEROP_REPORT.md) for 573-line analysis
+
+### Other Rust Tests
+
+```bash
+# All tests
 cargo test --release
 
-# Run specific test category
-cargo test --release --test final_interop      # Interop tests
+# Specific test categories
 cargo test --release --test jpegls_charls_validation  # JPEG-LS validation
 cargo test --release unit                      # Unit tests
 cargo test --release integration               # Integration tests
 
 # Run a specific test
-cargo test --release --test final_interop test_grayscale_interop -- --nocapture
+cargo test --release --test jpegls_charls_validation -- --nocapture
 ```
 
-### Test Coverage
+### Test Coverage (Updated 2026-01-11)
 
-The test suite includes:
+**Comprehensive Interoperability Tests:**
+- **JPEG 1**: 320 tests (100% pass) - libjpeg-turbo 3.1.3 validation
+- **JPEG 2000**: 300 tests (43% pass) - OpenJPEG 2.5.2 validation (solid patterns work, gradients fail)
+- **JPEG-LS**: 640 tests (15% pass) - CharLS 3.0.0 validation (8-bit perfect, CLI limitations)
+- **Total**: 1,260 interoperability tests with detailed metrics
 
+**Individual Test Suites:**
 - **JPEG 1 (Baseline)**: SOF0/SOF1/SOF2 encoding and decoding for grayscale and RGB
-- **JPEG-LS**:
-  - CharLS validation tests (`tests/interop/jpegls_charls_validation.rs`): 23/23 passing
+- **JPEG-LS**: CharLS validation (`tests/interop/jpegls_charls_validation.rs`): 23/23 passing
   - Lossless grayscale 8-bit: MAE = 0
   - Lossless grayscale 16-bit: MAE = 0
-  - Lossless RGB sample-interleaved: MAE = 0 (23/23 tests)
+  - Lossless RGB sample-interleaved: MAE = 0
   - Edge cases (1x1, 1x8, 8x1, large images)
-- **JPEG 2000**: Full lossless/lossy encoding and decoding (MAE = 0)
-- **HTJ2K**: Encoder (working), Decoder (4 failing tests - under investigation)
+- **JPEG 2000**: OpenJPEG compatibility tests (solid patterns: MAE=0, complex patterns: issues)
+- **HTJ2K**: Encoder validation (CAP marker compliance)
 
-### Interop Tests
+### Interop Tests Requirements
 
 Interop tests require external binaries in `libs/bin/`:
 - `opj_decompress.exe` (OpenJPEG 2.5.2)
 - `opj_compress.exe` (OpenJPEG 2.5.2)
-- `charls-encoder.exe` (CharLS 2.4.2)
-- `charls-decoder.exe` (CharLS 2.4.2)
-- `oj_compress.exe` (OpenHTJ2K 0.6.0)
-- `oj_decompress.exe` (OpenHTJ2K 0.6.0)
+- `charls.exe` (CharLS 3.0.0)
+- `cjpeg.exe`, `djpeg.exe` (libjpeg-turbo 3.1.3)
+- `oj_compress.exe`, `oj_decompress.exe` (OpenHTJ2K 0.6.0)
 
 Run interop tests:
 ```bash

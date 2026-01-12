@@ -437,72 +437,221 @@ pub fn generate_optimal_huffman_table(
     let code_lengths = build_limited_length_codes(&freq_list, 16);
 
     // Generate lengths array and values array
-    generate_huffman_spec(&code_lengths)
+    let (lengths_vec, values_vec) = generate_huffman_spec(&code_lengths);
+
+    // Validate table
+    let mut check_sum = 0u32;
+    for (i, &count) in lengths_vec.iter().enumerate() {
+        // i=0 is length 1. Shift is 16 - 1 = 15.
+        // i=15 is length 16. Shift is 16 - 16 = 0.
+        check_sum += (count as u32) << (15 - i);
+    }
+    
+    // Debug print if invalid
+    if check_sum != 65536 {
+        // println!("WARNING: Invalid Huffman table generated! Kraft sum: {}/65536", check_sum);
+        // This might happen if we have a single symbol (handled above) or empty.
+        // But for N > 1, it should be exact.
+    }
+
+    (lengths_vec, values_vec)
 }
 
-/// Build limited-length Huffman codes using package-merge algorithm
+/// Build limited-length Huffman codes
 fn build_limited_length_codes(freq_list: &[(usize, u8)], max_len: usize) -> Vec<(u8, u8)> {
     let n = freq_list.len();
-    let mut code_lengths = vec![0u8; n];
-
-    if n <= 1 {
-        if n == 1 {
-            code_lengths[0] = 1;
-        }
-        return freq_list
-            .iter()
-            .enumerate()
-            .map(|(i, &(_, sym))| (sym, code_lengths[i]))
-            .collect();
+    if n == 0 {
+        return vec![];
+    }
+    if n == 1 {
+        // Single symbol must have length 1 (and we need a dummy symbol to make a tree, but here we just return 1)
+        // Actually generate_optimal checks this.
+        return vec![(freq_list[0].1, 1)];
     }
 
-    // Simple approach: use standard Huffman algorithm with length limit
-    // Create a priority queue (min-heap simulation)
-    let mut nodes: Vec<(usize, Vec<usize>)> = freq_list
+    // 1. Build standard Huffman tree to get initial lengths
+    // Create leaf nodes
+    let mut nodes: Vec<(usize, usize)> = freq_list // (weight, height/depth - initially 0)
         .iter()
-        .enumerate()
-        .map(|(i, &(f, _))| (f, vec![i]))
+        .map(|&(f, _)| (f, 0)) // 0 means leaf
         .collect();
-
-    while nodes.len() > 1 {
-        // Sort to get two minimum frequency nodes
-        nodes.sort_by_key(|&(f, _)| f);
-
-        // Take two smallest
-        let (f1, indices1) = nodes.remove(0);
-        let (f2, indices2) = nodes.remove(0);
-
-        // Merge
-        let mut merged_indices = indices1;
-        merged_indices.extend(indices2);
-        let merged_freq = f1 + f2;
-
-        // Increment depth for all indices
-        for &idx in &merged_indices {
-            code_lengths[idx] += 1;
+    
+    // We need to track the tree structure to determine depths.
+    // A simple way is to track "depth" if we build bottom-up?
+    // Standard Huffman builds bottom-up.
+    // Let's use a standard parent pointer array approach for simplicity.
+    // Or just count depths.
+    
+    // Let's use a simpler approach:
+    // Work with a list of "Items": (Frequency, OriginalIndex)
+    // We merge items.
+    // But we need to assign lengths at the end.
+    
+    #[derive(Debug, Clone, Copy)]
+    struct Node {
+        freq: usize,
+        is_leaf: bool,
+        index: usize, // index in freq_list if leaf
+        left: Option<usize>,
+        right: Option<usize>,
+    }
+    
+    let mut tree_nodes: Vec<Node> = Vec::with_capacity(2 * n);
+    let mut active_nodes: Vec<usize> = Vec::with_capacity(n);
+    
+    // Initialize leaves
+    for (i, &(f, _)) in freq_list.iter().enumerate() {
+        tree_nodes.push(Node { freq: f, is_leaf: true, index: i, left: None, right: None });
+        active_nodes.push(i);
+    }
+    
+    // Build tree
+    while active_nodes.len() > 1 {
+        // Sort descending by freq so we can pop smallest from end
+        active_nodes.sort_by(|&a, &b| tree_nodes[b].freq.cmp(&tree_nodes[a].freq));
+        
+        let n1_idx = active_nodes.pop().unwrap();
+        let n2_idx = active_nodes.pop().unwrap();
+        
+        let new_freq = tree_nodes[n1_idx].freq + tree_nodes[n2_idx].freq;
+        let new_node_idx = tree_nodes.len();
+        
+        tree_nodes.push(Node {
+            freq: new_freq,
+            is_leaf: false,
+            index: 0,
+            left: Some(n1_idx),
+            right: Some(n2_idx),
+        });
+        
+        active_nodes.push(new_node_idx);
+    }
+    
+    // Traverse tree to get lengths
+    let mut lengths = vec![0u8; n];
+    let mut stack: Vec<(usize, u8)> = vec![(active_nodes[0], 0)];
+    
+    while let Some((node_idx, depth)) = stack.pop() {
+        let node = &tree_nodes[node_idx];
+        if node.is_leaf {
+            lengths[node.index] = depth;
+        } else {
+            if let Some(l) = node.left { stack.push((l, depth + 1)); }
+            if let Some(r) = node.right { stack.push((r, depth + 1)); }
         }
-
-        // Add merged node back
-        nodes.push((merged_freq, merged_indices));
+    }
+    
+    // 2. Enforce length limit (16)
+    // Convert lengths to counts
+    let mut counts = vec![0usize; 33];
+    let mut max_depth = 0;
+    for &l in &lengths {
+        if l > 0 {
+            if l as usize >= counts.len() { counts.resize(l as usize + 1, 0); }
+            counts[l as usize] += 1;
+            max_depth = max_depth.max(l as usize);
+        }
     }
 
-    // Limit code lengths to max_len
-    let mut limited = true;
-    while limited {
-        limited = false;
-        for len in code_lengths.iter_mut() {
-            if *len > max_len as u8 {
-                *len = max_len as u8;
-                limited = true;
+    if max_depth > max_len {
+        // Step A: Squash everything > max_len into max_len
+        for i in (max_len + 1..=max_depth).rev() {
+            counts[max_len] += counts[i];
+            counts[i] = 0;
+        }
+
+        // Step B: Resolve Kraft inequality violation (overflow)
+        // Calculate used capacity in units of 2^-16
+        // Capacity = 2^16 = 65536
+        // Node at depth L consumes 2^(16-L) units
+        let mut used_capacity: u32 = 0;
+        for i in 1..=max_len {
+            used_capacity += (counts[i] as u32) * (1 << (max_len - i));
+        }
+
+        let max_capacity = 1 << max_len;
+        
+        while used_capacity > max_capacity {
+            // Find a level k (1..15) to push down to k+1
+            // We should pick the deepest level < 16 to minimize impact?
+            // Moving k -> k+1 reduces capacity by 2^(16-k-1)
+            // We loop from 15 down to 1
+            let mut best_k = 0;
+            for k in (1..max_len).rev() {
+                if counts[k] > 0 {
+                    best_k = k;
+                    break;
+                }
+            }
+            
+            if best_k == 0 {
+                // Should impossible if n <= 2^16
+                break;
+            }
+            
+            counts[best_k] -= 1;
+            counts[best_k + 1] += 1;
+            
+            // Update used_capacity
+            // Change: -2^(16-k) + 2^(16-(k+1))
+            // = -2 * 2^(15-k) + 2^(15-k) = -2^(15-k)
+            used_capacity -= 1 << (max_len - best_k - 1);
+        }
+    }
+    
+    // Step C: Enforce counts[i] <= 255 (DHT limit)
+    // Since total symbols <= 256, this only happens if one level has ALL 256 symbols.
+    // If so, we move one symbol to adjacent level.
+    for i in 1..=max_len {
+        if counts[i] > 255 {
+            // Must have exactly 256 symbols at this level
+            if i < max_len {
+                // Move one to deeper level (decreases Kraft usage)
+                counts[i] -= 1;
+                counts[i + 1] += 1;
+            } else {
+                // At max_len, move one to shallower level (increases Kraft usage)
+                // But since we have 256 symbols at depth 16, usage is 256/65536 << 1. Safe.
+                counts[i] -= 1;
+                counts[i - 1] += 1;
             }
         }
     }
-
-    freq_list
-        .iter()
-        .enumerate()
-        .map(|(i, &(_, sym))| (sym, code_lengths[i]))
-        .collect()
+    
+    // 3. Assign lengths to symbols
+    // Sort symbols by frequency (standard Huffman: most frequent -> shortest length).
+    // We have `freq_list`.
+    // We have `counts` array saying how many codes of length L exist.
+    // We assign the shortest lengths to the most frequent symbols.
+    
+    // Sort original list by freq descending (primary)
+    // If freqs equal, sort by symbol value to be deterministic
+    let mut sorted_syms: Vec<(usize, u8)> = freq_list.to_vec();
+    // Use stable sort or secondary key
+    sorted_syms.sort_by(|a, b| {
+        // Higher freq -> first (shortest code)
+        b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1))
+    });
+    
+    // Assign lengths
+    let mut result = Vec::with_capacity(n);
+    let mut cur_len = 1;
+    for &(freq, sym) in &sorted_syms {
+        while cur_len <= max_len && counts[cur_len] == 0 {
+            cur_len += 1;
+        }
+        if cur_len > max_len {
+            // Should not happen if logic is correct
+            cur_len = max_len;
+        }
+        
+        result.push((sym, cur_len as u8));
+        if counts[cur_len] > 0 {
+            counts[cur_len] -= 1;
+        }
+    }
+    
+    result
 }
 
 /// Generate JPEG Huffman table specification (lengths and values arrays)

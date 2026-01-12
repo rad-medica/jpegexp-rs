@@ -4,8 +4,11 @@
 /// - Image generation utilities (gradients, checkerboards, patterns)
 /// - Pixel comparison utilities (MAE, PSNR, exact matching)
 /// - Codec wrapper traits for unified testing
+/// - Comprehensive synthetic image generation
 
 use std::error::Error;
+
+pub mod synthetic_images;
 
 /// Image generation utilities
 pub mod image_gen {

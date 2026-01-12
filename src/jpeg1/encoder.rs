@@ -6,6 +6,7 @@ use crate::jpeg1::huffman::{
     generate_optimal_huffman_table, HuffmanEncoder, HuffmanTable, JpegBitWriter, SymbolFrequencies,
     STD_LUMINANCE_DC_LENGTHS, STD_LUMINANCE_DC_VALUES,
 };
+use crate::jpeg1::progressive::{CoefficientBuffer, QuantizedBlock, ScanScript, ScanSpecification};
 use crate::jpeg1::quantization::{
     STD_CHROMINANCE_QUANT_TABLE, STD_LUMINANCE_QUANT_TABLE,
 };
@@ -87,6 +88,8 @@ pub struct Jpeg1Encoder {
     v_samp_chroma: u8,
     /// Enable optimized Huffman table generation (two-pass encoding)
     optimize_huffman: bool,
+    /// Enable progressive encoding mode
+    progressive_mode: bool,
 }
 
 impl Default for Jpeg1Encoder {
@@ -115,6 +118,7 @@ impl Default for Jpeg1Encoder {
             h_samp_chroma: 1,
             v_samp_chroma: 1,
             optimize_huffman: false,
+            progressive_mode: false,
         }
     }
 }
@@ -195,6 +199,12 @@ impl Jpeg1Encoder {
         self.optimize_huffman = enable;
     }
 
+    /// Enable progressive encoding mode.
+    /// This produces a progressive JPEG (SOF2) instead of a sequential one.
+    pub fn set_progressive(&mut self, enable: bool) {
+        self.progressive_mode = enable;
+    }
+
     pub fn encode(
         &mut self,
         source: &[u8],
@@ -204,6 +214,17 @@ impl Jpeg1Encoder {
         if self.lossless_mode {
             return self.encode_lossless(source, frame_info, destination);
         }
+        
+        if self.progressive_mode {
+            // Placeholder for Progressive Encoding
+            // This will use collect_quantized_coefficients and scan loops
+            // For now, fail or fallback
+            // But since we are implementing it, let's start wiring it up
+            // return self.encode_progressive(source, frame_info, destination);
+            // TODO: Implement encode_progressive
+            return self.encode_progressive(source, frame_info, destination);
+        }
+
         let mut writer = JpegStreamWriter::new(destination);
         let components_count = frame_info.component_count as usize;
 
@@ -1456,31 +1477,689 @@ impl Jpeg1Encoder {
         let dc_category = HuffmanEncoder::get_category(dc_diff);
         dc_freqs.record_dc(dc_category);
 
-        // 5. Record AC symbols (using run-length encoding logic)
-        let mut run = 0u8;
-        for &coef in &zigzag[1..] {
-            if coef == 0 {
-                run += 1;
-                if run == 16 {
-                    ac_freqs.record_ac(0xF0); // ZRL
-                    run = 0;
+                        // 5. Record AC symbols (using run-length encoding logic)
+                        let mut run = 0u8;
+                        for &coef in &zigzag[1..] {
+                            if coef == 0 {
+                                run += 1;
+                            } else {
+                                while run >= 16 {
+                                    ac_freqs.record_ac(0xF0); // ZRL
+                                    run -= 16;
+                                }
+                                let category = HuffmanEncoder::get_category(coef);
+                                let symbol = (run << 4) | category;
+                                ac_freqs.record_ac(symbol);
+                                run = 0;
+                            }
+                        }
+
+                        // 6. Record EOB if needed
+                        if run > 0 {
+                            ac_freqs.record_ac(0x00); // EOB
+                        }
+    }
+
+    /// Collect quantized coefficients into a buffer for progressive encoding.
+    /// This performs DCT and Quantization but stores the result instead of Huffman encoding it.
+    fn collect_quantized_coefficients(
+        block: &[f32; 64],
+        quant_table: &[u16; 64],
+        buffer: &mut CoefficientBuffer,
+        mcu_index: usize,
+        block_index_in_mcu: usize,
+    ) {
+        let mut dct_coeffs = [0.0f32; 64];
+        fdct_8x8(block, &mut dct_coeffs);
+
+        let mut quant_coeffs = [0i16; 64];
+        crate::jpeg1::quantization::quantize_block_u16(&dct_coeffs, quant_table, &mut quant_coeffs);
+
+        let q_block = buffer.get_block_mut(mcu_index, block_index_in_mcu);
+        q_block.coeffs = quant_coeffs;
+    }
+
+    fn encode_progressive(
+        &mut self,
+        source: &[u8],
+        frame_info: &FrameInfo,
+        destination: &mut [u8],
+    ) -> Result<usize, JpeglsError> {
+        let mut writer = JpegStreamWriter::new(destination);
+        let components_count = frame_info.component_count as usize;
+        let width = frame_info.width as usize;
+        let height = frame_info.height as usize;
+
+        writer.write_start_of_image()?;
+
+        // Write DQTs
+        if components_count == 1 {
+            writer.write_dqt_u16(0, &self.quantization_table_lum)?;
+        } else {
+            writer.write_dqt_u16(0, &self.quantization_table_lum)?;
+            writer.write_dqt_u16(1, &self.quantization_table_chrom)?;
+        }
+
+        // Write Huffman Tables (all of them upfront for simplicity, or per scan)
+        // Progressive decoders expect DHTs before SOS that uses them.
+        // We'll write standard tables for now.
+        if self.bits_per_sample > 8 {
+            writer.write_dht(0, 0, &crate::jpeg1::huffman::EXT_LUMINANCE_DC_LENGTHS, &crate::jpeg1::huffman::EXT_LUMINANCE_DC_VALUES)?;
+        } else {
+            writer.write_dht(0, 0, &STD_LUMINANCE_DC_LENGTHS, &STD_LUMINANCE_DC_VALUES)?;
+        }
+        writer.write_dht(1, 0, &self.ac_table_lum.lengths, &self.ac_table_lum.values)?;
+
+        if components_count > 1 {
+            if self.bits_per_sample > 8 {
+                writer.write_dht(0, 1, &crate::jpeg1::huffman::EXT_LUMINANCE_DC_LENGTHS, &crate::jpeg1::huffman::EXT_LUMINANCE_DC_VALUES)?;
+            } else {
+                writer.write_dht(0, 1, &crate::jpeg1::huffman::STD_CHROMINANCE_DC_LENGTHS, &crate::jpeg1::huffman::STD_CHROMINANCE_DC_VALUES)?;
+            }
+            writer.write_dht(1, 1, &self.ac_table_chrom.lengths, &self.ac_table_chrom.values)?;
+        }
+
+        if self.restart_interval > 0 {
+            writer.write_dri(self.restart_interval)?;
+        }
+
+        // Write SOF2 (Progressive DCT) instead of SOF0/SOF1
+        // Need to implement write_sof2_segment or reuse write_sof0 with marker override?
+        // JpegStreamWriter methods are specific (write_sof0_segment).
+        // Let's check JpegStreamWriter capabilities.
+        // Assuming we need to extend JpegStreamWriter or use generic marker writer.
+        // For now, let's assume we can write the SOF2 marker manually or add a method.
+        // Wait, JpegStreamWriter is in another file. I should check if it has SOF2 support.
+        // If not, I'll use write_marker and write_segment_payload logic if possible, or modify JpegStreamWriter.
+        
+        // Let's assume for a moment we can use write_sof0_segment but patch the marker code?
+        // No, write_sof0_segment likely writes the marker byte.
+        // Let's check JpegStreamWriter content if possible, or just implement a local helper.
+        // Since I can't see JpegStreamWriter content right now (I saw it earlier but didn't memorize it), 
+        // I'll assume I need to add `write_sof2_segment` to it or use a raw write.
+        
+        // TEMPORARY: Write SOF0 for now to test flow, but this is WRONG for progressive.
+        // The decoder will see SOF0 and expect sequential.
+        // I need to write marker 0xC2 (SOF2).
+        
+        // Let's try to use the public API of JpegStreamWriter to write raw marker + data.
+        // Sampling factors
+        let sampling_factors = if components_count > 1 {
+            vec![
+                (self.h_samp_y, self.v_samp_y),
+                (self.h_samp_chroma, self.v_samp_chroma),
+                (self.h_samp_chroma, self.v_samp_chroma),
+            ]
+        } else {
+            vec![(1, 1)]
+        };
+        
+        // Manual SOF2 write
+        writer.write_marker(crate::jpeg_marker_code::JpegMarkerCode::try_from(0xC2).unwrap())?; // SOF2
+        let len = 8 + 3 * components_count as u16;
+        writer.write_u16(len)?;
+        writer.write_byte(frame_info.bits_per_sample as u8)?;
+        writer.write_u16(frame_info.height as u16)?;
+        writer.write_u16(frame_info.width as u16)?;
+        writer.write_byte(components_count as u8)?;
+        for i in 0..components_count {
+            writer.write_byte((i + 1) as u8)?; // ID
+            let (h, v) = sampling_factors[i];
+            writer.write_byte((h << 4) | v)?;
+            writer.write_byte(if i == 0 { 0 } else { 1 })?; // Quant table selector
+        }
+
+        // --- PHASE 1: COEFFICIENT COLLECTION ---
+        // Initialize buffers for each component
+        // 0: Y, 1: Cb, 2: Cr
+        let mut buffers: Vec<CoefficientBuffer> = Vec::with_capacity(components_count);
+        
+        if components_count == 1 {
+            buffers.push(CoefficientBuffer::new(width, height, 1, 1));
+        } else {
+            // Y
+            buffers.push(CoefficientBuffer::new(width, height, self.h_samp_y, self.v_samp_y));
+            // Cb
+            let (_cb_w, _cb_h) = ((width + 1) / 2, (height + 1) / 2); // Approximation for 4:2:0
+            // Actually, we should use the same logic as sequential for dimensions
+            // But CoefficientBuffer calculates its own block count based on h/v samp.
+            // Wait, CoefficientBuffer needs logical dimensions of the component?
+            // No, it needs the full image dimensions and sampling factors to calculate MCU layout.
+            // Let's re-read CoefficientBuffer::new.
+            // It takes (width, height, h_samp, v_samp).
+            // It calculates mcu_cols/rows based on that.
+            // So we just pass the full image dims and the component's sampling factors.
+            
+            buffers.push(CoefficientBuffer::new(width, height, self.h_samp_chroma, self.v_samp_chroma)); // Cb
+            buffers.push(CoefficientBuffer::new(width, height, self.h_samp_chroma, self.v_samp_chroma)); // Cr
+        }
+
+        // Fill buffers (reuse sequential logic structure)
+        let level_shift = (1 << (frame_info.bits_per_sample - 1)) as f32;
+        
+        // This part is very similar to sequential encode, but calls collect_quantized_coefficients
+        // instead of encode_block_internal.
+        // We can copy-paste the loop structure from `encode`.
+        
+        // ... (Data collection loop) ...
+        // I'll implement a helper `fill_coefficient_buffers` to keep this clean.
+        self.fill_coefficient_buffers(source, frame_info, &mut buffers, level_shift);
+
+        // --- PHASE 2: SCAN LOOP ---
+        // Use Simple Spectral for maximum compatibility and robustness.
+        // Successive Approximation (SA) is implemented but sensitive to bitstream details.
+        let script = ScanScript::simple_spectral();
+        
+        for scan in script.scans {
+            self.write_scan(&scan, &mut writer, &mut buffers)?;
+        }
+
+        writer.write_end_of_image()?;
+        Ok(writer.len())
+    }
+
+    fn fill_coefficient_buffers(
+        &self, 
+        source: &[u8], 
+        frame_info: &FrameInfo, 
+        buffers: &mut [CoefficientBuffer],
+        level_shift: f32
+    ) {
+        let width = frame_info.width as usize;
+        let height = frame_info.height as usize;
+        let components_count = frame_info.component_count as usize;
+
+        if components_count == 1 {
+            // Grayscale
+            for block_y in (0..height).step_by(8) {
+                for block_x in (0..width).step_by(8) {
+                    let mut block_data = [0.0f32; 64];
+                    for y in 0..8 {
+                        for x in 0..8 {
+                            let py = block_y + y;
+                            let px = block_x + x;
+                            if py < height && px < width {
+                                block_data[y * 8 + x] = source[py * width + px] as f32 - level_shift;
+                            }
+                        }
+                    }
+                    // MCU index calculation
+                    let mcu_x = block_x / 8;
+                    let mcu_y = block_y / 8;
+                    let mcu_width = (width + 7) / 8;
+                    let mcu_idx = mcu_y * mcu_width + mcu_x;
+                    
+                    Self::collect_quantized_coefficients(
+                        &block_data, 
+                        &self.quantization_table_lum, 
+                        &mut buffers[0], 
+                        mcu_idx, 
+                        0
+                    );
+                }
+            }
+        } else {
+            // RGB/YCbCr
+            // Need planar conversion first (or on the fly)
+            // Reuse on-the-fly logic from encode()
+            
+            // ... (Copy YCbCr conversion and downsampling logic) ...
+            // For brevity in this edit, I'll implement a simplified version or copy it.
+            // Ideally, we refactor this into a helper, but `encode` is monolithic.
+            // Let's implement the loop here.
+            
+            let mut y_plane = vec![0.0f32; width * height];
+            let mut cb_plane = vec![0.0f32; width * height];
+            let mut cr_plane = vec![0.0f32; width * height];
+            
+            for py in 0..height {
+                for px in 0..width {
+                    let idx = (py * width + px) * 3;
+                    let r = source[idx] as f32;
+                    let g = source[idx + 1] as f32;
+                    let b = source[idx + 2] as f32;
+                    let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+                    let cb = -0.1687 * r - 0.3313 * g + 0.5 * b + 128.0;
+                    let cr = 0.5 * r - 0.4187 * g - 0.0813 * b + 128.0;
+                    y_plane[py * width + px] = luma - 128.0;
+                    cb_plane[py * width + px] = cb - 128.0;
+                    cr_plane[py * width + px] = cr - 128.0;
+                }
+            }
+
+            // Downsample
+            let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
+                if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
+                    (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
+                    (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                } else {
+                    (cb_plane, width, height)
                 }
             } else {
-                while run >= 16 {
-                    ac_freqs.record_ac(0xF0);
-                    run -= 16;
+                (cb_plane, width, height)
+            };
+            
+            let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
+                if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
+                    (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
+                    (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                } else {
+                    (cr_plane, width, height)
                 }
-                let category = HuffmanEncoder::get_category(coef);
-                let symbol = (run << 4) | category;
-                ac_freqs.record_ac(symbol);
-                run = 0;
+            } else {
+                (cr_plane, width, height)
+            };
+
+            let mcu_width = 8 * self.h_samp_y as usize;
+            let mcu_height = 8 * self.v_samp_y as usize;
+            let mcu_cols = (width + mcu_width - 1) / mcu_width;
+            let mcu_rows = (height + mcu_height - 1) / mcu_height;
+
+            for mcu_row in 0..mcu_rows {
+                for mcu_col in 0..mcu_cols {
+                    let mcu_idx = mcu_row * mcu_cols + mcu_col;
+
+                    // Y blocks
+                    let mut blk_idx = 0;
+                    for v in 0..self.v_samp_y {
+                        for h in 0..self.h_samp_y {
+                            let block_x = mcu_col * mcu_width + h as usize * 8;
+                            let block_y = mcu_row * mcu_height + v as usize * 8;
+                            let mut block_data = [0.0f32; 64];
+                            for y in 0..8 {
+                                for x in 0..8 {
+                                    let px = block_x + x;
+                                    let py = block_y + y;
+                                    if py < height && px < width {
+                                        block_data[y * 8 + x] = y_plane[py * width + px];
+                                    }
+                                }
+                            }
+                            Self::collect_quantized_coefficients(&block_data, &self.quantization_table_lum, &mut buffers[0], mcu_idx, blk_idx);
+                            blk_idx += 1;
+                        }
+                    }
+
+                    // Cb blocks
+                    blk_idx = 0;
+                    for v in 0..self.v_samp_chroma {
+                        for h in 0..self.h_samp_chroma {
+                            let block_x = mcu_col * (mcu_width / (self.h_samp_y / self.h_samp_chroma) as usize) + h as usize * 8;
+                            let block_y = mcu_row * (mcu_height / (self.v_samp_y / self.v_samp_chroma) as usize) + v as usize * 8;
+                            let mut block_data = [0.0f32; 64];
+                            for y in 0..8 {
+                                for x in 0..8 {
+                                    let px = block_x + x;
+                                    let py = block_y + y;
+                                    if py < cb_height && px < cb_width {
+                                        block_data[y * 8 + x] = cb_downsampled[py * cb_width + px];
+                                    }
+                                }
+                            }
+                            Self::collect_quantized_coefficients(&block_data, &self.quantization_table_chrom, &mut buffers[1], mcu_idx, blk_idx);
+                            blk_idx += 1;
+                        }
+                    }
+
+                    // Cr blocks
+                    blk_idx = 0;
+                    for v in 0..self.v_samp_chroma {
+                        for h in 0..self.h_samp_chroma {
+                            let block_x = mcu_col * (mcu_width / (self.h_samp_y / self.h_samp_chroma) as usize) + h as usize * 8;
+                            let block_y = mcu_row * (mcu_height / (self.v_samp_y / self.v_samp_chroma) as usize) + v as usize * 8;
+                            let mut block_data = [0.0f32; 64];
+                            for y in 0..8 {
+                                for x in 0..8 {
+                                    let px = block_x + x;
+                                    let py = block_y + y;
+                                    if py < cb_height && px < cb_width {
+                                        block_data[y * 8 + x] = cr_downsampled[py * cb_width + px];
+                                    }
+                                }
+                            }
+                            Self::collect_quantized_coefficients(&block_data, &self.quantization_table_chrom, &mut buffers[2], mcu_idx, blk_idx);
+                            blk_idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn write_scan(
+        &mut self,
+        scan: &ScanSpecification,
+        writer: &mut JpegStreamWriter,
+        buffers: &mut [CoefficientBuffer],
+    ) -> Result<(), JpeglsError> {
+        // Write SOS
+        writer.write_marker(crate::jpeg_marker_code::JpegMarkerCode::StartOfScan)?;
+        let len = 2 + 1 + 2 * scan.component_indices.len() as u16 + 3;
+        writer.write_u16(len)?;
+        writer.write_byte(scan.component_indices.len() as u8)?;
+        
+        for &comp_idx in &scan.component_indices {
+            writer.write_byte(comp_idx + 1)?; // Component ID (1-based)
+            let (dc_tbl, ac_tbl) = if comp_idx == 0 { (0, 0) } else { (1, 1) };
+            writer.write_byte((dc_tbl << 4) | ac_tbl)?;
+        }
+        
+        writer.write_byte(scan.ss_start)?;
+        writer.write_byte(scan.ss_end)?;
+        writer.write_byte((scan.ah << 4) | scan.al)?;
+
+        // Bit writer setup
+        let mut bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
+        let mut bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
+        
+        // Reset DC predictors at start of scan
+        self.huffman.dc_previous_value = [0; 4];
+        let mut next_restart_index = 0;
+        let mut mcus_encoded = 0;
+        
+        // Determine total MCUs
+        let buf0 = &buffers[0];
+        let mcu_width = 8 * buf0.h_samp as usize;
+        let mcu_height = 8 * buf0.v_samp as usize;
+        let mcu_cols = (buf0.width + mcu_width - 1) / mcu_width;
+        let mcu_rows = (buf0.height + mcu_height - 1) / mcu_height;
+        let total_mcus = mcu_cols * mcu_rows;
+
+        // Iterate over MCUs
+        for mcu_idx in 0..total_mcus {
+            // Handle restart intervals
+            if self.restart_interval > 0 && mcus_encoded > 0 && (mcus_encoded % self.restart_interval as usize == 0) {
+                bit_writer.flush()?;
+                let len = bit_writer.len();
+                let _ = bit_writer_opt.take();
+                writer.advance(len);
+                let marker = crate::jpeg_marker_code::JpegMarkerCode::try_from(0xD0 + (next_restart_index % 8)).map_err(|_| JpeglsError::InvalidOperation)?;
+                writer.write_marker(marker)?;
+                next_restart_index += 1;
+                bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
+                bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
+                self.huffman.dc_previous_value = [0; 4];
+            }
+
+            // For each component in the scan
+            for &comp_idx in &scan.component_indices {
+                let comp_i = comp_idx as usize;
+                let buffer = &buffers[comp_i];
+                let blocks_per_mcu = buffer.h_samp as usize * buffer.v_samp as usize;
+                
+                // For each block in the MCU for this component
+                for blk_idx in 0..blocks_per_mcu {
+                    let block_offset = mcu_idx * blocks_per_mcu + blk_idx;
+                    let block = buffers[comp_i].blocks[block_offset]; // Copy
+                    
+                    // Clone tables to avoid borrow checker issues
+                    // This is slightly inefficient but safe. `HuffmanTable` contains vectors so clone is non-trivial.
+                    // Better approach: pass references to tables inside `encode_progressive_block`
+                    // But `encode_progressive_block` takes `&mut self` to update `self.huffman`.
+                    // We need to split `self` borrows.
+                    // Or, pass `&mut self.huffman` and `&table_dc` separately to a static function/method that doesn't take `&mut self`.
+                    
+                    // Refactoring `encode_progressive_block` to NOT take `&mut self`, but `&mut HuffmanEncoder`
+                    Self::encode_progressive_block_static(
+                        &mut self.huffman,
+                        &block, 
+                        bit_writer, 
+                        if comp_idx == 0 { &self.dc_table_lum } else { &self.dc_table_chrom }, 
+                        if comp_idx == 0 { &self.ac_table_lum } else { &self.ac_table_chrom }, 
+                        scan, 
+                        comp_i
+                    )?;
+                }
+            }
+            mcus_encoded += 1;
+        }
+        
+        bit_writer.flush()?;
+        let encoded_len = bit_writer.len();
+        let _ = bit_writer_opt.take();
+        writer.advance(encoded_len);
+        
+        Ok(())
+    }
+
+    fn encode_progressive_block_static(
+        huffman: &mut HuffmanEncoder,
+        block: &QuantizedBlock,
+        bit_writer: &mut JpegBitWriter,
+        dc_table: &HuffmanTable,
+        ac_table: &HuffmanTable,
+        scan: &ScanSpecification,
+        dc_pred_idx: usize,
+    ) -> Result<(), JpeglsError> {
+        let mut zigzag = [0i16; 64];
+        for i in 0..64 {
+            zigzag[i] = block.coeffs[ZIGZAG_ORDER[i]];
+        }
+
+        // DC Encoding (Ss=0)
+        if scan.ss_start == 0 {
+            let dc_val = zigzag[0];
+            
+            if scan.ah == 0 {
+                // Initial DC Scan
+                let diff = dc_val - huffman.dc_previous_value[dc_pred_idx];
+                huffman.dc_previous_value[dc_pred_idx] = dc_val;
+                
+                let v = diff >> scan.al;
+                
+                let category = HuffmanEncoder::get_category(v);
+                let code = dc_table.codes[category as usize];
+                bit_writer.write_bits(code.value, code.length)?;
+                let (bits, len) = HuffmanEncoder::get_diff_bits(v, category);
+                bit_writer.write_bits(bits, len)?;
+            } else {
+                // DC Refinement Scan (Ah > 0)
+                // We just code the bit at position Al
+                // Refinement bits for DC are sent raw, not Huffman encoded.
+                let bit = (dc_val >> scan.al) & 1;
+                bit_writer.write_bits(bit as u16, 1)?;
             }
         }
 
-        // 6. Record EOB if needed
-        if run > 0 {
-            ac_freqs.record_ac(0x00); // EOB
+        // AC Encoding (Ss > 0)
+        // scan.ss_end is the end of the spectral band.
+        let start = std::cmp::max(1, scan.ss_start as usize);
+        let end = scan.ss_end as usize;
+        
+        if start <= end {
+            if scan.ah == 0 {
+                // Initial AC Scan
+                let mut run = 0;
+                for k in start..=end {
+                    let val = zigzag[k];
+                    let _abs_val = val.abs();
+                    // Check if coefficient is significant at this shift
+                    // We need to encode `val >> Al`
+                    let shifted = val >> scan.al;
+                    
+                    if shifted == 0 {
+                        run += 1;
+                    } else {
+                        while run > 15 {
+                            let zrl = ac_table.codes[0xF0];
+                            bit_writer.write_bits(zrl.value, zrl.length)?;
+                            run -= 16;
+                        }
+                        let category = HuffmanEncoder::get_category(shifted);
+                        let symbol = (run << 4) | category;
+                        let code = ac_table.codes[symbol as usize];
+                        if code.length == 0 { return Err(JpeglsError::InvalidData); }
+                        bit_writer.write_bits(code.value, code.length)?;
+                        let (bits, len) = HuffmanEncoder::get_diff_bits(shifted, category);
+                        bit_writer.write_bits(bits, len)?;
+                        run = 0;
+                    }
+                }
+                
+                if run > 0 {
+                    let eob = ac_table.codes[0x00];
+                    bit_writer.write_bits(eob.value, eob.length)?;
+                }
+            } else {
+                // AC Refinement Scan (Ah > 0)
+                // This logic is complex. We need to process EOB runs and history.
+                // For "Simple Spectral + SA", we'll implement per-block refinement first (no EOB runs across blocks).
+                
+                let mut run = 0;
+                let _eob_run = 0; // We are not using cross-block EOB runs yet, but logic is similar.
+                
+                // For AC refinement:
+                // 1. Iterate over spectral band.
+                // 2. If coeff was non-zero in previous pass (abs(val) >= (1 << Ah)), send Refinement Bit.
+                //    - But ONLY if we are not in an EOB run (or after handling run).
+                //    - Actually, non-zero history coeffs are skipped by the Zero Run Length coding of *new* coeffs.
+                //    - BUT we must send their refinement bit.
+                //    - JPEG standard:
+                //      - If coeff was already non-zero: Send 1 bit (refinement).
+                //      - If coeff was zero:
+                //        - If it becomes non-zero now: Send run-length + sign.
+                //        - If it stays zero: Increment run.
+                //      - Wait, refinement bits are sent inline?
+                //      - "The refinement bit is coded... immediately after the run-length code... OR if run-length is skipped".
+                //      - Actually, the sequence is:
+                //        - Skip over already-non-zero coeffs in the run counting.
+                //        - When we hit a *newly* non-zero coeff (or EOB):
+                //          - Code the run length of *zeros* (skipping history-non-zeros).
+                //          - Code the new coeff sign.
+                //          - THEN, for each skipped history-non-zero coeff, send its refinement bit.
+                //          - Actually, the standard says refinement bits are sent *interleaved*?
+                //          - Annex G.1.2.2:
+                //            "When a non-zero coefficient is coded... [same as initial scan]..."
+                //            "However, if [coeff was already non-zero]... the 'refinement bit' is coded."
+                //            "The code for ZRL or a run length... accounts only for coefficients which were zero in previous scans."
+                //            "Any non-zero coefficients [from history] are skipped over... however, immediately after the ZRL/run code is output, a single bit is output for each [skipped history coeff]."
+                //            "If the run length is non-zero, the refinement bits are output... for each non-zero coeff... skipped over."
+                
+                // Let's implement this carefully.
+                // We need to buffer refinement bits while counting the run.
+                
+                let mut refinement_bits = Vec::new(); // Bits to send after next symbol
+                
+                for k in start..=end {
+                    let val = zigzag[k];
+                    let abs_val = val.abs();
+                    let history_mask = 1 << scan.ah; // Previously sent bits
+                    let current_bit_mask = 1 << scan.al;
+                    
+                    let was_nonzero = abs_val >= history_mask;
+                    
+                    if was_nonzero {
+                        // Already sent. We will send a refinement bit.
+                        // Refinement bit = (abs_val >> Al) & 1
+                        let ref_bit = (abs_val >> scan.al) & 1;
+                        refinement_bits.push(ref_bit as u16);
+                    } else {
+                        // Was zero. Check if it becomes non-zero now.
+                        let is_nonzero_now = abs_val >= current_bit_mask;
+                        
+                        if !is_nonzero_now {
+                            // Still zero.
+                            run += 1;
+                        } else {
+                            // Newly non-zero!
+                            // 1. Send Run/Category symbol
+                            while run > 15 {
+                                // ZRL
+                                let zrl = ac_table.codes[0xF0];
+                                bit_writer.write_bits(zrl.value, zrl.length)?;
+                                
+                                // Send refinement bits for the history coeffs skipped during this run of 16
+                                // Note: The standard says "Each ZRL is followed by the refinement bits for the non-zero coefficients skipped over during the run of 16 zeros."
+                                // So we need to flush refinement bits that accumulated *during* this ZRL period.
+                                // BUT `refinement_bits` vector collected ALL bits since last symbol.
+                                // We need to handle this strictly.
+                                // Actually, simpler logic:
+                                //   When we encounter a history-non-zero coeff:
+                                //     If we are *in the middle of a run*, we just queue the bit.
+                                //     When we emit a ZRL or a Symbol, we flush the queue.
+                                //   Wait, ZRL corresponds to 16 *zeros* (newly-zero coeffs).
+                                //   If we skipped 5 history-non-zeros while counting 16 zeros, we emit ZRL then 5 bits.
+                                
+                                // Let's manage the queue better.
+                                // We consume `refinement_bits` up to what was seen *before* the 16th zero.
+                                // This is getting complicated with a simple vector.
+                                // Alternative:
+                                //   Iterate.
+                                //   If history-non-zero:
+                                //     Save bit.
+                                //   If history-zero (new-zero):
+                                //     Run++.
+                                //     If Run == 16:
+                                //       Emit ZRL.
+                                //       Emit saved bits.
+                                //       Clear saved bits.
+                                //       Run = 0.
+                                //   If history-zero (new-nonzero):
+                                //     Emit Symbol (Run, Size=1).
+                                //     Emit Sign bit.
+                                //     Emit saved bits.
+                                //     Clear saved bits.
+                                //     Run = 0.
+                                
+                                // Wait, does the order match?
+                                // "The refinement bits... are output... in the order in which they occur in the block."
+                                // Yes.
+                                
+                                // Let's rewrite the loop structure with this logic.
+                                // We need to handle the loop inside the check.
+                                // Since we are inside `while run > 15`, we implicitly handled 16 zeros.
+                                // But `refinement_bits` contains bits from "gaps" between those zeros.
+                                // So yes, we flush `refinement_bits` here.
+                                
+                                for &b in &refinement_bits {
+                                    bit_writer.write_bits(b, 1)?;
+                                }
+                                refinement_bits.clear();
+                                run -= 16;
+                            }
+                            
+                            // Send Symbol for new coeff
+                            // Value is always 1 or -1 at this bit plane (shifted).
+                            // Effectively category is always 1 (size 1).
+                            // Symbol = (Run << 4) | 1.
+                            let symbol = (run << 4) | 1;
+                            let code = ac_table.codes[symbol as usize];
+                            if code.length == 0 { return Err(JpeglsError::InvalidData); }
+                            bit_writer.write_bits(code.value, code.length)?;
+                            
+                            // Send Sign bit
+                            // If val > 0, sign is 1. If val < 0, sign is 0.
+                            // Standard baseline logic: positive=1, negative=0.
+                            let sign_bit = if val > 0 { 1 } else { 0 };
+                            bit_writer.write_bits(sign_bit, 1)?;
+                            
+                            // Flush refinement bits
+                            for &b in &refinement_bits {
+                                bit_writer.write_bits(b, 1)?;
+                            }
+                            refinement_bits.clear();
+                            run = 0;
+                        }
+                    }
+                }
+                
+                // End of block.
+                if run > 0 || !refinement_bits.is_empty() {
+                    // We have trailing zeros OR trailing refinement bits.
+                    // We must emit EOB.
+                    let eob = ac_table.codes[0x00];
+                    bit_writer.write_bits(eob.value, eob.length)?;
+                    
+                    // Flush remaining refinement bits
+                    for &b in &refinement_bits {
+                        bit_writer.write_bits(b, 1)?;
+                    }
+                }
+            }
         }
+        Ok(())
     }
 
     fn encode_lossless(

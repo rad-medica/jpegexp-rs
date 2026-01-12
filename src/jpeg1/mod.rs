@@ -13,6 +13,7 @@ pub mod decoder;
 pub mod encoder;
 pub mod huffman;
 pub mod lossless;
+pub mod progressive;
 pub mod quantization;
 
 pub use decoder::Jpeg1Decoder;
