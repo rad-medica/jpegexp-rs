@@ -3,7 +3,7 @@
 **Project:** jpegexp-rs  
 **Test Date:** 2026-01-11  
 **Test Framework:** Comprehensive Interop Test Suite v1.0  
-**Test Duration:** 39.68 seconds (J2K only run)
+**Test Duration:** 38.5 seconds (J2K only run)
 
 ---
 
@@ -58,12 +58,12 @@ This report documents comprehensive interoperability testing between `jpegexp-rs
 | Pattern | Failure Mode | Typical MAE | Probable Cause |
 |---------|--------------|-------------|----------------|
 | **Solid** | ✅ Pass | 0.0000 | - |
-| **Gradient** | ❌ Fail | ~0.73 (8-bit) | Tier-1 Context Modeling or Boundary Extension |
+| **Gradient** | ❌ Fail | ~0.73 (8-bit) | Tier-1 Context Modeling (MagRef LSB mismatch) |
 | **Noise** | ❌ Fail | ~0.73 (8-bit) | Tier-1 Context Modeling |
 | **Checkerboard** | ❌ Fail | ~0.73 (8-bit) | Tier-1 Context Modeling |
-| **16-bit (Any)** | ❌ Fail | > 10,000 | Endianness/Signedness mismatch in Test Harness vs Codec |
+| **16-bit (Any)** | ❌ Fail | > 10,000 | Endianness/Signedness mismatch in Test Harness or `zero_bp` packet header divergence |
 
-**Key Finding:** The consistent MAE of ~0.7351 for 8-bit complex patterns suggests a systematic bias, likely a single-bit difference in rounding or a specific context model decision in the arithmetic coder.
+**Key Finding:** The consistent MAE of ~0.7351 for 8-bit complex patterns suggests a systematic bias, identified as a mismatch in the **Magnitude Refinement** pass context modeling for bit 1 (2nd LSB) and bit 0 (LSB). The bitstream remains synchronized for higher bits but diverges at the finest detail levels.
 
 ### 2.4 Verdict
 
@@ -72,8 +72,8 @@ This report documents comprehensive interoperability testing between `jpegexp-rs
 - **Safe for Exchange with OpenJPEG**: No (for complex images).
 
 **Next Steps:**
-1.  Debug Tier-1 MQ Coder context states against OpenJPEG debug output.
-2.  Investigate 16-bit PNM handling in the test harness to resolve the massive MAE errors.
+1.  Debug Tier-1 MQ Coder context states against OpenJPEG debug output trace.
+2.  Investigate 16-bit `zero_bp` header calculation logic.
 
 ---
 

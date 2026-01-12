@@ -20,7 +20,7 @@ jpegexp-rs implements the core of the JPEG 2000 standard, specifically designed 
 - ✅ **Lossless (5-3 DWT)**: Implemented and validated for solid/uniform images (MAE=0.0) against OpenJPEG.
 - ✅ **Lossy (9-7 DWT)**: Implemented, with recent quantization fixes improving PSNR > 50dB.
 - ❌ **Interoperability (Complex Patterns)**: Gradients, noise, and checkerboard patterns fail to reconstruct perfectly with OpenJPEG (MAE ~0.735). This isolates the issue to **Tier-1 Entropy Coding** (Context Modeling) or **Packet Header Signaling**, as the DWT math is now proven correct.
-- ❌ **16-bit Interoperability**: Large errors (MAE > 10,000) when validating against OpenJPEG. Internal roundtrip is perfect (MAE=0), suggesting a test harness interpretation issue (PNM Endianness/Signedness).
+- ❌ **16-bit Interoperability**: Large errors (MAE > 10,000) when validating against OpenJPEG. Internal roundtrip is perfect (MAE=0), suggesting a test harness interpretation issue (PNM Endianness/Signedness) or a packet header `zero_bp` mismatch.
 
 ---
 
@@ -68,7 +68,7 @@ jpegexp-rs implements the core of the JPEG 2000 standard, specifically designed 
 - This suggests a subtle deviation in **Entropy Coding context modeling** (e.g. significance propagation neighbors) or **rounding modes** in the bit-plane coder.
 
 ### 2. High Bit Depth Validation
-- 16-bit encoding works perfectly internally (Roundtrip MAE=0), but validation against OpenJPEG fails. This is attributed to the test harness (PNM Endianness/Signedness handling).
+- 16-bit encoding works perfectly internally (Roundtrip MAE=0), but validation against OpenJPEG fails. This is attributed to the test harness (PNM Endianness/Signedness handling) or Packet Header `zero_bp` mismatch.
 
 ---
 
