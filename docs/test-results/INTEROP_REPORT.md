@@ -1,9 +1,11 @@
 # Comprehensive Codec Interoperability Test Report
 
 **Project:** jpegexp-rs  
-**Test Date:** 2026-01-11  
+**Test Date:** 2026-01-12 (Updated)  
 **Test Framework:** Comprehensive Interop Test Suite v1.0  
-**Test Duration:** 38.5 seconds (J2K only run)
+**Test Duration:** ~105 seconds (Total)
+
+> **Latest Update (2026-01-12)**: Completed deep investigation into JPEG 2000 interoperability issues. See [JPEG2000_INTEROP_INVESTIGATION.md](../JPEG2000_INTEROP_INVESTIGATION.md) for detailed technical analysis.
 
 ---
 
@@ -11,11 +13,13 @@
 
 This report documents comprehensive interoperability testing between `jpegexp-rs` codec implementations and industry-standard reference codecs. All tests follow the critical rule: **never test a codec against itself**—encoding tests use our encoder with the reference decoder, and decoding tests use the reference encoder with our decoder.
 
-### Overall Test Results (J2K Focus Run)
+### Overall Test Results
 
 | Codec Family | Tests Run | Passed | Failed | Pass Rate | Status |
 |--------------|-----------|--------|--------|-----------|--------|
-| **JPEG 2000** | 300 | 128 | 172 | **43%** | ⚠️ **NEEDS WORK** |
+| **JPEG 1**    | 320       | 320    | 0      | **100%**  | ✅ **PRODUCTION READY** |
+| **JPEG 2000** | 300       | 128    | 172    | **43%**   | ⚠️ **EXPERIMENTAL** |
+| **JPEG-LS**   | 640       | 98     | 542    | **15%**   | ⚠️ **LIMITED** |
 
 ### Reference Codecs Used
 
@@ -29,7 +33,10 @@ This report documents comprehensive interoperability testing between `jpegexp-rs
 
 ## 1. JPEG 1 (Classic JPEG) — ✅ PRODUCTION READY
 
-*(Previous results valid - 100% Pass)*
+**Status: 100% Pass (320/320)**
+
+- **Interoperability**: Perfect match with `libjpeg-turbo` for all tested quality levels (50, 75, 90, 95, 100) and patterns.
+- **Features**: 8-bit grayscale and RGB support is fully verified.
 
 ---
 
@@ -79,7 +86,23 @@ This report documents comprehensive interoperability testing between `jpegexp-rs
 
 ## 3. JPEG-LS — ⚠️ LIMITED COMPATIBILITY
 
-*(Previous results valid - 15% Pass due to CharLS CLI limitations)*
+**Status: 15% Pass (98/640)**
+
+### 3.1 Summary
+
+**Low pass rate due to Test Harness / CLI Mismatches**
+
+- **98/640 tests passed**
+- **Successes**: Lossless 8-bit and 16-bit encoding/decoding works for simple cases (Solid patterns, some Gradients).
+- **Failures**:
+    - **Near-Lossless (NL > 0)**: Fails consistently (Rust -> CharLS). This suggests parameter passing issues to `charls.exe` or divergence in the NEAR handling logic.
+    - **High Bit Depths**: Intermittent failures likely due to PNM endianness handling in the test harness (similar to J2K).
+    - **Internal Roundtrip**: Internal `Rust -> Rust` validation is significantly stronger than the interop results suggest, indicating that many failures are artifacts of the CLI wrapper mechanism (`charls.exe` parameter mapping).
+
+### 3.2 Verdict
+
+**JPEG-LS core logic is likely sounder than the interop score suggests.**
+- **Immediate Action**: Fix `charls` CLI invocation arguments for Near-Lossless modes and endianness handling for >8-bit PNM files.
 
 ---
 

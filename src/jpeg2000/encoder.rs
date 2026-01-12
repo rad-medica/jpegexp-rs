@@ -248,7 +248,9 @@ impl J2kEncoder {
         // For RGB with RCT, we need extra guard bits because:
         // - RCT doubles coefficient range: U=B-G, V=R-G can be [-255,255] instead of [-128,127]
         // - This requires one extra bit of magnitude precision
-        let guard_bits = if components >= 3 { 3 } else { 2 }; // OpenJPEG uses 2 guard bits for grayscale
+        // Using 2 guard bits for grayscale and 2 for RGB provides better precision
+        // OpenJPEG uses 1 by default, but we prioritize quality
+        let guard_bits = 2; // Use 2 guard bits consistently for best precision
 
         // Calculate step sizes
         let step_sizes: Vec<u16>;
@@ -401,8 +403,10 @@ impl J2kEncoder {
                 })
                 .collect();
         } else {
-            // Reversible 5-3 (No Quantization - Style 0x00)
-            quant_style = guard_bits << 5;
+            // Reversible 5-3 (Lossless mode - use Scalar Expounded style 0x02 for OpenJPEG compatibility)
+            // OpenJPEG uses style 0x02 (scalar expounded) even for lossless, with mantissa=0
+            // This is more compatible than style 0x00 (no quantization)
+            quant_style = (guard_bits << 5) | 0x02;
 
             step_sizes = (0..num_subbands)
                 .map(|i| {
@@ -420,6 +424,7 @@ impl J2kEncoder {
                             depth + 2
                         }
                     };
+                    // For lossless: (epsilon << 11) | 0 (mantissa = 0)
                     (epsilon as u16) << 11
                 })
                 .collect();
@@ -950,8 +955,10 @@ impl J2kEncoder {
                                 let encoded = bpc.mq.get_buffer();
 
                                 let mb = (guard_bits + epsilon).saturating_sub(1);
-                                let zero_bp = if max_bp <= mb.saturating_sub(1) {
-                                    mb.saturating_sub(1).saturating_sub(max_bp as u8)
+                                // Zero bit-planes = number of MSB planes that are all zeros  
+                                // Original formula that was working better
+                                let zero_bp = if max_bp < mb {
+                                    mb - max_bp - 1
                                 } else {
                                     0
                                 };
