@@ -16,9 +16,6 @@
 
 ### Performance & Validation
 - [Interoperability Test Report](test-results/INTEROP_REPORT.md) - **Comprehensive codec interoperability analysis** (JPEG1, J2K, JPEG-LS vs reference implementations)
-- [OpenJPEG Comparison](OPENJPEG_COMPARISON.md) - Performance benchmarks vs OpenJPEG 2.5.2
-- [Session Summary: OpenJPEG](SESSION_SUMMARY_OPENJPEG_COMPARISON.md) - Cross-validation results
-- [Comprehensive Test Report](COMPREHENSIVE_TEST_REPORT.md) - Full test coverage analysis
 
 ### Technical Details
 - [JPEG2000 RLC Fix](JPEG2000_RLC_FIX.md) - Run-Length Coding interoperability fix

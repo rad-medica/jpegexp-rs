@@ -101,6 +101,10 @@ name = "debug_charls_rgb"
 path = "tests/regression/debug_charls_rgb.rs"
 
 [[test]]
+name = "repro_j2k_gradient"
+path = "tests/regression/repro_j2k_gradient.rs"
+
+[[test]]
 name = "debug_edge_1x8"
 path = "tests/regression/debug_edge_1x8.rs"
 

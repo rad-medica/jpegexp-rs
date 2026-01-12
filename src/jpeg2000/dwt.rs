@@ -30,6 +30,7 @@ impl Dwt53 {
         for i in (0..len).step_by(2) {
             let left = if i > 0 { x[i - 1] } else { x[i + 1] };
             let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+            // Standard (ISO 15444-1 F.4.5) uses +2 in the floor calculation: floor((a+b+2)/4)
             x[i] += (left + right + 2) >> 2;
         }
 
@@ -82,6 +83,7 @@ impl Dwt53 {
         for i in (0..len).step_by(2) {
             let left = if i > 0 { x[i - 1] } else { x[i + 1] };
             let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
+            // Standard uses +2
             x[i] -= (left + right + 2) >> 2;
         }
 
