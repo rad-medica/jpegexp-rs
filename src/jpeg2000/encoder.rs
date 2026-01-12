@@ -248,9 +248,7 @@ impl J2kEncoder {
         // For RGB with RCT, we need extra guard bits because:
         // - RCT doubles coefficient range: U=B-G, V=R-G can be [-255,255] instead of [-128,127]
         // - This requires one extra bit of magnitude precision
-        // Using 2 guard bits for grayscale and 2 for RGB provides better precision
-        // OpenJPEG uses 1 by default, but we prioritize quality
-        let guard_bits = 2; // Use 2 guard bits consistently for best precision
+        let guard_bits = if components >= 3 { 3 } else { 2 }; // OpenJPEG uses 2 guard bits for grayscale, 3 for RGB
 
         // Calculate step sizes
         let step_sizes: Vec<u16>;
@@ -403,10 +401,8 @@ impl J2kEncoder {
                 })
                 .collect();
         } else {
-            // Reversible 5-3 (Lossless mode - use Scalar Expounded style 0x02 for OpenJPEG compatibility)
-            // OpenJPEG uses style 0x02 (scalar expounded) even for lossless, with mantissa=0
-            // This is more compatible than style 0x00 (no quantization)
-            quant_style = (guard_bits << 5) | 0x02;
+            // Reversible 5-3 (No Quantization - Style 0x00)
+            quant_style = guard_bits << 5;
 
             step_sizes = (0..num_subbands)
                 .map(|i| {
@@ -424,7 +420,6 @@ impl J2kEncoder {
                             depth + 2
                         }
                     };
-                    // For lossless: (epsilon << 11) | 0 (mantissa = 0)
                     (epsilon as u16) << 11
                 })
                 .collect();
