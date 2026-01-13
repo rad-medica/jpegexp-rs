@@ -72,89 +72,81 @@ impl<'a> BitPlaneCoder<'a> {
         let idx = (y as usize + 1) * self.stride + (x as usize + 1);
         let s = self.stride;
 
-        let h = ((self.padded_flags[idx - 1] & Self::SIG) != 0) as u8
+        let mut h = ((self.padded_flags[idx - 1] & Self::SIG) != 0) as u8
             + ((self.padded_flags[idx + 1] & Self::SIG) != 0) as u8;
-        let v = ((self.padded_flags[idx - s] & Self::SIG) != 0) as u8
+        let mut v = ((self.padded_flags[idx - s] & Self::SIG) != 0) as u8
             + ((self.padded_flags[idx + s] & Self::SIG) != 0) as u8;
         let d = ((self.padded_flags[idx - s - 1] & Self::SIG) != 0) as u8
             + ((self.padded_flags[idx - s + 1] & Self::SIG) != 0) as u8
             + ((self.padded_flags[idx + s - 1] & Self::SIG) != 0) as u8
             + ((self.padded_flags[idx + s + 1] & Self::SIG) != 0) as u8;
 
+        // CRITICAL FIX: Swap h and v for LH orientation (orient=2)
+        // This matches OpenJPEG's t1_generate_luts.c implementation (lines 58-61)
+        if orientation == 2 {
+            std::mem::swap(&mut h, &mut v);
+        }
+
         match orientation {
-            0 | 2 => {
-                // LL, LH - Prioritize H
-                if h == 2 {
-                    8
-                } else if h == 1 {
-                    if v >= 1 {
-                        7
-                    } else if d >= 1 {
-                        6
+            0 | 1 | 2 => {
+                // LL, HL, LH - All use same logic after potential h/v swap for LH
+                // This matches OpenJPEG's t1_generate_luts.c lines 64-90
+                if h == 0 {
+                    if v == 0 {
+                        if d == 0 {
+                            0
+                        } else if d == 1 {
+                            1
+                        } else {
+                            2
+                        }
+                    } else if v == 1 {
+                        3
                     } else {
-                        5
+                        4
                     }
-                } else if v == 2 {
-                    4
-                } else if v == 1 {
-                    3
-                } else if d >= 2 {
-                    2
-                } else if d == 1 {
-                    1
-                } else {
-                    0
-                }
-            }
-            1 => {
-                // HL - Prioritize V
-                if v == 2 {
-                    8
-                } else if v == 1 {
-                    if h >= 1 {
-                        7
-                    } else if d >= 1 {
-                        6
-                    } else {
-                        5
-                    }
-                } else if h == 2 {
-                    4
                 } else if h == 1 {
-                    3
-                } else if d >= 2 {
-                    2
-                } else if d == 1 {
-                    1
+                    if v == 0 {
+                        if d == 0 {
+                            5
+                        } else {
+                            6
+                        }
+                    } else {
+                        7
+                    }
                 } else {
-                    0
+                    8
                 }
             }
             3 => {
-                // HH
+                // HH - Diagonal orientation uses different logic
+                // This matches OpenJPEG's t1_generate_luts.c lines 92-118
                 let hv = h + v;
-                if d >= 3 {
-                    8
-                } else if d == 2 {
-                    if hv >= 1 {
-                        7
+                if d == 0 {
+                    if hv == 0 {
+                        0
+                    } else if hv == 1 {
+                        1
                     } else {
-                        6
+                        2
                     }
                 } else if d == 1 {
-                    if hv >= 2 {
-                        5
+                    if hv == 0 {
+                        3
                     } else if hv == 1 {
                         4
                     } else {
-                        3
+                        5
                     }
-                } else if hv >= 2 {
-                    2
-                } else if hv == 1 {
-                    1
+                } else if d == 2 {
+                    if hv == 0 {
+                        6
+                    } else {
+                        7
+                    }
                 } else {
-                    0
+                    8
                 }
             }
             _ => 0,
@@ -244,7 +236,7 @@ impl<'a> BitPlaneCoder<'a> {
         Some(bp)
     }
 
-    pub fn encode_codeblock(&mut self, start_bp: u8, orient: u8) -> u8 {
+    pub fn encode_codeblock(&mut self, start_bp: u8, min_bp: u8, orient: u8) -> u8 {
         self.mq.init_encoder();
         self.reset_flags();
         self.state.fill(0);
@@ -253,8 +245,8 @@ impl<'a> BitPlaneCoder<'a> {
         self.encode_cleanup(start_bp, orient);
         let mut passes = 1;
 
-        if start_bp > 0 {
-            for bp in (0..start_bp).rev() {
+        if start_bp > min_bp {
+            for bp in (min_bp..start_bp).rev() {
                 self.encode_sigprop(bp, orient);
                 self.encode_magref(bp);
                 self.encode_cleanup(bp, orient);
