@@ -641,7 +641,7 @@ impl J2kEncoder {
         }
 
         let tile_part_header_len = 12 + plt_len; // SOT (12) + PLT
-        let tile_total_len = tile_part_header_len + 2 + total_packet_len as usize + 2; // + SOD (2) + Packets + EOC (2)
+        let tile_total_len = tile_part_header_len + 2 + total_packet_len as usize; // + SOD (2) + Packets (EOC not included in Psot)
 
         // Write TLM (if included) in main header
         if self.include_tlm {
@@ -649,8 +649,8 @@ impl J2kEncoder {
         }
 
         // Write SOT (Start of Tile)
-        // Set Psot = 0 for single tile-part as per standard recommendation
-        writer.write_sot(0, 0, 0, 1)?;
+        // Use actual tile length for better decoder compatibility
+        writer.write_sot(0, tile_total_len as u32, 0, 1)?;
 
         // Write PLT (if included)
         if self.include_plt {
@@ -662,6 +662,10 @@ impl J2kEncoder {
 
         // Write packet data
         for p in packets {
+            if std::env::var("J2K_PACKET_SIZES").is_ok() {
+                eprintln!("[PACKET] res={}, header={} bytes, body={} bytes", 
+                    p.resolution, p.header_data.len(), p.body_data.len());
+            }
             writer.write_bytes(&p.header_data)?;
             writer.write_bytes(&p.body_data)?;
         }
@@ -679,19 +683,30 @@ impl J2kEncoder {
         width: usize,
         height: usize,
     ) -> Result<Vec<i32>, JpeglsError> {
+        // Allocate a contiguous buffer for DWT coefficients
+        // Layout: After each level, LL is recursively decomposed in-place at top-left
         let mut result = data.to_vec();
         let mut current_w = width;
         let mut current_h = height;
+        let original_width = width;
 
-        for _level in 0..self.decomposition_levels {
+        for level in 0..self.decomposition_levels {
             if current_w < 2 || current_h < 2 {
                 break;
             }
 
+            // Extract current subband into temporary buffer
+            let mut temp = vec![0i32; current_w * current_h];
+            for y in 0..current_h {
+                for x in 0..current_w {
+                    temp[y * current_w + x] = result[y * original_width + x];
+                }
+            }
+
             // Apply 1D DWT to rows
             for y in 0..current_h {
-                let row_start = y * width;
-                let row: Vec<i32> = result[row_start..row_start + current_w].to_vec();
+                let row_start = y * current_w;
+                let row: Vec<i32> = temp[row_start..row_start + current_w].to_vec();
 
                 let l_len = (current_w + 1) / 2;
                 let h_len = current_w / 2;
@@ -701,16 +716,16 @@ impl J2kEncoder {
                 Dwt53::forward(&row, &mut out_l, &mut out_h);
 
                 for (i, &v) in out_l.iter().enumerate() {
-                    result[row_start + i] = v;
+                    temp[row_start + i] = v;
                 }
                 for (i, &v) in out_h.iter().enumerate() {
-                    result[row_start + l_len + i] = v;
+                    temp[row_start + l_len + i] = v;
                 }
             }
 
             // Apply 1D DWT to columns
             for x in 0..current_w {
-                let col: Vec<i32> = (0..current_h).map(|y| result[y * width + x]).collect();
+                let col: Vec<i32> = (0..current_h).map(|y| temp[y * current_w + x]).collect();
 
                 let l_len = (current_h + 1) / 2;
                 let h_len = current_h / 2;
@@ -720,10 +735,17 @@ impl J2kEncoder {
                 Dwt53::forward(&col, &mut out_l, &mut out_h);
 
                 for (i, &v) in out_l.iter().enumerate() {
-                    result[i * width + x] = v;
+                    temp[i * current_w + x] = v;
                 }
                 for (i, &v) in out_h.iter().enumerate() {
-                    result[(l_len + i) * width + x] = v;
+                    temp[(l_len + i) * current_w + x] = v;
+                }
+            }
+
+            // Copy DWT result back to original buffer
+            for y in 0..current_h {
+                for x in 0..current_w {
+                    result[y * original_width + x] = temp[y * current_w + x];
                 }
             }
 
@@ -808,6 +830,18 @@ impl J2kEncoder {
                     sb_idx,
                 );
 
+                if std::env::var("J2K_PKT_DEBUG").is_ok() {
+                    let nonzero_count = sb_coeffs.iter().filter(|&&v| v != 0).count();
+                    let max_abs = sb_coeffs.iter().map(|&v| v.abs()).max().unwrap_or(0);
+                    let nonzero_samples: Vec<(usize, i32)> = sb_coeffs.iter()
+                        .enumerate()
+                        .filter(|(_, &v)| v != 0)
+                        .take(3)
+                        .map(|(i, &v)| (i, v))
+                        .collect();
+                    eprintln!("[SUBBAND] res={}, band={}, size={}x{}, nonzero={}/{}, max_abs={}, nz_samples={:?}", 
+                        res, band, sb_w, sb_h, nonzero_count, sb_coeffs.len(), max_abs, nonzero_samples);
+                }
 
                 // Calculate epsilon for this subband
                 // For lossy mode (irreversible), use the epsilon from QCD step_sizes
@@ -930,6 +964,7 @@ impl J2kEncoder {
                                         num_passes: 1, 
                                         data_len: encoded.len() as u32,
                                         zero_bp,
+                                        numlenbits: 3,
                                     });
 
                                 packet_body.extend_from_slice(&encoded);
@@ -939,24 +974,34 @@ impl J2kEncoder {
                             let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
                             let max_bp_opt = bpc.calculate_max_bit_plane();
 
+                            if std::env::var("J2K_CBLK_DETAIL").is_ok() && (max_bp_opt.is_some() || has_nonzero) {
+                                eprintln!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}", 
+                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero);
+                            }
+
                             if max_bp_opt.is_some() || has_nonzero {
                                 let max_bp = max_bp_opt.unwrap_or(0);
+                                
+                                let min_bp = 0;
 
                                 // Map band 0..2 to orientation 1..3?
                                 let orientation = if res == 0 { 0 } else { band as u8 + 1 };
 
-                                let passes = bpc.encode_codeblock(max_bp, orientation);
+                                let passes = bpc.encode_codeblock(max_bp, min_bp, orientation);
                                 bpc.mq.flush();
                                 let encoded = bpc.mq.get_buffer();
 
                                 let mb = (guard_bits + epsilon).saturating_sub(1);
-                                // Zero bit-planes = number of MSB planes that are all zeros  
-                                // Original formula that was working better
                                 let zero_bp = if max_bp < mb {
                                     mb - max_bp - 1
                                 } else {
                                     0
                                 };
+
+                                if std::env::var("J2K_CBLK_DETAIL").is_ok() {
+                                    eprintln!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}", 
+                                        res, band, cbx, cby, passes, encoded.len(), zero_bp, epsilon, mb);
+                                }
 
                                 packet_header
                                     .included_cblks
@@ -968,6 +1013,7 @@ impl J2kEncoder {
                                         num_passes: passes,
                                         data_len: encoded.len() as u32,
                                         zero_bp,
+                                        numlenbits: 3,
                                     });
 
                                 packet_body.extend_from_slice(encoded);
@@ -977,11 +1023,8 @@ impl J2kEncoder {
                 }
             }
 
-            // Write Packet
-            if packet_header.included_cblks.is_empty() {
-                packet_header.empty = true;
-                packet_body.clear();
-            }
+            // Write Packet - note: don't mark as empty even if no codeblocks included
+            // The packet header still needs to write tag tree exclusion info
 
             let mut header_writer = J2kBitWriter::new();
             packet_header.write(
@@ -1118,16 +1161,21 @@ impl J2kEncoder {
         num_levels: usize,
         res: usize,
     ) -> (usize, usize) {
-        // Must use iterative ceiling division to match the actual DWT
-        // The forward DWT uses: current_w = (current_w + 1) / 2 at each level
         let levels_remaining = num_levels - res;
         let mut w = width;
         let mut h = height;
         for _ in 0..levels_remaining {
-            w = (w + 1) / 2; // Ceiling division, matching DWT
+            w = (w + 1) / 2;
             h = (h + 1) / 2;
         }
-        (w.max(1), h.max(1))
+        let result = (w.max(1), h.max(1));
+        
+        if std::env::var("J2K_LL_SIZE_DEBUG").is_ok() {
+            eprintln!("[GET_LL_SIZE] width={}, height={}, num_levels={}, res={}, levels_remaining={}, result={:?}",
+                width, height, num_levels, res, levels_remaining, result);
+        }
+        
+        result
     }
 
     /// Extract subband coefficients from the full coefficient array
@@ -1176,18 +1224,42 @@ impl J2kEncoder {
             _ => (0, 0, 0, 0),
         };
 
+        if std::env::var("J2K_EXTRACT_DEBUG").is_ok() {
+            eprintln!("[EXTRACT] res={}, sb_idx={}, img_size={}x{}, ll_size={}x{}, prev_ll_size={}x{}, region={}x{} at ({}, {})",
+                res, sb_idx, width, height, ll_w, ll_h, prev_ll_w, prev_ll_h, sb_w, sb_h, start_x, start_y);
+        }
+
 
         let mut sb_coeffs = Vec::with_capacity(sb_w * sb_h);
         for y in 0..sb_h {
             for x in 0..sb_w {
                 let src_x = start_x + x;
                 let src_y = start_y + y;
-                if src_y * width + src_x < coeffs.len() {
-                    sb_coeffs.push(coeffs[src_y * width + src_x]);
+                let src_idx = src_y * width + src_x;
+                if src_idx < coeffs.len() {
+                    sb_coeffs.push(coeffs[src_idx]);
                 } else {
                     sb_coeffs.push(0);
                 }
             }
+        }
+
+        if std::env::var("J2K_EXTRACT_DEBUG").is_ok() && sb_idx == 0 {
+            let sample_positions = [
+                (0, 0),
+                (1, 0), 
+                (sb_w.saturating_sub(2), 0),
+                (sb_w.saturating_sub(1), 0),
+            ];
+            let samples: Vec<_> = sample_positions.iter()
+                .filter(|(x, y)| *x < sb_w && *y < sb_h)
+                .map(|(x, y)| {
+                    let src_idx = (start_y + y) * width + (start_x + x);
+                    let val = coeffs.get(src_idx).copied().unwrap_or(9999);
+                    (src_idx, val)
+                })
+                .collect();
+            eprintln!("[EXTRACT_SAMPLES] res={}, sb={}, samples={:?}", res, sb_idx, samples);
         }
 
         (sb_coeffs, sb_w, sb_h)
