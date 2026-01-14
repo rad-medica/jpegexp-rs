@@ -4,13 +4,13 @@
 pub struct MelDecoder<'a> {
     data: &'a [u8],
     pos: usize,
-    tmp: u64,        // Bit buffer (64 bits)
-    bits: u32,       // Number of valid bits in tmp
-    length: i32,     // Remaining bytes to read
-    unstuff: bool,   // Whether the last byte read was 0xFF
-    k: i32,          // State index (exponent)
-    num_runs: i32,   // Number of decoded runs in buffer
-    runs: u64,       // Buffer of decoded runs (7 bits per run)
+    tmp: u64, // Bit buffer (64 bits)
+    bits: u32, // Number of valid bits in tmp
+    length: i32, // Remaining bytes to read
+    unstuff: bool, // Whether the last byte read was 0xFF
+    k: i32, // State index (exponent)
+    num_runs: i32, // Number of decoded runs in buffer
+    runs: u64, // Buffer of decoded runs (7 bits per run)
 }
 
 impl<'a> MelDecoder<'a> {
@@ -72,12 +72,14 @@ impl<'a> MelDecoder<'a> {
         if self.length > 4 {
             // Read 4 bytes at once
             if self.pos + 4 <= self.data.len() {
-                val = u32::from_le_bytes([
-                    self.data[self.pos],
-                    self.data[self.pos + 1],
-                    self.data[self.pos + 2],
-                    self.data[self.pos + 3],
-                ]);
+                val = u32::from_le_bytes(
+                    [
+                        self.data[self.pos],
+                        self.data[self.pos + 1],
+                        self.data[self.pos + 2],
+                        self.data[self.pos + 3],
+                    ],
+                );
                 self.pos += 4;
                 self.length -= 4;
             }
@@ -150,9 +152,14 @@ impl<'a> MelDecoder<'a> {
         if self.bits < 6 {
             self.read();
         }
-        
+
         if std::env::var("HTJ2K_DEBUG").is_ok() {
-            eprintln!("MelDecoder: decode_runs start k={} bits={} tmp={:016X}", self.k, self.bits, self.tmp);
+            eprintln!(
+                "MelDecoder: decode_runs start k={} bits={} tmp={:016X}",
+                self.k,
+                self.bits,
+                self.tmp
+            );
         }
 
         // Decode runs while we have enough bits and space in runs buffer
@@ -197,7 +204,6 @@ impl<'a> MelDecoder<'a> {
         }
         run
     }
-
 }
 
 #[cfg(test)]

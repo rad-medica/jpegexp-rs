@@ -460,11 +460,9 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                 // Read strict
                                 let marker = parser.reader.read_u16().unwrap_or(0);
                                 if marker == 0xFF91 {
-                                    // eprintln!("DEBUG: Found SOP marker at {}", pos);
                                     let _lsop = parser.reader.read_u16().unwrap_or(0);
                                     let _nsop = parser.reader.read_u16().unwrap_or(0);
                                 } else {
-                                    // eprintln!("DEBUG: Expected SOP at {}, got {:04X}", pos, marker);
                                     return Err(JpeglsError::InvalidData);
                                 }
                             }
@@ -620,10 +618,29 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         } else {
                             1 + (res - 1) * 3 + cb_info.subband_index as usize
                         };
-                        let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
-                            (qcd.step_sizes[qcd_idx] >> 11) as u8
+                        
+                        // For reversible mode, calculate epsilon from depth + gain (not from QCD)
+                        let quant_type = qcd.quant_style & 0x1F;
+                        let epsilon_b = if quant_type == 0 || quant_type == 1 {
+                            // Reversible mode: calculate from depth + subband gain
+                            let depth = parser.image.components[comp].depth;
+                            if res == 0 {
+                                depth // LL subband
+                            } else {
+                                let band_type = cb_info.subband_index; // 0=HL, 1=LH, 2=HH
+                                if band_type < 2 {
+                                    depth + 1 // HL or LH
+                                } else {
+                                    depth + 2 // HH
+                                }
+                            }
                         } else {
-                            8
+                            // Irreversible mode: extract from QCD
+                            if qcd_idx < qcd.step_sizes.len() {
+                                (qcd.step_sizes[qcd_idx] >> 11) as u8
+                            } else {
+                                8 // Default fallback
+                            }
                         };
                         let guard_bits = (qcd.quant_style >> 5) & 0x07;
                         let m_b = (guard_bits + epsilon_b).saturating_sub(1);
@@ -848,10 +865,29 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         1 + (res - 1) * 3 + cb_info.subband_index as usize
                     };
 
-                    let epsilon_b = if qcd_idx < qcd.step_sizes.len() {
-                        (qcd.step_sizes[qcd_idx] >> 11) as u8
+                    // For reversible mode (No Quantization), calculate epsilon based on depth + subband gain
+                    // The QCD marker epsilon values are just fractional bits (0-2) and not used for M_b
+                    let quant_type = qcd.quant_style & 0x1F;
+                    let epsilon_b = if quant_type == 0 || quant_type == 1 {
+                        // Reversible mode: calculate from depth + subband gain
+                        let depth = parser.image.components[comp].depth;
+                        if res == 0 {
+                            depth // LL subband
+                        } else {
+                            let band_type = cb_info.subband_index; // 0=HL, 1=LH, 2=HH
+                            if band_type < 2 {
+                                depth + 1 // HL or LH
+                            } else {
+                                depth + 2 // HH
+                            }
+                        }
                     } else {
-                        8 // Default fallback
+                        // Irreversible mode: extract from QCD
+                        if qcd_idx < qcd.step_sizes.len() {
+                            (qcd.step_sizes[qcd_idx] >> 11) as u8
+                        } else {
+                            8 // Default fallback
+                        }
                     };
 
                     // M_b = G + epsilon_b - 1

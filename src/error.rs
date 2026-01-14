@@ -150,4 +150,3 @@ impl From<BitIoError> for JpeglsError {
         }
     }
 }
-

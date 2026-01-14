@@ -2,7 +2,7 @@
 
 This document tracks the backlog of planned features, improvements, and known issues for `jpegexp-rs`.
 
-**Last Updated**: 2026-01-09 (Post-Lossy Quantization Fix)
+**Last Updated**: 2026-01-13 (Post-DWT Bug Fixes)
 
 ## 🔥 Critical Issues
 
@@ -19,9 +19,37 @@ This document tracks the backlog of planned features, improvements, and known is
 - [x] **16-bit Endianness Investigation**: Issue cannot be reproduced, all tests passing MAE=0
 - [x] **Test Infrastructure**: Reusable framework with image generation and pixel comparison
 - [x] **Binary Orchestration**: PNM I/O, binary locator for external reference implementations
-- **Result**: **78 active tests, 100% pass rate, 41 new interop tests added**
+- [ ] **Result**: **78 active tests, 100% pass rate, 41 new interop tests added**
 
-### 3. HTJ2K Decoder Bug Fix (Tracked Separately)
+### ✅ 3. JPEG 2000: Major DWT Bug Fixes (2026-01-13) ⭐ NEW
+- [x] **DWT 1D Inverse Boundary**: Fixed inverse prediction formula for boundary case
+  - Changed `x[i] += (left + 1) >> 1` to `x[i] += left`
+  - Result: 1D DWT now perfectly reversible
+- [x] **get_ll_size Formula**: Fixed subband sizing calculation
+  - Changed `num_levels - res` to `res + 1` for correct reductions
+  - Result: Correct subband sizes for all resolutions
+- [x] **extract_subband_coeffs**: Fixed coefficient extraction positions
+  - Use `get_ll_size(..., 0)` for positioning
+  - Result: Correct subband extraction
+- [x] **DWT Coefficient Storage**: Fixed full coefficient preservation
+  - Copy all subbands (LL+HL+LH+HH) to result buffer
+  - Result: Full coefficient array preserved
+- **Test Results**:
+  - 8x8, 16x16, 32x32: MAE = 0.0 (perfect) ✅
+  - 40x40, 48x48, 64x64: MAE = 0.05 (near-perfect) ⚠️
+- **Files Modified**: `src/jpeg2000/dwt.rs`, `src/jpeg2000/encoder.rs`
+- **Test Coverage**: New `tests/test_40x40_dwt_fix.rs` with comprehensive validation
+
+### 4. JPEG 2000: Edge Pixel Encoding (MAE = 0.05)
+- [ ] **Issue**: Single non-zero coefficients at image boundaries are lost
+  - Affects right edge column (x=39) for even-width images
+  - Systematic -1 error at x=39 for all rows
+  - MAE = 0.05 (very small impact)
+- **Root Cause**: Codeblock encoding loop doesn't properly include edge coefficients
+- **Not Affected**: Solid patterns, odd-width images, smaller images (8x8, 16x16, 32x32)
+- **Priority**: MEDIUM - Minor visual impact, acceptable for most use cases
+
+### 5. HTJ2K Decoder Bug Fix (Tracked Separately)
 - [ ] **HTJ2K Decoder Bug Fix**: 🔴 **HIGH PRIORITY** - Fix remaining pixel mismatch issues in HTJ2K decoder.
   - Current status: 4 test failures in `test_htj2k_comprehensive` with ~99% pixel mismatches
     - `test_htj2k_8bit_gray`: 4079/4096 pixels wrong (~99.6%)
@@ -107,7 +135,8 @@ This document tracks the backlog of planned features, improvements, and known is
 | **CI-03** | Tooling | rustfmt version incompatibility | 🟡 Minor |
 | **J2K-01** | Encoder | Lossy quantization formula (guard_bits) | 🟢 **Fixed 2026-01-09** - PSNR 13→51 dB |
 | **J2K-02** | Encoder | 12-bit Color artifacts >32x32 blocks | 🟢 Working |
-| **J2K-03** | Testing | 16-bit endianness issue (MAE ~19,491) | 🟢 **RESOLVED** - Cannot reproduce, MAE=0 |
+| **J2K-03** | Testing | 16-bit endianness issue (MAE ~19,491) | 🟢 **RESOLVED** - Fixed constant/sparse encoding |
+| **J2K-04** | Encoder | 16-bit complex pattern (gradient) encoding errors | 🟡 Active - Sparse works, dense fails |
 | **JLS-01** | Encoder | No RGB Interleave support | 🟢 Fixed - CharLS interop verified |
 | **JLS-02** | Interop | CharLS RGB interop bit over-consumption | 🟢 Fixed (Context sharing) |
 | **JLS-03** | Decoder | Grayscale regression (Rb/Rd init) | 🟢 Fixed |

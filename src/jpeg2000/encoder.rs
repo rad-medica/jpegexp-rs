@@ -220,15 +220,32 @@ impl J2kEncoder {
 
 
         // Determine transform type
-        let transformation = if self.use_irreversible { 0 } else { 1 }; // 0=9-7, 1=5-3
+        // NOTE: This appears backwards but is intentional!
+        // When we write transformation=1, we're actually using 5-3 DWT in our code
+        // TODO: Investigate why this mapping is inverted
+        let transformation = if self.use_irreversible { 0 } else { 1 };
 
         // Create COD marker
         // HTJ2K mode requires bit 6 (0x40) to be set in code_block_style (SPcod_Scoc byte 9)
         // This signals that blocks use HT coding instead of standard EBCOT
         let code_block_style = if self.use_htj2k { 0x40 } else { 0 };
         
+        // Coding style flags (Scod):
+        // Bit 0: Selective arithmetic coding bypass
+        // Bit 1: Reset context probabilities on coding pass boundaries
+        // Bit 2: Termination on each coding pass
+        // Bit 3: Vertically causal context
+        // Bit 4: Predictable termination
+        // Bit 5: Segmentation symbols
+        // 
+        // OpenJPEG default: 0x00 (no special modes)
+        // For better compatibility, we can enable:
+        // - Bit 2 (0x04): Termination on each coding pass (helps decoder synchronization)
+        // - Bit 4 (0x10): Predictable termination (adds extra bits for error resilience)
+        let coding_style = 0; // Use default for now (matching OpenJPEG)
+        
         let cod = J2kCod {
-            coding_style: 0,
+            coding_style,
             progression_order: 0, // LRCP
             number_of_layers: 1,
             mct: if components >= 3 { 1 } else { 0 },
@@ -403,6 +420,9 @@ impl J2kEncoder {
         } else {
             // Reversible 5-3 (No Quantization - Style 0x00)
             quant_style = guard_bits << 5;
+            if std::env::var("J2K_QCD_DEBUG").is_ok() {
+                eprintln!("[QCD] guard_bits={}, quant_style=0x{:02X}", guard_bits, quant_style);
+            }
 
             step_sizes = (0..num_subbands)
                 .map(|i| {
@@ -429,6 +449,9 @@ impl J2kEncoder {
             quant_style,
             step_sizes: step_sizes.clone(),
         };
+        if std::env::var("J2K_QCD_DEBUG").is_ok() {
+            eprintln!("[QCD WRITE] quant_style=0x{:02X}, step_sizes.len()={}", qcd.quant_style, qcd.step_sizes.len());
+        }
         writer.write_qcd(&qcd)?;
 
         // ... rest of the function ...
@@ -677,29 +700,33 @@ impl J2kEncoder {
     }
 
     /// Apply forward 2D DWT using 5-3 reversible transform
+    /// Returns the full coefficient array with all subbands stored at their proper positions.
     fn apply_forward_dwt_2d(
         &self,
         data: &mut [i32],
         width: usize,
         height: usize,
     ) -> Result<Vec<i32>, JpeglsError> {
-        // Allocate a contiguous buffer for DWT coefficients
-        // Layout: After each level, LL is recursively decomposed in-place at top-left
-        let mut result = data.to_vec();
+        // Allocate result buffer for full coefficient array
+        let mut result = vec![0i32; width * height];
         let mut current_w = width;
         let mut current_h = height;
-        let original_width = width;
 
         for level in 0..self.decomposition_levels {
             if current_w < 2 || current_h < 2 {
                 break;
             }
 
-            // Extract current subband into temporary buffer
+            // Extract current region into temporary buffer
             let mut temp = vec![0i32; current_w * current_h];
             for y in 0..current_h {
                 for x in 0..current_w {
-                    temp[y * current_w + x] = result[y * original_width + x];
+                    // For first level, read from input data; for subsequent levels, read from result
+                    if level == 0 {
+                        temp[y * current_w + x] = data[y * width + x];
+                    } else {
+                        temp[y * current_w + x] = result[y * width + x];
+                    }
                 }
             }
 
@@ -742,15 +769,44 @@ impl J2kEncoder {
                 }
             }
 
-            // Copy DWT result back to original buffer
-            for y in 0..current_h {
-                for x in 0..current_w {
-                    result[y * original_width + x] = temp[y * current_w + x];
+            // Copy ALL subbands back to result at their proper positions
+            // LL at (0, 0), HL at (ll_w, 0), LH at (0, ll_h), HH at (ll_w, ll_h)
+            let ll_w = (current_w + 1) / 2;
+            let ll_h = (current_h + 1) / 2;
+            let hl_w = current_w / 2;
+            let lh_h = current_h / 2;
+
+            // Copy LL
+            for y in 0..ll_h {
+                for x in 0..ll_w {
+                    result[y * width + x] = temp[y * current_w + x];
                 }
             }
 
-            current_w = (current_w + 1) / 2;
-            current_h = (current_h + 1) / 2;
+            // Copy HL (right of LL)
+            for y in 0..ll_h {
+                for x in 0..hl_w {
+                    result[y * width + ll_w + x] = temp[y * current_w + ll_w + x];
+                }
+            }
+
+            // Copy LH (below LL)
+            for y in 0..lh_h {
+                for x in 0..ll_w {
+                    result[(ll_h + y) * width + x] = temp[(ll_h + y) * current_w + x];
+                }
+            }
+
+            // Copy HH (below HL, right of LH)
+            for y in 0..lh_h {
+                for x in 0..hl_w {
+                    result[(ll_h + y) * width + ll_w + x] = temp[(ll_h + y) * current_w + ll_w + x];
+                }
+            }
+
+            // Prepare for next level: only LL region will be further decomposed
+            current_w = ll_w;
+            current_h = ll_h;
         }
 
         Ok(result)
@@ -775,6 +831,9 @@ impl J2kEncoder {
 
         // Iterate through resolutions (lowest to highest)
         for res in 0..num_resolutions {
+            if std::env::var("J2K_RES_DEBUG").is_ok() {
+                eprintln!("[RES] Processing resolution {}/{}", res, num_resolutions - 1);
+            }
             // For now, assume 1 precinct per resolution
             let cb_log2 = self.codeblock_exp;
             let cb_dim = 1 << (cb_log2 + 2); // 64
@@ -787,23 +846,29 @@ impl J2kEncoder {
 
 
             for band in 0..num_bands {
+                // For res=0, subband is the LL itself
+                // For res>=1, subbands are HL/LH/HH extracted from the LL at res=0
+                // The subband sizes must be based on the ORIGINAL image dimensions and the LL at res=0
                 let (sb_w, sb_h) = if res == 0 {
                     (ll_w, ll_h)
                 } else {
-                    let (prev_w, prev_h) =
-                        self.get_ll_size(width, height, num_levels as usize, res - 1);
+                    // Get the LL size at res=0 (the first LL after full decomposition)
+                    let (ll_0_w, ll_0_h) = self.get_ll_size(width, height, num_levels as usize, 0);
 
-                    // Logic must match extract_subband_coeffs
                     match band {
-                        0 => (ll_w - prev_w, prev_h),        // HL
-                        1 => (prev_w, ll_h - prev_h),        // LH
-                        2 => (ll_w - prev_w, ll_h - prev_h), // HH
+                        0 => (width.saturating_sub(ll_0_w), ll_0_h),        // HL (right of LL)
+                        1 => (ll_0_w, height.saturating_sub(ll_0_h)),       // LH (below LL)
+                        2 => (width.saturating_sub(ll_0_w), height.saturating_sub(ll_0_h)), // HH (diagonal)
                         _ => (0, 0),
                     }
                 };
                 let gw = (sb_w + cb_dim - 1) / cb_dim;
                 let gh = (sb_h + cb_dim - 1) / cb_dim;
                 subband_grids.push((gw, gh));
+
+                if std::env::var("J2K_GRID_DEBUG").is_ok() {
+                    eprintln!("[GRID] res={}, band={}, sb_size={}x{}, grid={}x{}", res, band, sb_w, sb_h, gw, gh);
+                }
             }
 
             // Start with empty state, it will grow as needed
@@ -975,8 +1040,14 @@ impl J2kEncoder {
                             let max_bp_opt = bpc.calculate_max_bit_plane();
 
                             if std::env::var("J2K_CBLK_DETAIL").is_ok() && (max_bp_opt.is_some() || has_nonzero) {
-                                eprintln!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}", 
-                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero);
+                                let max_abs = block_data.iter().map(|&v| v.abs()).max().unwrap_or(0);
+                                eprintln!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}", 
+                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs, 
+                                    if block_data.len() <= 16 { block_data.clone() } else { block_data[..16].to_vec() });
+                                // Also print to stdout for test capture
+                                println!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}", 
+                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs, 
+                                    if block_data.len() <= 16 { block_data.clone() } else { block_data[..16].to_vec() });
                             }
 
                             if max_bp_opt.is_some() || has_nonzero {
@@ -984,8 +1055,23 @@ impl J2kEncoder {
                                 
                                 let min_bp = 0;
 
-                                // Map band 0..2 to orientation 1..3?
+                                // Map band 0..2 to orientation 1..3
+                                // band=0 (HL) -> orientation=1
+                                // band=1 (LH) -> orientation=2
+                                // band=2 (HH) -> orientation=3
                                 let orientation = if res == 0 { 0 } else { band as u8 + 1 };
+                                
+                                if std::env::var("J2K_ORIENT_DEBUG").is_ok() {
+                                    let orient_name = match orientation {
+                                        0 => "LL",
+                                        1 => "HL",
+                                        2 => "LH",
+                                        3 => "HH",
+                                        _ => "??"
+                                    };
+                                    eprintln!("[ORIENT] res={}, band={}, orientation={}({}), cb=({},{}), size={}x{}", 
+                                              res, band, orientation, orient_name, cbx, cby, bw, bh);
+                                }
 
                                 let passes = bpc.encode_codeblock(max_bp, min_bp, orientation);
                                 bpc.mq.flush();
@@ -999,8 +1085,10 @@ impl J2kEncoder {
                                 };
 
                                 if std::env::var("J2K_CBLK_DETAIL").is_ok() {
-                                    eprintln!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}", 
-                                        res, band, cbx, cby, passes, encoded.len(), zero_bp, epsilon, mb);
+                                    eprintln!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}, max_bp={}", 
+                                        res, band, cbx, cby, passes, encoded.len(), zero_bp, epsilon, mb, max_bp);
+                                    println!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}, max_bp={}", 
+                                        res, band, cbx, cby, passes, encoded.len(), zero_bp, epsilon, mb, max_bp);
                                 }
 
                                 packet_header
@@ -1041,6 +1129,11 @@ impl J2kEncoder {
                 header_data: header_writer.finish(),
                 body_data: packet_body,
             });
+            
+            if std::env::var("J2K_RES_DEBUG").is_ok() {
+                eprintln!("[RES] Created packet for res={}, header_len={}, body_len={}", 
+                         res, packets.last().unwrap().header_data.len(), packets.last().unwrap().body_data.len());
+            }
 
         }
 
@@ -1161,18 +1254,21 @@ impl J2kEncoder {
         num_levels: usize,
         res: usize,
     ) -> (usize, usize) {
-        let levels_remaining = num_levels - res;
+        // Number of DWT reductions applied to get to this resolution
+        // res=0 means 1 reduction (full decomposition to LL)
+        // res=1 means 2 reductions (LL of LL), etc.
+        let reductions = res + 1;
         let mut w = width;
         let mut h = height;
-        for _ in 0..levels_remaining {
+        for _ in 0..reductions {
             w = (w + 1) / 2;
             h = (h + 1) / 2;
         }
         let result = (w.max(1), h.max(1));
         
         if std::env::var("J2K_LL_SIZE_DEBUG").is_ok() {
-            eprintln!("[GET_LL_SIZE] width={}, height={}, num_levels={}, res={}, levels_remaining={}, result={:?}",
-                width, height, num_levels, res, levels_remaining, result);
+            eprintln!("[GET_LL_SIZE] width={}, height={}, num_levels={}, res={}, reductions={}, result={:?}",
+                width, height, num_levels, res, reductions, result);
         }
         
         result
@@ -1205,28 +1301,55 @@ impl J2kEncoder {
         }
 
         // For higher resolutions, extract HL, LH, or HH
-        let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels, res);
-        let (prev_ll_w, prev_ll_h) = self.get_ll_size(width, height, num_levels, res - 1);
+        // Get the LL size at resolution 0 (full decomposition LL) for positioning
+        let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels, 0);
+        // Get the current LL size at resolution res (not used, but kept for reference)
+        let _current_ll_size = self.get_ll_size(width, height, num_levels, res);
 
+        // The DWT coefficients are stored in the ORIGINAL image dimensions
+        // At res=0: LL occupies ll_w x ll_h at (0, 0)
+        // At res=1+: The current resolution's LL is smaller, but we extract HL/LH/HH
+        // based on the original ll_w/ll_h positions
+        
+        // Extract subbands from the full image at original dimensions
+        // HL: extracted from (ll_w, 0) with size (width - ll_w, ll_h)
+        // LH: extracted from (0, ll_h) with size (ll_w, height - ll_h)
+        // HH: extracted from (ll_w, ll_h) with size (width - ll_w, height - ll_h)
         let (sb_w, sb_h, start_x, start_y) = match sb_idx {
             0 => {
                 // HL (right of LL)
-                (ll_w - prev_ll_w, prev_ll_h, prev_ll_w, 0)
+                let w = width.saturating_sub(ll_w);
+                let h = ll_h;
+                (w, h, ll_w, 0)
             }
             1 => {
                 // LH (below LL)
-                (prev_ll_w, ll_h - prev_ll_h, 0, prev_ll_h)
+                let w = ll_w;
+                let h = height.saturating_sub(ll_h);
+                (w, h, 0, ll_h)
             }
             2 => {
                 // HH (diagonal)
-                (ll_w - prev_ll_w, ll_h - prev_ll_h, prev_ll_w, prev_ll_h)
+                let w = width.saturating_sub(ll_w);
+                let h = height.saturating_sub(ll_h);
+                (w, h, ll_w, ll_h)
             }
             _ => (0, 0, 0, 0),
         };
 
         if std::env::var("J2K_EXTRACT_DEBUG").is_ok() {
-            eprintln!("[EXTRACT] res={}, sb_idx={}, img_size={}x{}, ll_size={}x{}, prev_ll_size={}x{}, region={}x{} at ({}, {})",
-                res, sb_idx, width, height, ll_w, ll_h, prev_ll_w, prev_ll_h, sb_w, sb_h, start_x, start_y);
+            eprintln!("[EXTRACT] res={}, sb_idx={}, width={}, height={}, ll_size={}x{}, region={}x{} at ({}, {})",
+                res, sb_idx, width, height, ll_w, ll_h, sb_w, sb_h, start_x, start_y);
+            
+            // Print first few coefficients
+            let sample_count = sb_w * sb_h.min(5);
+            let samples: Vec<i32> = (0..sample_count.min(20)).map(|i| {
+                let y = i / sb_w;
+                let x = i % sb_w;
+                let src_idx = (start_y + y) * width + (start_x + x);
+                coeffs.get(src_idx).copied().unwrap_or(0)
+            }).collect();
+            eprintln!("[EXTRACT_SAMPLES] res={}, sb={}, first_samples={:?}", res, sb_idx, &samples[..samples.len().min(10)]);
         }
 
 

@@ -1,5 +1,5 @@
 //! Progressive JPEG Encoder Infrastructure
-//! 
+//!
 //! Handles coefficient buffering and multi-scan encoding management.
 
 /// Represents a single 8x8 block of quantized coefficients.
@@ -10,9 +10,7 @@ pub struct QuantizedBlock {
 
 impl Default for QuantizedBlock {
     fn default() -> Self {
-        Self {
-            coeffs: [0; 64],
-        }
+        Self { coeffs: [0; 64] }
     }
 }
 
@@ -33,10 +31,10 @@ impl CoefficientBuffer {
         let mcu_height = 8 * v_samp as usize;
         let mcu_cols = (width + mcu_width - 1) / mcu_width;
         let mcu_rows = (height + mcu_height - 1) / mcu_height;
-        
+
         // Total blocks = MCUs * blocks_per_mcu
         let total_blocks = mcu_cols * mcu_rows * (h_samp as usize * v_samp as usize);
-        
+
         Self {
             width,
             height,
@@ -46,7 +44,11 @@ impl CoefficientBuffer {
         }
     }
 
-    pub fn get_block_mut(&mut self, mcu_index: usize, block_index_in_mcu: usize) -> &mut QuantizedBlock {
+    pub fn get_block_mut(
+        &mut self,
+        mcu_index: usize,
+        block_index_in_mcu: usize,
+    ) -> &mut QuantizedBlock {
         // Blocks are stored in MCU order, then interleaved
         let blocks_per_mcu = self.h_samp as usize * self.v_samp as usize;
         &mut self.blocks[mcu_index * blocks_per_mcu + block_index_in_mcu]
@@ -112,20 +114,62 @@ impl ScanScript {
         Self {
             scans: vec![
                 // Scan 1: DC (all components)
-                ScanSpecification { ss_start: 0, ss_end: 0, ah: 0, al: 0, component_indices: vec![0, 1, 2] },
+                ScanSpecification {
+                    ss_start: 0,
+                    ss_end: 0,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![0, 1, 2],
+                },
                 // Scan 2: AC Luma 1-5
-                ScanSpecification { ss_start: 1, ss_end: 5, ah: 0, al: 0, component_indices: vec![0] },
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 5,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![0],
+                },
                 // Scan 3: AC Cb 1-5
-                ScanSpecification { ss_start: 1, ss_end: 5, ah: 0, al: 0, component_indices: vec![1] },
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 5,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![1],
+                },
                 // Scan 4: AC Cr 1-5
-                ScanSpecification { ss_start: 1, ss_end: 5, ah: 0, al: 0, component_indices: vec![2] },
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 5,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![2],
+                },
                 // Scan 5: AC Luma 6-63
-                ScanSpecification { ss_start: 6, ss_end: 63, ah: 0, al: 0, component_indices: vec![0] },
+                ScanSpecification {
+                    ss_start: 6,
+                    ss_end: 63,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![0],
+                },
                 // Scan 6: AC Cb 6-63
-                ScanSpecification { ss_start: 6, ss_end: 63, ah: 0, al: 0, component_indices: vec![1] },
+                ScanSpecification {
+                    ss_start: 6,
+                    ss_end: 63,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![1],
+                },
                 // Scan 7: AC Cr 6-63
-                ScanSpecification { ss_start: 6, ss_end: 63, ah: 0, al: 0, component_indices: vec![2] },
-            ]
+                ScanSpecification {
+                    ss_start: 6,
+                    ss_end: 63,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![2],
+                },
+            ],
         }
     }
 
@@ -135,29 +179,77 @@ impl ScanScript {
         Self {
             scans: vec![
                 // Scan 1: DC (all components) - First approximation (High bits)
-                ScanSpecification { ss_start: 0, ss_end: 0, ah: 0, al: 0, component_indices: vec![0, 1, 2] },
-                
+                ScanSpecification {
+                    ss_start: 0,
+                    ss_end: 0,
+                    ah: 0,
+                    al: 0,
+                    component_indices: vec![0, 1, 2],
+                },
+
                 // Scan 2: AC Luma - First approximation (High bits)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 0, al: 2, component_indices: vec![0] },
-                
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 0,
+                    al: 2,
+                    component_indices: vec![0],
+                },
+
                 // Scan 3: AC Cb - First approximation (High bits)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 0, al: 1, component_indices: vec![1] },
-                
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 0,
+                    al: 1,
+                    component_indices: vec![1],
+                },
+
                 // Scan 4: AC Cr - First approximation (High bits)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 0, al: 1, component_indices: vec![2] },
-                
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 0,
+                    al: 1,
+                    component_indices: vec![2],
+                },
+
                 // Scan 5: AC Luma - Refinement (Al=1)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 2, al: 1, component_indices: vec![0] },
-                
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 2,
+                    al: 1,
+                    component_indices: vec![0],
+                },
+
                 // Scan 6: AC Cb - Refinement (Al=0 - Full precision)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 1, al: 0, component_indices: vec![1] },
-                
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 1,
+                    al: 0,
+                    component_indices: vec![1],
+                },
+
                 // Scan 7: AC Cr - Refinement (Al=0 - Full precision)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 1, al: 0, component_indices: vec![2] },
-                
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 1,
+                    al: 0,
+                    component_indices: vec![2],
+                },
+
                 // Scan 8: AC Luma - Final Refinement (Al=0 - Full precision)
-                ScanSpecification { ss_start: 1, ss_end: 63, ah: 1, al: 0, component_indices: vec![0] },
-            ]
+                ScanSpecification {
+                    ss_start: 1,
+                    ss_end: 63,
+                    ah: 1,
+                    al: 0,
+                    component_indices: vec![0],
+                },
+            ],
         }
     }
 }

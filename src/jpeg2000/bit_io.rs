@@ -91,6 +91,12 @@ impl J2kBitWriter {
     }
 
     pub fn write_bit(&mut self, bit: u8) {
+        if std::env::var("J2K_BIT_TRACE").is_ok() {
+            let total_bits = self.data.len() * 8 + self.bits_count as usize;
+            eprintln!("[BIT] Write bit {} at position {} (byte {}, bit {})", 
+                     bit & 1, total_bits, self.data.len(), self.bits_count);
+        }
+        
         self.bit_buffer = (self.bit_buffer << 1) | (bit & 1);
         self.bits_count += 1;
 

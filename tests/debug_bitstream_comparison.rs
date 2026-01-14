@@ -58,14 +58,13 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
     let our_path = "test_bitstream_ours.j2k";
     fs::write(our_path, &our_j2k).unwrap();
     
-    // Encode with OpenJPEG
     let opj_path = "test_bitstream_openjpeg.j2k";
+    let num_resolutions = decomp_levels + 1;
     let output = Command::new("libs/bin/opj_compress.exe")
         .args(&[
             "-i", pgm_path,
             "-o", opj_path,
-            "-I",  // Lossless
-            "-n", &decomp_levels.to_string(),
+            "-n", &num_resolutions.to_string(),
         ])
         .output()
         .expect("Failed to run opj_compress");

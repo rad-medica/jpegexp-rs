@@ -8,12 +8,23 @@ pub struct TagTree {
     leaf_height: usize,
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 struct TagTreeNode {
     value: i32,
     low: i32,
     known: bool,
     parent_index: Option<usize>,
+}
+
+impl Default for TagTreeNode {
+    fn default() -> Self {
+        Self {
+            value: 99999,  // Match OpenJPEG's initialization value
+            low: 0,
+            known: false,
+            parent_index: None,
+        }
+    }
 }
 
 impl TagTree {
@@ -102,77 +113,104 @@ impl TagTree {
     }
 
     /// Set the value at a leaf coordinate (x, y).
+    /// This propagates the value up the tree to all parent nodes (matching OpenJPEG's opj_tgt_setvalue).
+    /// Each parent node stores the minimum value of all its children.
     pub fn set_value(&mut self, x: usize, y: usize, value: i32) {
         if x >= self.leaf_width || y >= self.leaf_height {
             return;
         }
         let leaf_idx = y * self.leaf_width + x;
-        self.nodes[leaf_idx].value = value;
+        
+        if std::env::var("J2K_TT_TRACE").is_ok() {
+            eprintln!("TT set_value: leaf=({},{}) idx={} value={} (before: leaf.value={})", 
+                      x, y, leaf_idx, value, self.nodes[leaf_idx].value);
+        }
+        
+        // Propagate value up the tree (matching OpenJPEG's logic in opj_tgt_setvalue)
+        let mut idx = Some(leaf_idx);
+        while let Some(curr_idx) = idx {
+            let node = &mut self.nodes[curr_idx];
+            if node.value <= value {
+                // Parent already has a smaller value from another child, stop propagation
+                if std::env::var("J2K_TT_TRACE").is_ok() {
+                    eprintln!("  TT[{}]: stop propagation (node.value={} <= value={})", curr_idx, node.value, value);
+                }
+                break;
+            }
+            if std::env::var("J2K_TT_TRACE").is_ok() {
+                eprintln!("  TT[{}]: set value {} (was {})", curr_idx, value, node.value);
+            }
+            node.value = value;
+            idx = node.parent_index;
+        }
     }
 
     /// Encode the value for leaf at (x, y) given a threshold.
     /// Tag tree coding in Packet Headers uses J2kBitWriter (Raw bits with stuffing).
+    /// 
+    /// This implementation matches OpenJPEG's opj_tgt_encode exactly.
     pub fn encode(&mut self, writer: &mut J2kBitWriter, x: usize, y: usize, threshold: i32) {
         if x >= self.leaf_width || y >= self.leaf_height {
             return;
         }
         let leaf_idx = y * self.leaf_width + x;
+        
+        if std::env::var("J2K_TT_TRACE").is_ok() {
+            eprintln!("TT Encode: leaf=({},{}) idx={} value={} threshold={} current_low={}", 
+                      x, y, leaf_idx, self.nodes[leaf_idx].value, threshold, self.nodes[leaf_idx].low);
+        }
 
+        // Build stack from leaf to root (matching OpenJPEG's approach)
+        let mut stack: Vec<usize> = Vec::new();
         let mut idx = leaf_idx;
-        let mut stack = Vec::new();
-
-        // Find start node
+        
+        // Walk up to root, pushing nodes onto stack
         loop {
             stack.push(idx);
-            let node = &self.nodes[idx];
-            if node.low >= threshold || node.known {
-                break;
-            }
-            if let Some(parent) = node.parent_index {
+            if let Some(parent) = self.nodes[idx].parent_index {
                 idx = parent;
             } else {
                 break;
             }
         }
 
-        // Encode
-        // JPEG 2000 tag tree semantics (per OpenJPEG):
-        // bit=1 means "value equals current low" (found!)
-        // bit=0 means "value is higher than current low" (continue)
+        // Process from root to leaf (pop from stack)
+        // Use a local `low` variable that propagates through the tree (like OpenJPEG)
+        let mut low: i32 = 0;
+        
         while let Some(curr_idx) = stack.pop() {
-            // Sync low with parent
-            let parent_index = self.nodes[curr_idx].parent_index;
-            let parent_low = if let Some(p_idx) = parent_index {
-                self.nodes[p_idx].low
-            } else {
-                0
-            };
-
             let node = &mut self.nodes[curr_idx];
-            if node.low < parent_low {
-                node.low = parent_low;
+            
+            // Sync low: take max of local low and node->low (OpenJPEG lines 281-285)
+            if low > node.low {
+                node.low = low;
+            } else {
+                low = node.low;
             }
 
-            while node.low < threshold {
-                if node.known {
-                    // Already encoded/known, no need to send more bits
+            // Encode bits while low < threshold (OpenJPEG lines 287-297)
+            while low < threshold {
+                if low >= node.value {
+                    // Value found at current low level
+                    if !node.known {
+                        if std::env::var("J2K_TT_TRACE").is_ok() {
+                            eprintln!("  TT[{}]: Write 1 (low {} >= value {})", curr_idx, low, node.value);
+                        }
+                        writer.write_bit(1);
+                        node.known = true;
+                    }
                     break;
                 }
-                if node.value == node.low {
-                    // Found: value equals current low, write 1
-                    writer.write_bit(1);
-                    node.known = true;
-                    break;
-                } else {
-                    // Value is higher, write 0 and increment low
-                    writer.write_bit(0);
-                    node.low += 1;
+                // Value is higher, write 0 and increment low
+                if std::env::var("J2K_TT_TRACE").is_ok() {
+                    eprintln!("  TT[{}]: Write 0 (low {} < value {})", curr_idx, low, node.value);
                 }
+                writer.write_bit(0);
+                low += 1;
             }
-            if !node.known && node.low >= threshold {
-                // We reached threshold without finding the value
-                node.known = false;
-            }
+
+            // Update node->low after the loop (OpenJPEG line 299)
+            node.low = low;
         }
     }
 

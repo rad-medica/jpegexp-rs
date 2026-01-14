@@ -374,10 +374,6 @@ impl PacketHeader {
                         let lblock = numlenbits + increment;
                         let lbits = lblock + log2_passes;
 
-                        #[cfg(feature = "trace_packet_header")]
-                        eprintln!("[PKT]   bits_needed={}, log2_passes={}, increment={}, lblock={}, lbits={}", 
-                                  bits_needed, log2_passes, increment, lblock, lbits);
-
                         Self::write_comma_code(writer, increment);
                         if std::env::var("J2K_PKT_TRACE").is_ok() {
                             eprintln!("[PKT] Write data_len: {} in {} bits = {:0width$b}", 

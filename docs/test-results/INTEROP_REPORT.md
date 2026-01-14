@@ -6,7 +6,10 @@
 **Test Duration:** ~105 seconds (Total)  
 **Investigation:** Deep technical analysis completed (2026-01-12)
 
-> **Latest Update (2026-01-12)**: Completed comprehensive investigation into JPEG 2000 interoperability. **Root cause identified**: MQ coder bitstream divergence in encoder (byte 0: `0x00` vs OpenJPEG `0x80`). QCD marker fix applied. Our decoder is 100% compatible with OpenJPEG. See [JPEG2000_INTEROP_INVESTIGATION.md](../JPEG2000_INTEROP_INVESTIGATION.md) for complete technical analysis with bitstream comparisons.
+> **Latest Update (2026-01-12)**: **16-bit Encoding Fix Applied**. Fixed incorrect MQ coder context initialization (ZC contexts) and implemented zero bit-plane truncation.
+> - ✅ **16-bit Constant/Sparse**: Validated (MAE=0.0) against OpenJPEG. Critical for medical imaging padding/masks.
+> - ⚠️ **Complex Patterns**: 16-bit gradients still show failures (tracked as J2K-04).
+> - See [JPEG2000_INTEROP_INVESTIGATION.md](../JPEG2000_INTEROP_INVESTIGATION.md) for full analysis.
 
 ---
 
@@ -66,10 +69,11 @@ This report documents comprehensive interoperability testing between `jpegexp-rs
 | Pattern | Failure Mode | Typical MAE | Root Cause (Confirmed) |
 |---------|--------------|-------------|------------------------|
 | **Solid** | ✅ Pass | 0.0000 | - |
-| **Gradient** | ❌ Fail | ~0.73 (8-bit) | **MQ Coder bitstream divergence** (encoder outputs 0x00 vs OpenJPEG 0x80 at byte 0) |
+| **16-bit Constant/Sparse** | ✅ Pass | 0.0000 | **Fixed (2026-01-12)**: Context init & truncation |
+| **Gradient** | ❌ Fail | ~0.73 (8-bit) | **MQ Coder bitstream divergence** (byte 0 mismatch) |
 | **Noise** | ❌ Fail | ~0.73 (8-bit) | Same MQ Coder issue |
 | **Checkerboard** | ❌ Fail | ~0.73 (8-bit) | Same MQ Coder issue |
-| **16-bit (Any)** | ❌ Fail | > 10,000 | Same MQ Coder issue (not endianness) |
+| **16-bit Complex** | ❌ Fail | > 10,000 | Same MQ Coder issue (not endianness) |
 
 **Key Findings (2026-01-12 Investigation):**
 

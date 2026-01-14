@@ -123,6 +123,23 @@ MAE: 0.1875 (12 pixels off by ±1 out of 64)
 
 **Hypothesis**: LSB (Least Significant Bit) mismatch in magnitude refinement pass
 
+### 6. 16-bit Encoding Fix (2026-01-12) ✅
+
+**Problem**: 16-bit encoding was producing invalid packets for non-trivial images, causing decoder failures.
+
+**Diagnosis**:
+1.  **Incorrect Context Initialization**: MQ coder ZC context 0 initialized to Index 4 (should be 0).
+2.  **Missing Truncation**: Encoder sent ~40 passes of zeros for empty refinement bit-planes.
+
+**Fix Applied**:
+- Standardized `BitPlaneCoder` context initialization.
+- Implemented `calculate_min_bit_plane` to truncate trailing zero bit-planes.
+
+**Result**:
+- **16-bit Constant/Sparse**: ✅ **FIXED** (Interop passed with OpenJPEG).
+- **8-bit Legacy**: ✅ **VERIFIED** (No regressions).
+- **16-bit Complex**: ⚠️ **WIP** (Gradients still have MAE > 0).
+
 ---
 
 ## Root Cause Analysis

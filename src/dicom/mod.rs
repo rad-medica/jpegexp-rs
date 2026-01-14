@@ -387,12 +387,14 @@ impl<'a> DicomParser<'a> {
             )));
         }
 
-        let value = u32::from_le_bytes([
-            self.data[self.position],
-            self.data[self.position + 1],
-            self.data[self.position + 2],
-            self.data[self.position + 3],
-        ]);
+        let value = u32::from_le_bytes(
+            [
+                self.data[self.position],
+                self.data[self.position + 1],
+                self.data[self.position + 2],
+                self.data[self.position + 3],
+            ],
+        );
         self.position += 4;
         Ok(value)
     }

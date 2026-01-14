@@ -1,8 +1,8 @@
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-pub trait JpeglsSample:
-    Copy
+pub trait JpeglsSample
+    : Copy
     + Clone
     + Debug
     + Default
@@ -12,8 +12,7 @@ pub trait JpeglsSample:
     + std::ops::Sub<Output = Self>
     + From<u8>
     + TryInto<u8>
-    + TryInto<i32>
-{
+    + TryInto<i32> {
     const BITS: u32;
     const MAX_VALUE: i32;
 
@@ -72,11 +71,7 @@ pub fn bit_wise_sign(i: i32) -> i32 {
 }
 
 pub fn apply_sign(val: i32, sign: i32) -> i32 {
-    if sign < 0 {
-        -val
-    } else {
-        val
-    }
+    if sign < 0 { -val } else { val }
 }
 
 pub fn apply_sign_for_index(val: i32, sign: i32) -> usize {

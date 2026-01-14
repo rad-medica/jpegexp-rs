@@ -80,18 +80,36 @@ impl Dwt53 {
         }
 
         // Reverse Update (Even samples)
+        // For the boundary case (last even index), the forward transform's update
+        // formula differs slightly from the inverse. We need to use the correct
+        // formula to match.
         for i in (0..len).step_by(2) {
             let left = if i > 0 { x[i - 1] } else { x[i + 1] };
             let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-            // Standard uses +2
+            // The forward uses: x_even += floor((left + right + 2) / 4)
+            // The inverse should undo this. Due to boundary truncation effects,
+            // we use the same formula for consistency.
             x[i] -= (left + right + 2) >> 2;
         }
 
         // Reverse Prediction (Odd samples)
+        // For the last odd index (boundary case where i+1 >= len), the forward
+        // transform used x[i-1] as both neighbors due to symmetric extension.
+        // Forward at boundary: h = x - floor((left + left) / 2) = x - left
+        // So x = h + left = h + x[i-1]
+        // This simplifies to: x[i] = in_h + in_l
         for i in (1..len).step_by(2) {
             let left = x[i - 1];
-            let right = if i + 1 < len { x[i + 1] } else { x[i - 1] };
-            x[i] += (left + right) >> 1;
+            if i + 1 < len {
+                // Normal case: use both neighbors
+                let right = x[i + 1];
+                x[i] += (left + right) >> 1;
+            } else {
+                // Boundary case: x[i] = in_h + in_l = x[i] + x[i-1]
+                // After reverse update at i-1 (even), x[i-1] = in_l
+                // So we need: x[i] = in_h + x[i-1]
+                x[i] += left;
+            }
         }
 
         output.copy_from_slice(&x);
@@ -488,7 +506,9 @@ mod tests {
 
         println!(
             "Min: {}, Max: {}, Is constant: {}",
-            min_val, max_val, is_constant
+            min_val,
+            max_val,
+            is_constant
         );
 
         // IDWT should produce varying output, not constant!
@@ -533,7 +553,7 @@ mod tests {
         // Apply 1D DWT to rows
         for y in 0..height {
             let row: Vec<i32> = coeffs[y * width..(y + 1) * width].to_vec();
-            let l_len = (width + 1) / 2;
+            let l_len = width.div_ceil(2);
             let h_len = width / 2;
             let mut l = vec![0i32; l_len];
             let mut h = vec![0i32; h_len];
@@ -549,7 +569,7 @@ mod tests {
         // Apply 1D DWT to columns
         for x in 0..width {
             let col: Vec<i32> = (0..height).map(|y| coeffs[y * width + x]).collect();
-            let l_len = (height + 1) / 2;
+            let l_len = height.div_ceil(2);
             let h_len = height / 2;
             let mut l = vec![0i32; l_len];
             let mut h = vec![0i32; h_len];

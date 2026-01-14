@@ -335,7 +335,12 @@ fn calculate_metrics(original: &[u8], decoded: &[u8], bit_depth: u32) -> (f64, u
 
     let max_val = (1u64 << bit_depth) - 1;
 
-    if bit_depth <= 8 {
+    // NOTE: For bit_depth > 8 (including 10, 12, 16), pixels are stored in 16-bit containers
+    // with native endian byte order. We use bytes_per_sample to determine the storage format.
+    let bytes_per_sample = if bit_depth <= 8 { 1 } else { 2 };
+
+    if bytes_per_sample == 1 {
+        // 8-bit data: each sample is a single byte
         let mut sum_abs_error = 0u64;
         let mut sum_sq_error = 0u64;
         let mut max_error = 0u32;
@@ -358,7 +363,7 @@ fn calculate_metrics(original: &[u8], decoded: &[u8], bit_depth: u32) -> (f64, u
 
         (mae, max_error, psnr)
     } else {
-        // 16-bit (native endian)
+        // 10/12/16-bit data: each sample is 2 bytes in native endian
         let count = original.len() / 2;
         let mut sum_abs_error = 0u64;
         let mut sum_sq_error = 0u64;

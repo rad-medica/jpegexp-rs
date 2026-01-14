@@ -18,7 +18,7 @@ fn test_bitplane_single_value() {
         println!("Max bit-plane: {}", max_bp);
         
         // Encode
-        let num_passes = coder.encode_codeblock(max_bp, 0); // Orient 0 = LL
+        let num_passes = coder.encode_codeblock(max_bp, 0, 0); // Orient 0 = LL
         println!("Number of passes: {}", num_passes);
         
         // Get encoded data
@@ -80,7 +80,7 @@ fn test_bitplane_8x8_gradient() {
     let max_bp = coder.calculate_max_bit_plane().expect("Should have max BP");
     println!("\nMax bit-plane: {}", max_bp);
     
-    let num_passes = coder.encode_codeblock(max_bp, 0);
+    let num_passes = coder.encode_codeblock(max_bp, 0, 0);
     println!("Number of passes: {}", num_passes);
     
     coder.mq.flush();

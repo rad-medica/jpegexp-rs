@@ -155,10 +155,6 @@ mod tests {
         let mae = total_diff as f64 / pixel_count as f64;
         let compression_ratio = original_pixels.len() as f64 / encoded_len as f64;
 
-        println!("JPEG2000 MAE: {}", mae);
-        println!("Max pixel difference: {}", max_diff);
-        println!("Compression ratio: {}", compression_ratio);
-
         // Verify that the JPEG2000 pipeline works (produces valid output)
         assert!(
             compression_ratio > 0.5,

@@ -303,6 +303,7 @@ pub struct MqCoder {
     pub source: Vec<u8>,
     pub src_pos: usize,
     pub contexts: Vec<u8>,
+    pub symbol_count: usize, // Debug: count encoded symbols
 }
 
 impl Default for MqCoder {
@@ -316,6 +317,7 @@ impl Default for MqCoder {
             source: Vec::new(),
             src_pos: 0,
             contexts: vec![0; 19],
+            symbol_count: 0,
         }
     }
 }
@@ -344,10 +346,18 @@ impl MqCoder {
         self.bp_idx = 0;
         self.a = 0x8000;
         self.c = 0;
-        self.ct = 12;
+        self.ct = 12; // Standard says 12, OpenJPEG uses 12
+        self.symbol_count = 0;
     }
 
     pub fn encode(&mut self, d: u8, cx: usize) {
+        self.symbol_count += 1;
+
+        // Trace symbol encoding if MQ_SYMBOL_TRACE is set
+        if std::env::var("MQ_SYMBOL_TRACE").is_ok() {
+            eprintln!("[MQ] Symbol #{}: d={}, cx={}", self.symbol_count, d, cx);
+        }
+
         let ctx = self.contexts[cx];
         let idx = (ctx >> 1) as usize;
         let mps = ctx & 1;
@@ -395,26 +405,35 @@ impl MqCoder {
     }
 
     fn byte_out(&mut self) {
+        // OpenJPEG-compatible byte_out implementation (ISO 15444-1 Annex C)
+        // Key: Only clear carry bit when it actually propagates to create 0xFF
         if self.buffer[self.bp_idx] == 0xff {
+            // Previous byte was 0xFF: bit-stuffing mode
+            // Output 7 bits instead of 8 to avoid creating marker-like sequences
             self.bp_idx += 1;
             self.buffer.push((self.c >> 20) as u8);
             self.c &= 0xfffff;
             self.ct = 7;
         } else if (self.c & 0x8000000) == 0 {
+            // No carry: normal output
             self.bp_idx += 1;
             self.buffer.push((self.c >> 19) as u8);
             self.c &= 0x7ffff;
             self.ct = 8;
         } else {
-            self.buffer[self.bp_idx] = self.buffer[self.bp_idx].wrapping_add(1);
-            if self.buffer[self.bp_idx] == 0xff {
-                self.c &= 0x7ffffff;
+            // Carry bit is set: propagate carry to previous byte
+            let v = self.buffer[self.bp_idx] + 1;
+            self.buffer[self.bp_idx] = v;
+
+            if v == 0xff {
+                // Carry propagation created 0xFF: enter bit-stuffing mode
+                self.c &= 0x7ffffff; // Clear carry bit ONLY when creating 0xFF
                 self.bp_idx += 1;
                 self.buffer.push((self.c >> 20) as u8);
                 self.c &= 0xfffff;
                 self.ct = 7;
             } else {
-                self.c &= 0x7ffffff;
+                // Normal carry propagation complete
                 self.bp_idx += 1;
                 self.buffer.push((self.c >> 19) as u8);
                 self.c &= 0x7ffff;
@@ -433,10 +452,36 @@ impl MqCoder {
         self.byte_out();
         self.c <<= self.ct;
         self.byte_out();
+
+        // OpenJPEG: if (*mqc->bp != 0xff) { mqc->bp++; }
+        if self.bp_idx < self.buffer.len() && self.buffer[self.bp_idx] != 0xff {
+            self.bp_idx += 1;
+        }
+
+        if std::env::var("MQ_DEBUG").is_ok() {
+            eprintln!(
+                "[MQ_FLUSH] symbols={}, bp_idx={}, buffer.len()={}, last_byte=0x{:02X}, result_len={}",
+                self.symbol_count,
+                self.bp_idx,
+                self.buffer.len(),
+                if self.bp_idx > 0 && self.bp_idx <= self.buffer.len() {
+                    self.buffer[self.bp_idx - 1]
+                } else {
+                    0
+                },
+                self.get_buffer().len()
+            );
+        }
     }
 
     pub fn get_buffer(&self) -> &[u8] {
-        &self.buffer[1..] // Skip dummy first byte
+        // Return bytes from 1 (skip dummy) to bp_idx (exclusive)
+        // OpenJPEG returns (bp - start) bytes
+        if self.bp_idx > 0 {
+            &self.buffer[1..self.bp_idx]
+        } else {
+            &[]
+        }
     }
 
     // --- Decoder ---

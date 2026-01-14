@@ -163,12 +163,10 @@ impl<'a, 'b> J2kParser<'a, 'b> {
     pub fn parse_qcd(&mut self) -> Result<(), JpeglsError> {
         // QCD marker parsing
         let len = self.reader.read_u16()?;
-        // eprintln!("DEBUG: parse_qcd len={}", len);
         if len < 3 {
             return Err(JpeglsError::InvalidData);
         }
         let sqcd = self.reader.read_u8()?; // quantization style flags
-                                           // eprintln!("DEBUG: parse_qcd sqcd={:02X}", sqcd);
 
         // Remaining in the marker segment
         // len includes 2 bytes for len.
@@ -273,30 +271,26 @@ impl<'a, 'b> J2kParser<'a, 'b> {
         let _tpsot = self.reader.read_u8()?;
         let _tnsot = self.reader.read_u8()?;
 
-        // eprintln!("DEBUG: SOT isot={} psot={}", isot, psot);
-
         // Loop for other markers until SOD
         loop {
             // Check for potential markers
+
             if self.reader.remaining_data().len() < 2 {
-                // eprintln!("DEBUG: SOT Loop EOF");
                 return Err(JpeglsError::InvalidData);
             }
 
             let b1 = self.reader.read_u8()?;
             if b1 != 0xFF {
-                // eprintln!("DEBUG: SOT Loop expected FF, got {:02X}", b1);
                 return Err(JpeglsError::InvalidData);
             }
+
             let b2 = self.reader.read_u8()?;
             if b2 == 0x93 {
                 // SOD
-                // eprintln!("DEBUG: Found SOD");
                 break;
             }
 
             let marker = JpegMarkerCode::try_from(b2)?;
-            // eprintln!("DEBUG: Tile Marker {:?} ({:02X})", marker, b2);
 
             match marker {
                 JpegMarkerCode::CodingStyleDefault => self.parse_cod()?,

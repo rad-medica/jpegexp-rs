@@ -61,7 +61,9 @@ This document details the compliance of `jpegexp-rs` with DICOM Transfer Syntaxe
 ## 4. JPEG 2000 Compliance (ISO 15444-1)
 
 ### Medical Imaging Features
-- **12-bit / 16-bit Support**: Fully verified (MAE=0).
+- **12-bit / 16-bit Support**: 
+    - ✅ **12-bit**: Fully verified (MAE=0).
+    - ✅ **16-bit**: Verified for constant/sparse data (MAE=0). Complex patterns experimental.
 - **Photometric Interpretations**: MONOCHROME1, MONOCHROME2, YBR_RCT, YBR_ICT.
 - **Signed Pixel Data**: Full support for CT Hounsfield Units (-1024 to +3071).
 - **Markers**: Implementation of TLM and PLT markers for improved random access.

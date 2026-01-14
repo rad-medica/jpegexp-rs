@@ -251,7 +251,7 @@ fn test_j2k_bit_plane_coder_simple_single_value() {
     let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
     println!("Max bit plane: {}", max_bp);
 
-    let passes = encoder.encode_codeblock(max_bp, 0);
+    let passes = encoder.encode_codeblock(max_bp, 0, 0);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -289,7 +289,7 @@ fn test_j2k_bit_plane_coder_two_values() {
     let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
     println!("Max bit plane: {}", max_bp);
 
-    let passes = encoder.encode_codeblock(max_bp, 0);
+    let passes = encoder.encode_codeblock(max_bp, 0, 0);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -349,7 +349,7 @@ fn test_j2k_bit_plane_coder_four_values_with_negatives() {
     let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
     println!("Max bit plane: {}", max_bp);
 
-    let passes = encoder.encode_codeblock(max_bp, 0);
+    let passes = encoder.encode_codeblock(max_bp, 0, 0);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -399,7 +399,7 @@ fn test_j2k_bit_plane_coder_roundtrip() {
     let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
     println!("Max bit plane: {}", max_bp);
 
-    let passes = encoder.encode_codeblock(max_bp, 0);
+    let passes = encoder.encode_codeblock(max_bp, 0, 0);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -449,7 +449,7 @@ fn test_j2k_bit_plane_coder_3x4_block() {
     let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
 
     let orientation = 1u8; // HL
-    let passes = encoder.encode_codeblock(max_bp, orientation);
+    let passes = encoder.encode_codeblock(max_bp, 0, orientation);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -496,7 +496,7 @@ fn test_j2k_bit_plane_coder_2x4_block() {
     println!("Max bit plane: {}", max_bp);
 
     let orientation = 1u8; // HL orientation
-    let passes = encoder.encode_codeblock(max_bp, orientation);
+    let passes = encoder.encode_codeblock(max_bp, 0, orientation);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -545,7 +545,7 @@ fn test_j2k_bit_plane_coder_4x1_column() {
     println!("Max bit plane: {}", max_bp);
 
     let orientation = 1u8; // HL orientation
-    let passes = encoder.encode_codeblock(max_bp, orientation);
+    let passes = encoder.encode_codeblock(max_bp, 0, orientation);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -592,7 +592,7 @@ fn test_j2k_bit_plane_coder_2x2_simple() {
     println!("Max bit plane: {}", max_bp);
 
     let orientation = 1u8; // HL orientation
-    let passes = encoder.encode_codeblock(max_bp, orientation);
+    let passes = encoder.encode_codeblock(max_bp, 0, orientation);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -642,7 +642,7 @@ fn test_j2k_bit_plane_coder_4x4_hl_pattern() {
     println!("Max bit plane: {} (max_val=16, 16=0b10000, bit 4)", max_bp);
 
     let orientation = 1u8; // HL orientation
-    let passes = encoder.encode_codeblock(max_bp, orientation);
+    let passes = encoder.encode_codeblock(max_bp, 0, orientation);
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
 
@@ -975,7 +975,7 @@ fn test_j2k_single_coeff_73() {
     let max_bp = encoder.calculate_max_bit_plane().unwrap_or(0);
     println!("  max_bit_plane = {}", max_bp);
 
-    let passes = encoder.encode_codeblock(max_bp, 1); // orientation 1 = HL
+    let passes = encoder.encode_codeblock(max_bp, 0, 1); // orientation 1 = HL
     encoder.mq.flush();
     let encoded = encoder.mq.get_buffer().to_vec();
     println!("  Encoded {} passes to {} bytes", passes, encoded.len());

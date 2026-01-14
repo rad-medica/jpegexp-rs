@@ -447,9 +447,8 @@ pub fn generate_optimal_huffman_table(
         check_sum += (count as u32) << (15 - i);
     }
     
-    // Debug print if invalid
+    // Kraft sum must equal 65536 for valid complete Huffman codes
     if check_sum != 65536 {
-        // println!("WARNING: Invalid Huffman table generated! Kraft sum: {}/65536", check_sum);
         // This might happen if we have a single symbol (handled above) or empty.
         // But for N > 1, it should be exact.
     }
@@ -471,7 +470,7 @@ fn build_limited_length_codes(freq_list: &[(usize, u8)], max_len: usize) -> Vec<
 
     // 1. Build standard Huffman tree to get initial lengths
     // Create leaf nodes
-    let mut nodes: Vec<(usize, usize)> = freq_list // (weight, height/depth - initially 0)
+    let _nodes: Vec<(usize, usize)> = freq_list // (weight, height/depth - initially 0)
         .iter()
         .map(|&(f, _)| (f, 0)) // 0 means leaf
         .collect();
@@ -636,7 +635,7 @@ fn build_limited_length_codes(freq_list: &[(usize, u8)], max_len: usize) -> Vec<
     // Assign lengths
     let mut result = Vec::with_capacity(n);
     let mut cur_len = 1;
-    for &(freq, sym) in &sorted_syms {
+    for &(_freq, sym) in &sorted_syms {
         while cur_len <= max_len && counts[cur_len] == 0 {
             cur_len += 1;
         }

@@ -60,6 +60,23 @@ tests/fixtures/out/*
 Thumbs.db
 desktop.ini
 
+# Generated test files (root directory)
+*.raw
+*.j2k
+*.pgm
+*.pnm
+*.jpg
+*.jls
+
+# Old test results
+docs/test-results/*.csv
+!docs/test-results/README.md
+!docs/test-results/archive/.gitkeep
+
+# External/temporary directories
+*temp/
+temp/
+
 .ruff_cache/
 
 *.pdb

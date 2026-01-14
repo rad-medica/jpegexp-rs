@@ -135,6 +135,9 @@ impl<'a> J2kWriter<'a> {
         let payload_len = 1 + qcd.step_sizes.len() * step_size_bytes;
         self.writer.write_u16((payload_len + 2) as u16)?;
 
+        if std::env::var("J2K_QCD_DEBUG").is_ok() {
+            eprintln!("[QCD WRITER] Writing Sqcd byte: 0x{:02X}", qcd.quant_style);
+        }
         self.writer.write_byte(qcd.quant_style)?;
 
         for &step in &qcd.step_sizes {
