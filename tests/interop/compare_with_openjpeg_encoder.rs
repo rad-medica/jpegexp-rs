@@ -6,6 +6,10 @@ use std::fs;
 
 use std::path::Path;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 /// Find a binary in libs/bin or PATH
 fn find_binary(name: &str) -> Option<String> {
     let bin_dir = "libs/bin";
@@ -54,26 +58,26 @@ fn compare_gradient_encoding() {
     );
     let our_output = &output_buffer[..bytes_written];
 
-    let our_j2k = "tests/fixtures/out/test_our_gradient.j2k";
-    fs::write(our_j2k, our_output).expect("Failed to write our output");
+    let our_j2k_path = get_test_output_path("test_our_gradient.j2k");
+    fs::write(&our_j2k_path, our_output).expect("Failed to write our output");
     println!("Our encoder output: {} bytes", our_output.len());
 
     // Save raw pixels for OpenJPEG
-    let grad_raw = "tests/fixtures/out/test_gradient.raw";
-    fs::write(grad_raw, &pixels).expect("Failed to write raw");
+    let grad_raw_path = get_test_output_path("test_gradient.raw");
+    fs::write(&grad_raw_path, &pixels).expect("Failed to write raw");
 
     // Define cleanup paths upfront
-    let our_dec_raw = "tests/fixtures/out/test_our_decoded.raw";
-    let opj_dec_raw = "tests/fixtures/out/test_opj_decoded.raw";
-    let opj_j2k = "tests/fixtures/out/test_opj_gradient.j2k";
+    let our_dec_raw_path = get_test_output_path("test_our_decoded.raw");
+    let opj_dec_raw_path = get_test_output_path("test_opj_decoded.raw");
+    let opj_j2k_path = get_test_output_path("test_opj_gradient.j2k");
 
     // Encode with OpenJPEG
     let compress_bin = find_binary("opj_compress").unwrap_or_else(|| "opj_compress".to_string());
     let opj_result = Command::new(compress_bin)
         .args(
             &[
-            "-i", grad_raw,
-            "-o", opj_j2k,
+            "-i", grad_raw_path.to_str().unwrap(),
+            "-o", opj_j2k_path.to_str().unwrap(),
             "-F", "8,8,8,1,u@1x1",  // 8x8, 8bpp, 1 component, unsigned
             "-n", "1",  // 1 resolution level (same as 1 decomposition)
             "-I",  // Lossless
@@ -83,7 +87,7 @@ fn compare_gradient_encoding() {
 
     if let Ok(output) = opj_result {
         if output.status.success() {
-            let opj_output = fs::read(opj_j2k).expect("Failed to read OpenJPEG output");
+            let opj_output = fs::read(&opj_j2k_path).expect("Failed to read OpenJPEG output");
             println!("OpenJPEG encoder output: {} bytes", opj_output.len());
 
             // Compare byte by byte
@@ -108,16 +112,22 @@ fn compare_gradient_encoding() {
             let decompress_bin =
                 find_binary("opj_decompress").unwrap_or_else(|| "opj_decompress".to_string());
             let decode_ours = Command::new(&decompress_bin)
-                .args(&["-i", our_j2k, "-o", our_dec_raw])
+                .args(&[
+                    "-i", our_j2k_path.to_str().unwrap(), 
+                    "-o", our_dec_raw_path.to_str().unwrap()
+                ])
                 .output();
 
             let decode_opj = Command::new(&decompress_bin)
-                .args(&["-i", opj_j2k, "-o", opj_dec_raw])
+                .args(&[
+                    "-i", opj_j2k_path.to_str().unwrap(), 
+                    "-o", opj_dec_raw_path.to_str().unwrap()
+                ])
                 .output();
 
             if decode_ours.is_ok() && decode_opj.is_ok() {
-                let our_decoded = fs::read(our_dec_raw).ok();
-                let opj_decoded = fs::read(opj_dec_raw).ok();
+                let our_decoded = fs::read(&our_dec_raw_path).ok();
+                let opj_decoded = fs::read(&opj_dec_raw_path).ok();
 
                 if let (Some(our_dec), Some(opj_dec)) = (our_decoded, opj_decoded) {
                     println!("\n=== Decoded pixel comparison ===");
@@ -153,9 +163,9 @@ fn compare_gradient_encoding() {
     }
 
     // Cleanup
-    let _ = fs::remove_file(grad_raw);
-    let _ = fs::remove_file(our_j2k);
-    let _ = fs::remove_file(opj_j2k);
-    let _ = fs::remove_file(our_dec_raw);
-    let _ = fs::remove_file(opj_dec_raw);
+    // let _ = fs::remove_file(grad_raw_path);
+    // let _ = fs::remove_file(our_j2k_path);
+    // let _ = fs::remove_file(opj_j2k_path);
+    // let _ = fs::remove_file(our_dec_raw_path);
+    // let _ = fs::remove_file(opj_dec_raw_path);
 }

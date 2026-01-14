@@ -237,6 +237,7 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     pub fn encode_codeblock(&mut self, start_bp: u8, min_bp: u8, orient: u8) -> u8 {
+        // println!("DEBUG: encode_codeblock start_bp={} min_bp={}", start_bp, min_bp);
         self.mq.init_encoder();
         self.reset_flags();
         self.state.fill(0);
@@ -247,6 +248,7 @@ impl<'a> BitPlaneCoder<'a> {
 
         if start_bp > min_bp {
             for bp in (min_bp..start_bp).rev() {
+                // println!("DEBUG: encode pass bp={}", bp);
                 self.encode_sigprop(bp, orient);
                 self.encode_magref(bp);
                 self.encode_cleanup(bp, orient);
@@ -785,7 +787,7 @@ mod tests {
             .expect("Should have max_bp for 8190");
         println!("max_bp for 8190: {}", max_bp);
 
-        let passes = bpc.encode_codeblock(max_bp, 3, 0);
+        let passes = bpc.encode_codeblock(max_bp, 0, 0);
         bpc.mq.flush();
         let encoded = bpc.mq.get_buffer().to_vec();
         println!(
@@ -798,7 +800,7 @@ mod tests {
         // Decode
         let mut bpc_dec = BitPlaneCoder::new(width, height, &[]);
         let decoded = bpc_dec
-            .decode_codeblock(&encoded, max_bp, passes, 3)
+            .decode_codeblock(&encoded, max_bp, passes, 0)
             .unwrap();
 
         // Check

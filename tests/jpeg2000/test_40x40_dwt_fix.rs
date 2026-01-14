@@ -1,4 +1,9 @@
 /// Simple test for 40x40 DWT fix - standalone, no external dependencies
+
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 fn test_40x40_dwt_fix() {
     use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
@@ -34,12 +39,19 @@ fn test_40x40_dwt_fix() {
     println!("Encoded {} bytes", output_size);
     
     // Write test files
-    fs::write("test_40x40_ours.j2k", &output[..output_size]).unwrap();
-    fs::write("test_40x40_input.raw", &pixels).unwrap();
+    let j2k_path = get_test_output_path("test_40x40_ours.j2k");
+    let raw_path = get_test_output_path("test_40x40_input.raw");
+    let pnm_path = get_test_output_path("test_40x40_decoded.pnm");
+
+    fs::write(&j2k_path, &output[..output_size]).unwrap();
+    fs::write(&raw_path, &pixels).unwrap();
     
     // Decode with OpenJPEG
     let output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", "test_40x40_ours.j2k", "-o", "test_40x40_decoded.pnm"])
+        .args(&[
+            "-i", j2k_path.to_str().unwrap(),
+            "-o", pnm_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to decode");
     
@@ -73,7 +85,7 @@ fn test_40x40_dwt_fix() {
         data[offset..].to_vec()
     }
     
-    let decoded_data = fs::read("test_40x40_decoded.pnm").unwrap();
+    let decoded_data = fs::read(&pnm_path).unwrap();
     let decoded_pixels = parse_pnm(&decoded_data);
     
     // Compare

@@ -1,4 +1,6 @@
 /// Analyze what's special about the diagonal gradient
+mod common;
+
 #[test]
 #[ignore]
 fn analyze_diagonal_vs_horizontal() {
@@ -76,6 +78,7 @@ fn test_pattern(name: &str, pixels: &[u8], width: usize, height: usize) {
     use jpegexp_rs::FrameInfo;
     use std::fs;
     use std::process::Command;
+    use crate::common::file_io::get_test_output_path;
 
     let frame_info = FrameInfo {
         width: width as u32,
@@ -96,14 +99,21 @@ fn test_pattern(name: &str, pixels: &[u8], width: usize, height: usize) {
         .unwrap();
     let our_bytes = &our_output[..our_size];
 
-    let our_file = format!("test_{}_ours.j2k", name);
-    let decoded_file = format!("test_{}_ours_decoded.pnm", name);
+    let our_file_name = format!("test_{}_ours.j2k", name);
+    let our_file_path = get_test_output_path(&our_file_name);
+    let decoded_file_name = format!("test_{}_ours_decoded.pnm", name);
+    let decoded_file_path = get_test_output_path(&decoded_file_name);
 
-    fs::write(&our_file, our_bytes).unwrap();
+    fs::write(&our_file_path, our_bytes).unwrap();
 
     // Decode our file with OpenJPEG
     let output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", &our_file, "-o", &decoded_file])
+        .args(&[
+            "-i",
+            our_file_path.to_str().unwrap(),
+            "-o",
+            decoded_file_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to decode");
 
@@ -136,7 +146,7 @@ fn test_pattern(name: &str, pixels: &[u8], width: usize, height: usize) {
         data[offset..].to_vec()
     }
 
-    let decoded_data = fs::read(&decoded_file).unwrap();
+    let decoded_data = fs::read(&decoded_file_path).unwrap();
     let decoded_pixels = parse_pnm(&decoded_data);
 
     let mut errors = 0;

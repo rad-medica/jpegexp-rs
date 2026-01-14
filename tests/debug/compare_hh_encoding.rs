@@ -5,6 +5,10 @@ use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::FrameInfo;
 use std::fs;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 #[ignore]
 fn extract_and_compare_hh_subbands() {
@@ -43,15 +47,20 @@ fn extract_and_compare_hh_subbands() {
     let our_size = encoder.encode(&pixels, &frame_info, &mut our_output).unwrap();
     let our_bytes = &our_output[..our_size];
     
-    fs::write("compare_hh_ours.j2k", our_bytes).unwrap();
-    fs::write("compare_hh_input.raw", &pixels).unwrap();
+    let j2k_path = get_test_output_path("compare_hh_ours.j2k");
+    let raw_path = get_test_output_path("compare_hh_input.raw");
+
+    fs::write(&j2k_path, our_bytes).unwrap();
+    fs::write(&raw_path, &pixels).unwrap();
     
     println!("\n=== Files Created ===");
     println!("  compare_hh_ours.j2k - Our encoding");
     println!("  compare_hh_input.raw - Input data");
     println!("\nTo compare with OpenJPEG:");
     println!("  1. Encode with OpenJPEG:");
-    println!("     libs/bin/opj_compress.exe -i compare_hh_input.raw -o compare_hh_opj.j2k -n 3 -r 1 -F 64,64,1,8,u");
+    println!("     libs/bin/opj_compress.exe -i {} -o {} -n 3 -r 1 -F 64,64,1,8,u", 
+        raw_path.to_str().unwrap(),
+        get_test_output_path("compare_hh_opj.j2k").to_str().unwrap());
     println!("  2. Compare packet structures with Python script");
 }
 
@@ -103,16 +112,21 @@ fn trace_hh_encoding_detailed() {
     println!("\n=== Encoding Complete ===");
     println!("Output size: {} bytes", our_size);
     
-    fs::write("trace_16x16_diag.j2k", &our_output[..our_size]).unwrap();
-    fs::write("trace_16x16_diag.raw", &pixels).unwrap();
+    let j2k_path = get_test_output_path("trace_16x16_diag.j2k");
+    let raw_path = get_test_output_path("trace_16x16_diag.raw");
+    let opj_path = get_test_output_path("trace_16x16_diag_opj.j2k");
+    let pnm_path = get_test_output_path("trace_16x16_diag_decoded.pnm");
+
+    fs::write(&j2k_path, &our_output[..our_size]).unwrap();
+    fs::write(&raw_path, &pixels).unwrap();
     
     // Test with OpenJPEG
     use std::process::Command;
     
     let _ = Command::new("libs/bin/opj_compress.exe")
         .args(&[
-            "-i", "trace_16x16_diag.raw",
-            "-o", "trace_16x16_diag_opj.j2k",
+            "-i", raw_path.to_str().unwrap(),
+            "-o", opj_path.to_str().unwrap(),
             "-n", "2",
             "-r", "1",
             "-F", "16,16,1,8,u",
@@ -120,7 +134,10 @@ fn trace_hh_encoding_detailed() {
         .output();
     
     let output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", "trace_16x16_diag.j2k", "-o", "trace_16x16_diag_decoded.pnm"])
+        .args(&[
+            "-i", j2k_path.to_str().unwrap(),
+            "-o", pnm_path.to_str().unwrap()
+        ])
         .output()
         .expect("Failed to decode");
     
@@ -149,7 +166,7 @@ fn trace_hh_encoding_detailed() {
             data[offset..].to_vec()
         }
         
-        let decoded_data = fs::read("trace_16x16_diag_decoded.pnm").unwrap();
+        let decoded_data = fs::read(&pnm_path).unwrap();
         let decoded_pixels = parse_pnm(&decoded_data);
         
         let mut errors = 0;

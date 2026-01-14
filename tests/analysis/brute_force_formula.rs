@@ -3,6 +3,10 @@ use jpegexp_rs::FrameInfo;
 use std::fs;
 use std::process::Command;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 fn brute_force_zero_bp_formula() {
     let pixels: Vec<u8> = (0..16).map(|i| (i * 255 / 15) as u8).collect();
@@ -10,13 +14,21 @@ fn brute_force_zero_bp_formula() {
     let pgm_header = "P5\n4 4\n255\n";
     let mut pgm_data = pgm_header.as_bytes().to_vec();
     pgm_data.extend_from_slice(&pixels);
-    fs::write("brute_test.pgm", &pgm_data).unwrap();
+    
+    let pgm_path = get_test_output_path("brute_test.pgm");
+    let j2k_path = get_test_output_path("brute_test_opj.j2k");
+
+    fs::write(&pgm_path, &pgm_data).unwrap();
     
     let _ = Command::new("libs/bin/opj_compress.exe")
-        .args(&["-i", "brute_test.pgm", "-o", "brute_test_opj.j2k", "-n", "2"])
+        .args(&[
+            "-i", pgm_path.to_str().unwrap(),
+            "-o", j2k_path.to_str().unwrap(),
+            "-n", "2"
+        ])
         .output();
     
-    let opj_data = fs::read("brute_test_opj.j2k").unwrap();
+    let opj_data = fs::read(&j2k_path).unwrap();
     let opj_sod = find_marker(&opj_data, 0xFF93).unwrap();
     let opj_tile = &opj_data[opj_sod + 2..];
     
@@ -54,8 +66,8 @@ fn brute_force_zero_bp_formula() {
         println!();
     }
     
-    let _ = fs::remove_file("brute_test.pgm");
-    let _ = fs::remove_file("brute_test_opj.j2k");
+    // let _ = fs::remove_file("brute_test.pgm");
+    // let _ = fs::remove_file("brute_test_opj.j2k");
 }
 
 fn find_marker(data: &[u8], marker: u16) -> Option<usize> {

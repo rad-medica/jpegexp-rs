@@ -6,6 +6,10 @@ use jpegexp_rs::FrameInfo;
 use std::fs;
 use std::process::Command;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 #[ignore]
 fn test_10x10_level1() {
@@ -35,14 +39,21 @@ fn test_10x10_level1() {
     let mut our_output = vec![0u8; 1024 * 1024];
     let our_size = encoder.encode(&pixels, &frame_info, &mut our_output).unwrap();
     
-    let our_file = "test_10x10_level1.j2k";
-    fs::write(our_file, &our_output[..our_size]).unwrap();
+    let our_file_name = "test_10x10_level1.j2k";
+    let our_file_path = get_test_output_path(our_file_name);
+    let pnm_file_name = "test_10x10_level1_decoded.pnm";
+    let pnm_file_path = get_test_output_path(pnm_file_name);
+
+    fs::write(&our_file_path, &our_output[..our_size]).unwrap();
     
-    println!("Wrote {} bytes to {}", our_size, our_file);
+    println!("Wrote {} bytes to {:?}", our_size, our_file_path);
     
     // Decode with OpenJPEG
     let output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", our_file, "-o", "test_10x10_level1_decoded.pnm"])
+        .args(&[
+            "-i", our_file_path.to_str().unwrap(),
+            "-o", pnm_file_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to run opj_decompress");
     

@@ -4,6 +4,10 @@ use std::process::Command;
 use std::path::Path;
 use std::fs;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 // Path to libjpeg-turbo djpeg
 const DJPEG_PATH: &str = "libs/bin/djpeg.exe";
 
@@ -83,9 +87,6 @@ fn test_interop_large_complex_images() {
         component_count: 3,
     };
 
-    let output_dir = "tests/output/interop";
-    fs::create_dir_all(output_dir).unwrap();
-
     struct TestCase {
         name: &'static str,
         progressive: bool,
@@ -114,8 +115,8 @@ fn test_interop_large_complex_images() {
             encoder.set_subsampling(hy, vy, hc, vc);
         }
 
-        let file_path = format!("{}/{}.jpg", output_dir, case.name);
-        let ppm_path = format!("{}/{}.ppm", output_dir, case.name); // djpeg outputs ppm by default
+        let file_path = get_test_output_path(&format!("{}.jpg", case.name));
+        let ppm_path = get_test_output_path(&format!("{}.ppm", case.name));
 
         // Encode
         let mut dest = vec![0u8; (width * height * 3) as usize]; // Large buffer
@@ -124,9 +125,9 @@ fn test_interop_large_complex_images() {
         fs::write(&file_path, &dest[..len]).expect("Write failed");
         
         // Verify
-        verify_with_djpeg(&file_path, &ppm_path);
+        verify_with_djpeg(file_path.to_str().unwrap(), ppm_path.to_str().unwrap());
         
         // Cleanup PPM (too large to keep)
-        let _ = fs::remove_file(ppm_path);
+        // let _ = fs::remove_file(ppm_path);
     }
 }

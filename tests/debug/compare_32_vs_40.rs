@@ -5,6 +5,10 @@ use jpegexp_rs::FrameInfo;
 use std::fs;
 use std::process::Command;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 fn test_with_logging(size: usize, name: &str) {
     println!("\n============================================================");
     println!("Testing {}x{} - {}", size, size, name);
@@ -39,13 +43,19 @@ fn test_with_logging(size: usize, name: &str) {
     let mut our_output = vec![0u8; 1024 * 1024];
     let our_size = encoder.encode(&pixels, &frame_info, &mut our_output).unwrap();
     
-    let our_file = format!("compare_{}_{}.j2k", size, name);
-    fs::write(&our_file, &our_output[..our_size]).unwrap();
+    let our_file_name = format!("compare_{}_{}.j2k", size, name);
+    let our_file_path = get_test_output_path(&our_file_name);
+    fs::write(&our_file_path, &our_output[..our_size]).unwrap();
     
     // Decode with OpenJPEG
-    let decoded_file = format!("compare_{}_{}_decoded.pnm", size, name);
+    let decoded_file_name = format!("compare_{}_{}_decoded.pnm", size, name);
+    let decoded_file_path = get_test_output_path(&decoded_file_name);
+
     let output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", &our_file, "-o", &decoded_file])
+        .args(&[
+            "-i", our_file_path.to_str().unwrap(),
+            "-o", decoded_file_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to decode");
     
@@ -73,7 +83,7 @@ fn test_with_logging(size: usize, name: &str) {
             data[offset..].to_vec()
         }
         
-        let decoded_data = fs::read(&decoded_file).unwrap();
+        let decoded_data = fs::read(&decoded_file_path).unwrap();
         let decoded_pixels = parse_pnm(&decoded_data);
         
         let mut errors = 0;

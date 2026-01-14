@@ -29,16 +29,18 @@ pub mod image_gen {
             8 => {
                 (0..total_pixels)
                     .map(|i| {
-                        let ratio = i as f64 / total_pixels.max(1) as f64;
-                        (ratio * max_value as f64) as u8
+                        // Use correct scaling to hit 255
+                        let ratio = i as f64 / (total_pixels - 1).max(1) as f64;
+                        (ratio * max_value as f64).round() as u8
                     })
                     .collect()
             }
             16 => {
                 let mut pixels = Vec::with_capacity(total_pixels * 2);
                 for i in 0..total_pixels {
-                    let ratio = i as f64 / total_pixels.max(1) as f64;
-                    let value = (ratio * max_value as f64) as u16;
+                    // Use correct scaling to hit 65535
+                    let ratio = i as f64 / (total_pixels - 1).max(1) as f64;
+                    let value = (ratio * max_value as f64).round() as u16;
                     // Big-endian storage
                     pixels.push((value >> 8) as u8);
                     pixels.push((value & 0xFF) as u8);
@@ -49,8 +51,8 @@ pub mod image_gen {
                 // For 12-bit, store as 16-bit big-endian with upper 12 bits used
                 let mut pixels = Vec::with_capacity(total_pixels * 2);
                 for i in 0..total_pixels {
-                    let ratio = i as f64 / total_pixels.max(1) as f64;
-                    let value = ((ratio * max_value as f64) as u16) & 0x0FFF;
+                    let ratio = i as f64 / (total_pixels - 1).max(1) as f64;
+                    let value = ((ratio * max_value as f64).round() as u16) & 0x0FFF;
                     pixels.push((value >> 8) as u8);
                     pixels.push((value & 0xFF) as u8);
                 }
@@ -282,6 +284,32 @@ pub trait CodecTest {
 
     /// Get codec name for reporting
     fn name(&self) -> &str;
+}
+
+/// Test file management utilities
+pub mod file_io {
+    use std::path::{Path, PathBuf};
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    /// Get path to a test output file, ensuring the directory exists
+    pub fn get_test_output_path(filename: &str) -> PathBuf {
+        let output_dir = Path::new("test_output");
+        
+        // Ensure directory exists (only once per run ideally, but FS check is cheap)
+        INIT.call_once(|| {
+            if !output_dir.exists() {
+                std::fs::create_dir_all(output_dir).expect("Failed to create test_output directory");
+            }
+        });
+        // Still check every time in case it was deleted
+        if !output_dir.exists() {
+             std::fs::create_dir_all(output_dir).expect("Failed to create test_output directory");
+        }
+
+        output_dir.join(filename)
+    }
 }
 
 #[cfg(test)]

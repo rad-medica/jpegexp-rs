@@ -1,5 +1,9 @@
 /// Test solid color encoding to isolate the issue
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 #[ignore]
 fn test_solid_color_level2() {
@@ -32,14 +36,19 @@ fn test_solid_color_level2() {
     let our_size = encoder.encode(&pixels, &frame_info, &mut our_output).unwrap();
     let our_bytes = &our_output[..our_size];
     
-    fs::write("test_solid_ours.j2k", our_bytes).unwrap();
-    fs::write("test_solid_input.raw", &pixels).unwrap();
+    let j2k_path = get_test_output_path("test_solid_ours.j2k");
+    let raw_path = get_test_output_path("test_solid_input.raw");
+    let opj_path = get_test_output_path("test_solid_opj.j2k");
+    let pnm_path = get_test_output_path("test_solid_ours_decoded.pnm");
+
+    fs::write(&j2k_path, our_bytes).unwrap();
+    fs::write(&raw_path, &pixels).unwrap();
     
     // Encode with OpenJPEG
     let status = Command::new("libs/bin/opj_compress.exe")
         .args(&[
-            "-i", "test_solid_input.raw",
-            "-o", "test_solid_opj.j2k",
+            "-i", raw_path.to_str().unwrap(),
+            "-o", opj_path.to_str().unwrap(),
             "-n", "3",
             "-r", "1",
             "-F", "64,64,1,8,u",
@@ -54,7 +63,10 @@ fn test_solid_color_level2() {
     
     // Decode our file with OpenJPEG
     let output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", "test_solid_ours.j2k", "-o", "test_solid_ours_decoded.pnm"])
+        .args(&[
+            "-i", j2k_path.to_str().unwrap(),
+            "-o", pnm_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to decode");
     
@@ -88,7 +100,7 @@ fn test_solid_color_level2() {
         data[offset..].to_vec()
     }
     
-    let decoded_data = fs::read("test_solid_ours_decoded.pnm").unwrap();
+    let decoded_data = fs::read(&pnm_path).unwrap();
     let decoded_pixels = parse_pnm(&decoded_data);
     
     let mut errors = 0;
@@ -111,5 +123,5 @@ fn test_solid_color_level2() {
     
     println!("File sizes: Ours={}B, OpenJPEG={}B", 
              our_size, 
-             fs::metadata("test_solid_opj.j2k").unwrap().len());
+             fs::metadata(&opj_path).unwrap().len());
 }

@@ -1039,12 +1039,9 @@ impl J2kEncoder {
                             let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
                             let max_bp_opt = bpc.calculate_max_bit_plane();
 
-                            if std::env::var("J2K_CBLK_DETAIL").is_ok() && (max_bp_opt.is_some() || has_nonzero) {
+                            // Force debug printing for analysis
+                            if true {
                                 let max_abs = block_data.iter().map(|&v| v.abs()).max().unwrap_or(0);
-                                eprintln!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}", 
-                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs, 
-                                    if block_data.len() <= 16 { block_data.clone() } else { block_data[..16].to_vec() });
-                                // Also print to stdout for test capture
                                 println!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}", 
                                     res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs, 
                                     if block_data.len() <= 16 { block_data.clone() } else { block_data[..16].to_vec() });
@@ -1255,9 +1252,9 @@ impl J2kEncoder {
         res: usize,
     ) -> (usize, usize) {
         // Number of DWT reductions applied to get to this resolution
-        // res=0 means 1 reduction (full decomposition to LL)
-        // res=1 means 2 reductions (LL of LL), etc.
-        let reductions = res + 1;
+        // res=0 means N reductions (deepest LL)
+        // res=N means 0 reductions (original size)
+        let reductions = num_levels.saturating_sub(res);
         let mut w = width;
         let mut h = height;
         for _ in 0..reductions {
@@ -1301,57 +1298,35 @@ impl J2kEncoder {
         }
 
         // For higher resolutions, extract HL, LH, or HH
-        // Get the LL size at resolution 0 (full decomposition LL) for positioning
-        let (ll_w, ll_h) = self.get_ll_size(width, height, num_levels, 0);
-        // Get the current LL size at resolution res (not used, but kept for reference)
-        let _current_ll_size = self.get_ll_size(width, height, num_levels, res);
+        let (ref_w, ref_h) = self.get_ll_size(width, height, num_levels, res - 1);
+        let (target_w, target_h) = self.get_ll_size(width, height, num_levels, res);
 
-        // The DWT coefficients are stored in the ORIGINAL image dimensions
-        // At res=0: LL occupies ll_w x ll_h at (0, 0)
-        // At res=1+: The current resolution's LL is smaller, but we extract HL/LH/HH
-        // based on the original ll_w/ll_h positions
-        
-        // Extract subbands from the full image at original dimensions
-        // HL: extracted from (ll_w, 0) with size (width - ll_w, ll_h)
-        // LH: extracted from (0, ll_h) with size (ll_w, height - ll_h)
-        // HH: extracted from (ll_w, ll_h) with size (width - ll_w, height - ll_h)
         let (sb_w, sb_h, start_x, start_y) = match sb_idx {
             0 => {
-                // HL (right of LL)
-                let w = width.saturating_sub(ll_w);
-                let h = ll_h;
-                (w, h, ll_w, 0)
+                // HL
+                let w = target_w.saturating_sub(ref_w);
+                let h = ref_h;
+                (w, h, ref_w, 0)
             }
             1 => {
-                // LH (below LL)
-                let w = ll_w;
-                let h = height.saturating_sub(ll_h);
-                (w, h, 0, ll_h)
+                // LH
+                let w = ref_w;
+                let h = target_h.saturating_sub(ref_h);
+                (w, h, 0, ref_h)
             }
             2 => {
-                // HH (diagonal)
-                let w = width.saturating_sub(ll_w);
-                let h = height.saturating_sub(ll_h);
-                (w, h, ll_w, ll_h)
+                // HH
+                let w = target_w.saturating_sub(ref_w);
+                let h = target_h.saturating_sub(ref_h);
+                (w, h, ref_w, ref_h)
             }
             _ => (0, 0, 0, 0),
         };
 
         if std::env::var("J2K_EXTRACT_DEBUG").is_ok() {
-            eprintln!("[EXTRACT] res={}, sb_idx={}, width={}, height={}, ll_size={}x{}, region={}x{} at ({}, {})",
-                res, sb_idx, width, height, ll_w, ll_h, sb_w, sb_h, start_x, start_y);
-            
-            // Print first few coefficients
-            let sample_count = sb_w * sb_h.min(5);
-            let samples: Vec<i32> = (0..sample_count.min(20)).map(|i| {
-                let y = i / sb_w;
-                let x = i % sb_w;
-                let src_idx = (start_y + y) * width + (start_x + x);
-                coeffs.get(src_idx).copied().unwrap_or(0)
-            }).collect();
-            eprintln!("[EXTRACT_SAMPLES] res={}, sb={}, first_samples={:?}", res, sb_idx, &samples[..samples.len().min(10)]);
+            eprintln!("[EXTRACT] res={}, sb_idx={}, ref={}x{}, target={}x{}, region={}x{} at ({}, {})",
+                res, sb_idx, ref_w, ref_h, target_w, target_h, sb_w, sb_h, start_x, start_y);
         }
-
 
         let mut sb_coeffs = Vec::with_capacity(sb_w * sb_h);
         for y in 0..sb_h {
@@ -1367,26 +1342,10 @@ impl J2kEncoder {
             }
         }
 
-        if std::env::var("J2K_EXTRACT_DEBUG").is_ok() && sb_idx == 0 {
-            let sample_positions = [
-                (0, 0),
-                (1, 0), 
-                (sb_w.saturating_sub(2), 0),
-                (sb_w.saturating_sub(1), 0),
-            ];
-            let samples: Vec<_> = sample_positions.iter()
-                .filter(|(x, y)| *x < sb_w && *y < sb_h)
-                .map(|(x, y)| {
-                    let src_idx = (start_y + y) * width + (start_x + x);
-                    let val = coeffs.get(src_idx).copied().unwrap_or(9999);
-                    (src_idx, val)
-                })
-                .collect();
-            eprintln!("[EXTRACT_SAMPLES] res={}, sb={}, samples={:?}", res, sb_idx, samples);
-        }
-
         (sb_coeffs, sb_w, sb_h)
     }
+
+
 }
 
 impl Default for J2kEncoder {

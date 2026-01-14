@@ -2,6 +2,10 @@
 //!
 //! Tests that files encoded by jpegexp-rs can be decoded by OpenJPEG and vice versa.
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -186,14 +190,17 @@ fn test_openjpeg_can_decode_our_lossless() {
     println!("Encoded 8x8 image to {} bytes", encoded_len);
     
     // Write J2K file
-    std::fs::write("tests/fixtures/openjpeg/test_lossless.j2k", &encoded)
+    let j2k_path = get_test_output_path("test_lossless.j2k");
+    let pgm_path = get_test_output_path("test_lossless_opj.pgm");
+
+    std::fs::write(&j2k_path, &encoded)
         .expect("Failed to write J2K");
     
     // Decode with OpenJPEG
     let output = Command::new(OPJ_DECOMPRESS)
         .args([
-            "-i", "tests/fixtures/openjpeg/test_lossless.j2k",
-            "-o", "tests/fixtures/openjpeg/test_lossless_opj.pgm",
+            "-i", j2k_path.to_str().unwrap(),
+            "-o", pgm_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run opj_decompress");
@@ -213,7 +220,7 @@ fn test_openjpeg_can_decode_our_lossless() {
     }
     
     // Read OpenJPEG output and compare
-    let pgm_data = std::fs::read("tests/fixtures/openjpeg/test_lossless_opj.pgm")
+    let pgm_data = std::fs::read(&pgm_path)
         .expect("Failed to read PGM");
     
     // Parse PGM - safer method: take last width*height bytes
@@ -244,8 +251,8 @@ fn test_openjpeg_can_decode_our_lossless() {
     assert_eq!(mae, 0.0, "OpenJPEG decode should be lossless, MAE={}", mae);
     
     // Cleanup
-    let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_lossless.j2k");
-    let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_lossless_opj.pgm");
+    // let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_lossless.j2k");
+    // let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_lossless_opj.pgm");
 }
 
 #[test]
@@ -281,11 +288,16 @@ fn test_openjpeg_large_image() {
         .expect("Encoding failed");
     encoded.truncate(encoded_len);
     
-    let path = "tests/fixtures/openjpeg/test_large.j2k";
-    std::fs::write(path, &encoded).expect("Failed to write J2K");
+    let path = get_test_output_path("test_large.j2k");
+    let pgm_path = get_test_output_path("test_large_opj.pgm");
+
+    std::fs::write(&path, &encoded).expect("Failed to write J2K");
     
     let output = Command::new(OPJ_DECOMPRESS)
-        .args(["-i", path, "-o", "tests/fixtures/openjpeg/test_large_opj.pgm"])
+        .args([
+            "-i", path.to_str().unwrap(),
+            "-o", pgm_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to run opj_decompress");
         
@@ -295,7 +307,7 @@ fn test_openjpeg_large_image() {
     }
     
     // Check MAE
-    let pgm_data = std::fs::read("tests/fixtures/openjpeg/test_large_opj.pgm")
+    let pgm_data = std::fs::read(&pgm_path)
         .expect("Failed to read PGM");
     
     // PGM P5 header parser
@@ -317,8 +329,8 @@ fn test_openjpeg_large_image() {
     println!("OpenJPEG decoded large image successfully");
     
     // Cleanup
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_large_opj.pgm");
+    // let _ = std::fs::remove_file(path);
+    // let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_large_opj.pgm");
 }
 
 #[test]
@@ -356,11 +368,16 @@ fn test_openjpeg_color() {
         .expect("Encoding failed");
     encoded.truncate(encoded_len);
     
-    let path = "tests/fixtures/openjpeg/test_color.j2k";
-    std::fs::write(path, &encoded).expect("Failed to write J2K");
+    let path = get_test_output_path("test_color.j2k");
+    let ppm_path = get_test_output_path("test_color_opj.ppm");
+
+    std::fs::write(&path, &encoded).expect("Failed to write J2K");
     
     let output = Command::new(OPJ_DECOMPRESS)
-        .args(["-i", path, "-o", "tests/fixtures/openjpeg/test_color_opj.ppm"])
+        .args([
+            "-i", path.to_str().unwrap(),
+            "-o", ppm_path.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to run opj_decompress");
         
@@ -372,8 +389,8 @@ fn test_openjpeg_color() {
     println!("OpenJPEG decoded color image successfully");
     
     // Cleanup
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_color_opj.ppm");
+    // let _ = std::fs::remove_file(path);
+    // let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_color_opj.ppm");
 }
 
 
@@ -397,15 +414,18 @@ fn test_we_can_decode_openjpeg_lossless() {
     }
     
     // Write as PGM for OpenJPEG
-    create_pgm("tests/fixtures/openjpeg/test_src.pgm", width, height, &original)
+    let src_pgm = get_test_output_path("test_src.pgm");
+    let opj_j2k = get_test_output_path("test_opj_lossless.j2k");
+
+    create_pgm(src_pgm.to_str().unwrap(), width, height, &original)
         .expect("Failed to create PGM");
     
     // Encode with OpenJPEG (lossless - reversible = no -I flag)
     // Also use minimal decomposition levels
     let output = Command::new(OPJ_COMPRESS)
         .args([
-            "-i", "tests/fixtures/openjpeg/test_src.pgm",
-            "-o", "tests/fixtures/openjpeg/test_opj_lossless.j2k",
+            "-i", src_pgm.to_str().unwrap(),
+            "-o", opj_j2k.to_str().unwrap(),
             "-n", "3", // 2 decomposition levels = 3 resolutions
         ])
         .output()
@@ -417,7 +437,7 @@ fn test_we_can_decode_openjpeg_lossless() {
     assert!(output.status.success(), "OpenJPEG failed to encode");
     
     // Decode with jpegexp-rs
-    let j2k_data = std::fs::read("tests/fixtures/openjpeg/test_opj_lossless.j2k")
+    let j2k_data = std::fs::read(&opj_j2k)
         .expect("Failed to read J2K");
     
     println!("OpenJPEG encoded {} bytes", j2k_data.len());
@@ -451,8 +471,8 @@ fn test_we_can_decode_openjpeg_lossless() {
     }
     
     // Cleanup
-    let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_src.pgm");
-    let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_opj_lossless.j2k");
+    // let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_src.pgm");
+    // let _ = std::fs::remove_file("tests/fixtures/openjpeg/test_opj_lossless.j2k");
 }
 
 #[test]

@@ -11,6 +11,10 @@ use jpegexp_rs::FrameInfo;
 use std::fs;
 use std::process::Command;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 #[ignore]
 fn compare_packet_structure_with_openjpeg() {
@@ -43,13 +47,19 @@ fn compare_packet_structure_with_openjpeg() {
     let our_size = encoder.encode(&pixels, &frame_info, &mut our_output).unwrap();
     let our_bytes = &our_output[..our_size];
     
-    fs::write("compare_ours.j2k", our_bytes).unwrap();
-    fs::write("compare_input.raw", &pixels).unwrap();
+    let j2k_path = get_test_output_path("compare_ours.j2k");
+    let raw_path = get_test_output_path("compare_input.raw");
+    let opj_path = get_test_output_path("compare_opj.j2k");
+    let our_pgm_path = get_test_output_path("compare_ours_decoded.pgm");
+    let opj_pgm_path = get_test_output_path("compare_opj_decoded.pgm");
+
+    fs::write(&j2k_path, our_bytes).unwrap();
+    fs::write(&raw_path, &pixels).unwrap();
     
     let status = Command::new("libs/bin/opj_compress.exe")
         .args(&[
-            "-i", "compare_input.raw",
-            "-o", "compare_opj.j2k",
+            "-i", raw_path.to_str().unwrap(),
+            "-o", opj_path.to_str().unwrap(),
             "-n", &format!("{}", levels + 1),
             "-r", "1",
             "-F", &format!("{},{},1,8,u", width, height),
@@ -63,7 +73,7 @@ fn compare_packet_structure_with_openjpeg() {
         return;
     }
     
-    let opj_bytes = fs::read("compare_opj.j2k").unwrap();
+    let opj_bytes = fs::read(&opj_path).unwrap();
     
     println!("File Sizes:");
     println!("  Ours:     {} bytes", our_size);
@@ -79,11 +89,17 @@ fn compare_packet_structure_with_openjpeg() {
     println!("\nDecoding both files...");
     
     let _ = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", "compare_ours.j2k", "-o", "compare_ours_decoded.pgm"])
+        .args(&[
+            "-i", j2k_path.to_str().unwrap(),
+            "-o", our_pgm_path.to_str().unwrap()
+        ])
         .output();
     
     let _ = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", "compare_opj.j2k", "-o", "compare_opj_decoded.pgm"])
+        .args(&[
+            "-i", opj_path.to_str().unwrap(),
+            "-o", opj_pgm_path.to_str().unwrap()
+        ])
         .output();
 }
 

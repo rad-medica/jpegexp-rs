@@ -52,6 +52,7 @@ dmypy.json
 *.ipynb_checkpoints/
 
 # Test Artifacts
+test_output/
 tests/output/*
 tests/fixtures/out/*
 !tests/fixtures/out/.gitkeep

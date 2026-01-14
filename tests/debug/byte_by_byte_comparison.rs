@@ -3,6 +3,10 @@ use jpegexp_rs::FrameInfo;
 use std::fs;
 use std::process::Command;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 #[test]
 #[ignore]
 fn byte_by_byte_comparison_level2() {
@@ -33,13 +37,17 @@ fn byte_by_byte_comparison_level2() {
     let our_size = encoder.encode(&pixels, &frame_info, &mut our_output).unwrap();
     let our_bytes = &our_output[..our_size];
     
-    fs::write("bytecmp_ours.j2k", our_bytes).unwrap();
-    fs::write("bytecmp_input.raw", &pixels).unwrap();
+    let j2k_path = get_test_output_path("bytecmp_ours.j2k");
+    let raw_path = get_test_output_path("bytecmp_input.raw");
+    let opj_path = get_test_output_path("bytecmp_opj.j2k");
+
+    fs::write(&j2k_path, our_bytes).unwrap();
+    fs::write(&raw_path, &pixels).unwrap();
     
     let status = Command::new("libs/bin/opj_compress.exe")
         .args(&[
-            "-i", "bytecmp_input.raw",
-            "-o", "bytecmp_opj.j2k",
+            "-i", raw_path.to_str().unwrap(),
+            "-o", opj_path.to_str().unwrap(),
             "-n", "3",
             "-r", "1",
             "-F", "64,64,1,8,u",
@@ -50,7 +58,7 @@ fn byte_by_byte_comparison_level2() {
     
     assert!(status.success());
     
-    let opj_bytes = fs::read("bytecmp_opj.j2k").unwrap();
+    let opj_bytes = fs::read(&opj_path).unwrap();
     
     println!("Our size:     {} bytes", our_size);
     println!("OpenJPEG size: {} bytes", opj_bytes.len());

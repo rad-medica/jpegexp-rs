@@ -4,6 +4,10 @@ use jpegexp_rs::FrameInfo;
 use std::fs;
 use std::process::Command;
 
+#[path = "../common/mod.rs"]
+mod common;
+use common::file_io::get_test_output_path;
+
 fn test_16bit_size(size: usize) -> f64 {
     let mut pixels = vec![0u8; size * size * 2];
     
@@ -33,12 +37,20 @@ fn test_16bit_size(size: usize) -> f64 {
     let output_size = encoder.encode(&pixels, &frame_info, &mut output).unwrap();
     
     let filename = format!("test_16bit_{}x{}.j2k", size, size);
-    fs::write(&filename, &output[..output_size]).unwrap();
+    let output_path = get_test_output_path(&filename);
+    
+    fs::write(&output_path, &output[..output_size]).unwrap();
     
     // Decode with OpenJPEG
     let raw_file = format!("test_16bit_{}x{}.raw", size, size);
+    let raw_path = get_test_output_path(&raw_file);
+
     let result = Command::new("libs/bin/opj_decompress.exe")
-        .args(&["-i", &filename, "-o", &raw_file, "-r", "0"])
+        .args(&[
+            "-i", output_path.to_str().unwrap(),
+            "-o", raw_path.to_str().unwrap(),
+            "-r", "0"
+        ])
         .output()
         .expect("OpenJPEG failed");
     
@@ -50,7 +62,7 @@ fn test_16bit_size(size: usize) -> f64 {
     }
     
     // Read decoded data
-    let decoded_bytes = fs::read(&raw_file).expect("Read decoded failed");
+    let decoded_bytes = fs::read(&raw_path).expect("Read decoded failed");
     let decoded: Vec<u16> = decoded_bytes
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
