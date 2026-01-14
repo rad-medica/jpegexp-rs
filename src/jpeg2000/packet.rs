@@ -58,6 +58,7 @@ pub struct CodeBlockInfo {
     pub num_passes: u8,
     pub data_len: u32,
     pub zero_bp: u8,
+    pub numlenbits: u8,
 }
 
 impl PacketHeader {
@@ -166,6 +167,7 @@ impl PacketHeader {
                             num_passes,
                             data_len,
                             zero_bp,
+                            numlenbits: 3,
                         });
                     }
                 }
@@ -205,7 +207,8 @@ impl PacketHeader {
             }
             return Ok(result);
         }
-        let bits2 = reader.read_bits(5)?;
+        // 37-164 passes: read 7 more bits
+        let bits2 = reader.read_bits(7)?;
         let result = (37 + bits2) as u8;
         if std::env::var("J2K_DEBUG").is_ok() {
             eprintln!("    DECODE num_passes: {}", result);
@@ -215,39 +218,68 @@ impl PacketHeader {
 
     /// Writes the number of coding passes using J2K codeword table (Table B.4).
     fn write_coding_passes(writer: &mut crate::jpeg2000::bit_io::J2kBitWriter, passes: u8) {
+        if std::env::var("J2K_PKT_TRACE").is_ok() {
+            eprint!("[PKT] Write passes({}): ", passes);
+        }
         match passes {
-            1 => writer.write_bit(0),
+            1 => {
+                writer.write_bit(0);
+                if std::env::var("J2K_PKT_TRACE").is_ok() {
+                    eprintln!("0");
+                }
+            }
             2 => {
                 writer.write_bit(1);
                 writer.write_bit(0);
+                if std::env::var("J2K_PKT_TRACE").is_ok() {
+                    eprintln!("10");
+                }
             }
             3..=5 => {
                 writer.write_bit(1);
                 writer.write_bit(1);
                 writer.write_bits((passes - 3) as u32, 2);
+                if std::env::var("J2K_PKT_TRACE").is_ok() {
+                    eprintln!("11 + {:02b}", passes - 3);
+                }
             }
             6..=36 => {
                 writer.write_bit(1);
                 writer.write_bit(1);
                 writer.write_bits(3, 2);
                 writer.write_bits((passes - 6) as u32, 5);
+                if std::env::var("J2K_PKT_TRACE").is_ok() {
+                    eprintln!("1111 + {:05b}", passes - 6);
+                }
             }
             _ => {
+                // 37-164 passes: write 16 bits total (9-bit prefix + 7-bit suffix)
+                // Prefix: 1111 1111 1 (0xff80 >> 7 = 0x1ff)
+                // Suffix: 7 bits for (passes - 37)
                 writer.write_bit(1);
                 writer.write_bit(1);
                 writer.write_bits(3, 2);
                 writer.write_bits(31, 5);
-                writer.write_bits((passes - 37) as u32, 5);
+                writer.write_bits((passes - 37) as u32, 7);
+                if std::env::var("J2K_PKT_TRACE").is_ok() {
+                    eprintln!("1111 11111 + {:07b}", passes - 37);
+                }
             }
         }
     }
 
     /// Writes a comma code (n ones followed by a zero)
     fn write_comma_code(writer: &mut crate::jpeg2000::bit_io::J2kBitWriter, n: i32) {
+        if std::env::var("J2K_PKT_TRACE").is_ok() {
+            eprint!("[PKT] Write comma_code({}): ", n);
+        }
         for _ in 0..n {
             writer.write_bit(1);
         }
         writer.write_bit(0);
+        if std::env::var("J2K_PKT_TRACE").is_ok() {
+            eprintln!("{}", "1".repeat(n as usize) + "0");
+        }
     }
 
     /// Reads a comma code (sequence of ones terminated by a zero)
@@ -304,6 +336,12 @@ impl PacketHeader {
 
                     if included {
                         let cb = cb_info.unwrap();
+                        
+                        if std::env::var("J2K_PKT_DEBUG").is_ok() {
+                            eprintln!("[PKT] Subband {} CB({},{}) included: num_passes={}, zero_bp={}, data_len={}, numlenbits={}", 
+                                      s, x, y, cb.num_passes, cb.zero_bp, cb.data_len, cb.numlenbits);
+                        }
+                        
                         subband_state
                             .inclusion_tree
                             .set_value(x, y, self.layer_index as i32);
@@ -312,38 +350,39 @@ impl PacketHeader {
                         subband_state
                             .zero_bp_tree
                             .set_value(x, y, cb.zero_bp as i32);
+                        // OpenJPEG uses threshold 999 to encode the full value
                         subband_state
                             .zero_bp_tree
-                            .encode(writer, x, y, cb.zero_bp as i32 + 1);
+                            .encode(writer, x, y, 999);
 
                         Self::write_coding_passes(writer, cb.num_passes);
 
-                        // Calculate lblock using OpenJPEG formula
-                        // increment = floor(log2(len)) + 1 - (numlenbits + floor(log2(nump)))
-                        // Where numlenbits starts at 3 for first inclusion
-
-                        // floor(log2(n)) = 31 - leading_zeros(n) for n > 0
                         let bits_needed = if cb.data_len > 0 {
-                            // floor(log2(data_len)) + 1
                             (32 - cb.data_len.leading_zeros()) as i32
                         } else {
-                            1 // log2(0) is undefined, but we need at least 1 bit
+                            1
                         };
 
                         let log2_passes = if cb.num_passes > 0 {
-                            // floor(log2(num_passes))
                             (31 - (cb.num_passes as u32).leading_zeros()) as i32
                         } else {
                             0
                         };
 
-                        // Start with numlenbits = 3 (OpenJPEG default for first inclusion)
-                        let numlenbits = 3;
+                        let numlenbits = cb.numlenbits as i32;
                         let increment = (bits_needed - numlenbits - log2_passes).max(0);
                         let lblock = numlenbits + increment;
                         let lbits = lblock + log2_passes;
 
+                        #[cfg(feature = "trace_packet_header")]
+                        eprintln!("[PKT]   bits_needed={}, log2_passes={}, increment={}, lblock={}, lbits={}", 
+                                  bits_needed, log2_passes, increment, lblock, lbits);
+
                         Self::write_comma_code(writer, increment);
+                        if std::env::var("J2K_PKT_TRACE").is_ok() {
+                            eprintln!("[PKT] Write data_len: {} in {} bits = {:0width$b}", 
+                                     cb.data_len, lbits, cb.data_len, width = lbits as usize);
+                        }
                         writer.write_bits(cb.data_len, lbits as u8);
                     } else {
                         subband_state.inclusion_tree.set_value(x, y, threshold + 1);
@@ -375,6 +414,7 @@ mod tests {
             num_passes: 3,
             data_len: 15,
             zero_bp: 3,
+            numlenbits: 3,
         });
         header.included_cblks.push(CodeBlockInfo {
             x: 0,
@@ -384,6 +424,7 @@ mod tests {
             num_passes: 1,
             data_len: 31,
             zero_bp: 0,
+            numlenbits: 3,
         });
         header.included_cblks.push(CodeBlockInfo {
             x: 0,
@@ -393,6 +434,7 @@ mod tests {
             num_passes: 1,
             data_len: 7,
             zero_bp: 0,
+            numlenbits: 3,
         });
         let mut writer = crate::jpeg2000::bit_io::J2kBitWriter::new();
         let mut state_enc = PrecinctState::new(1, 1);

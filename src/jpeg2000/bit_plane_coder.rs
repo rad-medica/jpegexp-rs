@@ -302,10 +302,17 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     fn encode_cleanup(&mut self, bp: u8, orient: u8) {
+        let trace = std::env::var("BPC_CLEANUP_TRACE").is_ok();
+        if trace {
+            eprintln!("[CLEANUP] bp={}, orient={}, size={}x{}", bp, orient, self.width, self.height);
+        }
         for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 // Check if we can use RLC (Run-Length Coding)
                 let stripe_height = (y_stripe + 4).min(self.height) - y_stripe;
+                if trace && stripe_height != 4 {
+                    eprintln!("[CLEANUP]   Partial stripe at y={}, height={}", y_stripe, stripe_height);
+                }
                 let mut all_insignificant = true;
                 let mut all_no_neighbors = true;
 
@@ -324,6 +331,9 @@ impl<'a> BitPlaneCoder<'a> {
 
                 // Use RLC if all 4 pixels are insignificant with no significant neighbors
                 if stripe_height == 4 && all_insignificant && all_no_neighbors {
+                    if trace {
+                        eprintln!("[CLEANUP]   x={}, y_stripe={}: Using RLC", x, y_stripe);
+                    }
                     // Find first significant pixel (runlen)
                     let mut runlen = 4u8;
                     for i in 0..4 {
@@ -339,6 +349,9 @@ impl<'a> BitPlaneCoder<'a> {
 
                     // Encode aggregate bit (AGG context 17)
                     self.mq.encode((runlen != 4) as u8, 17);
+                    if trace {
+                        eprintln!("[CLEANUP]     runlen={}, agg_bit={}", runlen, (runlen != 4) as u8);
+                    }
 
                     if runlen < 4 {
                         // Encode runlen using 2 bits (UNI context 18)
@@ -376,6 +389,12 @@ impl<'a> BitPlaneCoder<'a> {
                         }
                     }
                 } else {
+                    if trace && stripe_height != 4 {
+                        eprintln!("[CLEANUP]   x={}, y_stripe={}: NO RLC (partial stripe, height={})", 
+                                  x, y_stripe, stripe_height);
+                    } else if trace {
+                        eprintln!("[CLEANUP]   x={}, y_stripe={}: NO RLC (has neighbors or already sig)", x, y_stripe);
+                    }
                     // No RLC - encode each pixel normally
                     for y in y_stripe..(y_stripe + 4).min(self.height) {
                         let idx = (y * self.width + x) as usize;
@@ -618,7 +637,7 @@ mod tests {
     fn test_bpc_roundtrip() {
         let data = [0, 1, 2, 3, 4, 5, 6, 7];
         let mut bpc = BitPlaneCoder::new(8, 1, &data);
-        let passes = bpc.encode_codeblock(3, 0);
+        let passes = bpc.encode_codeblock(3, 0, 0);
         bpc.mq.flush();
         let buf = bpc.mq.get_buffer().to_vec();
         let mut dec = BitPlaneCoder::new(8, 1, &[]);
@@ -633,7 +652,7 @@ mod tests {
         let mut bpc = BitPlaneCoder::new(8, 1, &data);
         let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
         println!("Encoding constant 7s with max_bp={}", max_bp);
-        let passes = bpc.encode_codeblock(max_bp, 0);
+        let passes = bpc.encode_codeblock(max_bp, 0, 0);
         bpc.mq.flush();
         let buf = bpc.mq.get_buffer().to_vec();
         println!("Encoded to {} bytes, {} passes", buf.len(), passes);
@@ -655,7 +674,7 @@ mod tests {
         let mut bpc = BitPlaneCoder::new(width as u32, height as u32, &data);
         let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
         println!("Encoding 8x8 constant 255s with max_bp={}", max_bp);
-        let passes = bpc.encode_codeblock(max_bp, 0);
+        let passes = bpc.encode_codeblock(max_bp, 0, 0);
         bpc.mq.flush();
         let buf = bpc.mq.get_buffer().to_vec();
         println!("Encoded to {} bytes, {} passes", buf.len(), passes);
@@ -686,7 +705,7 @@ mod tests {
         let mut bpc = BitPlaneCoder::new(width as u32, height as u32, &data);
         let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
         println!("Encoding 16x16 constant 255s with max_bp={}", max_bp);
-        let passes = bpc.encode_codeblock(max_bp, 0);
+        let passes = bpc.encode_codeblock(max_bp, 0, 0);
         bpc.mq.flush();
         let buf = bpc.mq.get_buffer().to_vec();
         println!("Encoded to {} bytes, {} passes", buf.len(), passes);
@@ -719,7 +738,7 @@ mod tests {
 
             let mut bpc = BitPlaneCoder::new(width as u32, height as u32, &data);
             let max_bp = bpc.calculate_max_bit_plane().expect("Should have max_bp");
-            let passes = bpc.encode_codeblock(max_bp, 0);
+            let passes = bpc.encode_codeblock(max_bp, 0, 0);
             bpc.mq.flush();
             let buf = bpc.mq.get_buffer().to_vec();
 
@@ -766,7 +785,7 @@ mod tests {
             .expect("Should have max_bp for 8190");
         println!("max_bp for 8190: {}", max_bp);
 
-        let passes = bpc.encode_codeblock(max_bp, 3);
+        let passes = bpc.encode_codeblock(max_bp, 3, 0);
         bpc.mq.flush();
         let encoded = bpc.mq.get_buffer().to_vec();
         println!(
