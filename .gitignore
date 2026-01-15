@@ -9,7 +9,9 @@
 # Rust
 /target/
 /target_build/
+python/target
 **/*.rs.bk
+**./*.rs.bak
 
 # Python
 __pycache__/

@@ -473,7 +473,9 @@ impl J2kEncoder {
                             // Assume Little Endian input for 16-bit
                             let b0 = pixels[idx] as i32;
                             let b1 = pixels[idx + 1] as i32;
-                            (b1 << 8) | b0
+                            let raw = (b1 << 8) | b0;
+                            // Mask to actual bit depth (e.g., 10-bit: & 0x3FF, 12-bit: & 0xFFF)
+                            raw & ((1 << depth) - 1)
                         } else {
                             pixels[i * components + c] as i32
                         };
