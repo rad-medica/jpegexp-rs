@@ -71,6 +71,13 @@ jpegexp-rs/
 - **NEVER commit without MAE=0** for lossless modes - validates perfect interoperability
 - **DO NOT use JPEG 2000 for production** until gradient/noise bugs fixed (current status: 36% pass rate)
 
+### Documentation Requirements
+- **ALWAYS update documentation BEFORE commit** if code or test results change
+- **ALWAYS update affected AGENTS.md** when changing rules, conventions, or module behavior
+- **NEVER create duplicate documentation** - update existing files (e.g., append to INTEROP_REPORT.md, not create new reports)
+- **NEVER delete unrelated information** - only modify sections directly affected by code changes
+- **AVOID documentation bloat** - don't add redundant TODOs if existing ones cover the same issue
+
 ### Known Issues
 - **HTJ2K Decoder**: Experimental/broken (4 tests failing with pixel reconstruction errors)
 - **J2K Complex Patterns**: >8-bit depths fail for gradients/noise (solid patterns work perfectly after bit depth masking fix)
@@ -123,7 +130,7 @@ cargo run --bin jpegexp -- --help
 
 ### Recent Fixes
 - **2026-01-15**: Added bit depth masking to J2K encoder - fixed solid pattern MAE from ~250-10000 to 0.0
-- **Hypothesis**: Remaining J2K failures likely in quantization step size calculation for >8-bit
+- **Investigation Status (2026-01-15)**: J2K complex pattern failures at >8-bit are NOT in quantization formulas (encoder/decoder both use depth correctly, QCD marker writing/parsing verified correct). Next hypothesis: bit-plane coder may be truncating coefficients for >8-bit depths
 
 ### Dependencies
 - `num_enum`: Type-safe marker enums
