@@ -477,6 +477,13 @@ fn run_jpegls_test(
     near_lossless: i32,
     suite: &mut TestSuite,
 ) {
+    // NOTE: CharLS CLI tool only supports lossless encoding.
+    // Near-lossless (NEAR > 0) is not supported via CLI.
+    // Skip near-lossless interop tests with CharLS.
+    if near_lossless > 0 {
+        return;
+    }
+
     let charls_bin = match find_binary("charls") {
         Some(b) => b,
         None => {
@@ -615,13 +622,8 @@ fn run_jpegls_test(
             return;
         }
 
-        // Encode with CharLS
-        let mut args = vec!["-encodepnm", temp_pnm, temp_jls];
-        let near_str;
-        if near_lossless > 0 {
-            near_str = near_lossless.to_string();
-            args.extend(["-near_lossless", &near_str]);
-        }
+        // Encode with CharLS (lossless only - CLI doesn't support NEAR parameter)
+        let args = vec!["-encodepnm", temp_pnm, temp_jls];
 
         let start_enc = Instant::now();
         let output = Command::new(&charls_bin).args(&args).output();
