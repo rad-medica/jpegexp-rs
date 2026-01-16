@@ -292,17 +292,11 @@ impl<'a> JpegBitWriter<'a> {
     }
 }
 
+#[derive(Default)]
 pub struct HuffmanEncoder {
     pub dc_previous_value: [i16; 4],
 }
 
-impl Default for HuffmanEncoder {
-    fn default() -> Self {
-        Self {
-            dc_previous_value: [0; 4],
-        }
-    }
-}
 
 impl HuffmanEncoder {
     pub fn new() -> Self {
@@ -656,7 +650,7 @@ fn build_limited_length_codes(freq_list: &[(usize, u8)], max_len: usize) -> Vec<
 /// Generate JPEG Huffman table specification (lengths and values arrays)
 fn generate_huffman_spec(code_lengths: &[(u8, u8)]) -> (Vec<u8>, Vec<u8>) {
     // Count symbols at each code length
-    let mut bit_len_count = vec![0usize; 17]; // Index 0 unused, 1-16 for code lengths
+    let mut bit_len_count = [0usize; 17]; // Index 0 unused, 1-16 for code lengths
     for &(_, len) in code_lengths {
         if len > 0 && (len as usize) <= 16 {
             bit_len_count[len as usize] += 1;

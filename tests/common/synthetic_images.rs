@@ -6,7 +6,6 @@
 //! - Color modes (grayscale, RGB)
 //! - Resolutions and aspect ratios
 
-use std::collections::HashMap;
 
 /// Image pattern types for testing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

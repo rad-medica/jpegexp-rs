@@ -32,7 +32,7 @@ use jpegexp_rs::FrameInfo;
 mod synthetic_images;
 
 use synthetic_images::{
-    Dimensions, Pattern, SyntheticImage, SyntheticImageConfig, SyntheticImageGenerator, TestPresets,
+    SyntheticImage, TestPresets,
 };
 
 // ============================================================================
@@ -374,7 +374,7 @@ fn calculate_metrics(original: &[u8], decoded: &[u8], bit_depth: u32) -> (f64, u
             let d = u16::from_ne_bytes([decoded[i * 2], decoded[i * 2 + 1]]) as i32;
             let diff = (o - d).abs() as u32;
             sum_abs_error += diff as u64;
-            sum_sq_error += (diff as u64 * diff as u64);
+            sum_sq_error += diff as u64 * diff as u64;
             max_error = max_error.max(diff);
         }
 

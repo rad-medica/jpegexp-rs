@@ -88,7 +88,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
 
         match orientation {
-            0 | 1 | 2 => {
+            0..=2 => {
                 // LL, HL, LH - All use same logic after potential h/v swap for LH
                 // This matches OpenJPEG's t1_generate_luts.c lines 64-90
                 if h == 0 {

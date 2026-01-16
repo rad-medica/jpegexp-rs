@@ -33,11 +33,10 @@ impl<'a, 'b> J2kParser<'a, 'b> {
             // Read next marker (FFxx)
             self.reader.align_to_byte();
 
-            if self.reader.remaining_data().len() < 2 {
-                if self.reader.remaining_data().is_empty() {
+            if self.reader.remaining_data().len() < 2
+                && self.reader.remaining_data().is_empty() {
                     return Err(JpeglsError::InvalidData);
                 }
-            }
             let b1 = self.reader.read_u8()?;
             if b1 != 0xFF {
                 return Err(JpeglsError::InvalidData);
@@ -189,7 +188,7 @@ impl<'a, 'b> J2kParser<'a, 'b> {
                 (self.reader.read_u8()? as u16) << 8
             };
             step_sizes.push(step);
-            bytes_left -= step_size_len as usize;
+            bytes_left -= step_size_len;
         }
         // Skip any leftover bytes (e.g. if odd length, though unlikely for u16 steps)
         if bytes_left > 0 {

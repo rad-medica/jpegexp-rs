@@ -67,6 +67,7 @@ impl<'a, 'b> J2kBitReader<'a, 'b> {
     }
 }
 
+#[derive(Default)]
 pub struct J2kBitWriter {
     data: Vec<u8>,
     bit_buffer: u8,
@@ -74,16 +75,6 @@ pub struct J2kBitWriter {
     last_byte_ff: bool,
 }
 
-impl Default for J2kBitWriter {
-    fn default() -> Self {
-        Self {
-            data: Vec::new(),
-            bit_buffer: 0,
-            bits_count: 0,
-            last_byte_ff: false,
-        }
-    }
-}
 
 impl J2kBitWriter {
     pub fn new() -> Self {

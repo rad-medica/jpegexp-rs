@@ -152,7 +152,7 @@ mod tests {
             pixel_count += 1;
         }
 
-        let mae = total_diff as f64 / pixel_count as f64;
+        let _mae = total_diff as f64 / pixel_count as f64;
         let compression_ratio = original_pixels.len() as f64 / encoded_len as f64;
 
         // Verify that the JPEG2000 pipeline works (produces valid output)

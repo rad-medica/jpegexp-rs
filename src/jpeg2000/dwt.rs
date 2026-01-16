@@ -131,9 +131,9 @@ impl Dwt53 {
             return;
         }
 
-        let ll_w = (w + 1) / 2;
+        let ll_w = w.div_ceil(2);
         let hl_w = w / 2;
-        let ll_h = (h + 1) / 2;
+        let ll_h = h.div_ceil(2);
         let lh_h = h / 2;
 
         let mut temp = vec![0i32; w * h];
@@ -290,11 +290,9 @@ impl Dwt97 {
                     x[i] = in_l[l_idx];
                     l_idx += 1;
                 }
-            } else {
-                if h_idx < in_h.len() {
-                    x[i] = in_h[h_idx];
-                    h_idx += 1;
-                }
+            } else if h_idx < in_h.len() {
+                x[i] = in_h[h_idx];
+                h_idx += 1;
             }
         }
 
@@ -345,9 +343,9 @@ impl Dwt97 {
             return;
         }
 
-        let ll_w = (w + 1) / 2;
+        let ll_w = w.div_ceil(2);
         let hl_w = w / 2;
-        let ll_h = (h + 1) / 2;
+        let ll_h = h.div_ceil(2);
         let lh_h = h / 2;
 
         let mut temp = vec![0.0f32; w * h];

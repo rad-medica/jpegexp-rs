@@ -37,8 +37,8 @@ pub fn decode_step_size(encoded: u16, _guard_bits: u8) -> f32 {
     // where R_b = depth + guard_bits + gain
     // For LL: gain = 0, for others: gain = log2(2) = 1 for HL/LH, log2(2*sqrt(2)) ≈ 1.5 for HH
 
-    let base = (1.0 + (mantissa as f32) / 2048.0) * 2.0f32.powi(-(exponent as i32));
-    base
+    
+    (1.0 + (mantissa as f32) / 2048.0) * 2.0f32.powi(-(exponent as i32))
 }
 
 /// Calculate step sizes for all subbands

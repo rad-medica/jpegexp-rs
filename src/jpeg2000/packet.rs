@@ -331,7 +331,7 @@ impl PacketHeader {
                         .iter()
                         .find(|c| c.x == x && c.y == y && c.subband_index == s as u8);
 
-                    let included = cb_info.map_or(false, |c| c.included);
+                    let included = cb_info.is_some_and(|c| c.included);
                     let threshold = (self.layer_index + 1) as i32;
 
                     if included {

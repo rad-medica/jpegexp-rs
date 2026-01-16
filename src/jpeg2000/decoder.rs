@@ -178,12 +178,8 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     // FF FF ... second FF could be start of marker
                     byte = 0xFF;
                     continue;
-                } else {
-                    if std::env::var("J2K_DEBUG").is_ok() {
-                        eprintln!("Skipping marker {:02X}", b2);
-                    }
-                    // Not a marker, continue scanning
-                    // byte = next byte
+                } else if std::env::var("J2K_DEBUG").is_ok() {
+                    eprintln!("Skipping marker {:02X}", b2);
                 }
             }
             byte = parser.reader.read_u8()?;
@@ -472,7 +468,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             {
                                 // We create a new scope to limit lifetime of bit_reader
                                 let mut bit_reader =
-                                    crate::jpeg2000::bit_io::J2kBitReader::new(&mut parser.reader);
+                                    crate::jpeg2000::bit_io::J2kBitReader::new(parser.reader);
 
                                 // Calculate precinct dimensions in codeblocks
                                 // NOTE: The PacketHeader expects grid dimensions in SUBBAND codeblocks.
@@ -505,7 +501,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                         // Low pass (even indices): ceil(end/2) - ceil(start/2)
                                         // High pass (odd indices): floor(end/2) - floor(start/2)
                                         let count_low =
-                                            |start: u32, end: u32| (end + 1) / 2 - (start + 1) / 2;
+                                            |start: u32, end: u32| end.div_ceil(2) - start.div_ceil(2);
                                         let count_high = |start: u32, end: u32| end / 2 - start / 2;
 
                                         let (w, h) = match s {

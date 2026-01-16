@@ -235,10 +235,10 @@ impl J2kImage {
                         };
 
                         // Δ = 2^(depth + gain - epsilon) * (1 + mu/2048)
-                        let delta = (1.0 + mu as f32 / 2048.0)
-                            * 2.0f32.powi((depth) as i32 + gain - eps);
+                        
 
-                        delta
+                        (1.0 + mu as f32 / 2048.0)
+                            * 2.0f32.powi((depth) as i32 + gain - eps)
                     };
 
                     let idx_base = 1 + (r - 1) * 3;
@@ -312,10 +312,10 @@ impl J2kImage {
             for c in 0..self.component_count as usize {
                 let comp_info = self.components.get(c);
                 let depth = comp_info.map_or(8, |info| info.depth);
-                let is_signed = comp_info.map_or(false, |info| info.is_signed);
+                let is_signed = comp_info.is_some_and(|info| info.is_signed);
                 
                 // Apply DC level shift only for unsigned components (ISO/IEC 15444-1 Section G.1.1)
-                let level_offset = if is_signed { 0 } else { (1i32 << (depth - 1)) as i32 };
+                let level_offset = if is_signed { 0 } else { (1i32 << (depth - 1)) };
                 let val = component_buffers[c][i] + level_offset;
                 let clamped = val.clamp(0, (1i32 << depth) - 1) as u32;
                 

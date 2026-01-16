@@ -36,8 +36,8 @@ impl<'a> HTBlockCoder<'a> {
             }
         }
 
-        let num_quads_x = (width + 1) / 2;
-        let num_quads_y = (height + 1) / 2;
+        let num_quads_x = width.div_ceil(2);
+        let num_quads_y = height.div_ceil(2);
 
         let mut coder = Self {
             mel_decoder: MelDecoder::new(mel_vlc_data, 4), // MEL reads forward from start
@@ -79,7 +79,7 @@ impl<'a> HTBlockCoder<'a> {
 
         if debug {
             eprintln!("DEC: Starting decode loop, num_quads_x={} num_quads_y={}", 
-                      self.num_quads_x, (self.height + 1) / 2);
+                      self.num_quads_x, self.height.div_ceil(2));
         }
 
         // Reset VLC context for each block
@@ -282,7 +282,7 @@ impl<'a> HTBlockCoder<'a> {
         if gamma == 0 { return 1; }
         let mut max_e = 0u8;
         
-        let ne_available = (qy % 2 == 0) && (qx + 1 < self.num_quads_x) && (qy > 0);
+        let ne_available = qy.is_multiple_of(2) && (qx + 1 < self.num_quads_x) && (qy > 0);
 
         let neighbors = [
             if qx > 0 && qy > 0 { Some((qx - 1, qy - 1)) } else { None }, // NW

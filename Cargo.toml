@@ -105,6 +105,10 @@ name = "debug_edge_1x8"
 path = "tests/regression/debug_edge_1x8.rs"
 
 [[test]]
+name = "debug_bitstream_comparison"
+path = "tests/debug/debug_bitstream_comparison.rs"
+
+[[test]]
 name = "repro_j2k_lossy"
 path = "tests/regression/repro_j2k_lossy.rs"
 
@@ -123,6 +127,8 @@ path = "tests/regression/test_minimum_failing_size.rs"
 [[test]]
 name = "test_jpeg1_12bit"
 path = "tests/integration/test_jpeg1_12bit.rs"
+
+
 
 [[test]]
 name = "test_jpeg1_interop"

@@ -240,11 +240,11 @@ impl Jpeg1Encoder {
             let height = frame_info.height as usize;
             let mut mcus_encoded = 0;
             let total_mcus = if components_count == 1 {
-                 ((height + 7) / 8) * ((width + 7) / 8)
+                 height.div_ceil(8) * width.div_ceil(8)
             } else {
                  let mcu_width = 8 * self.h_samp_y as usize;
                  let mcu_height = 8 * self.v_samp_y as usize;
-                 ((height + mcu_height - 1) / mcu_height) * ((width + mcu_width - 1) / mcu_width)
+                 height.div_ceil(mcu_height) * width.div_ceil(mcu_width)
             };
 
             if components_count == 1 {
@@ -293,9 +293,9 @@ impl Jpeg1Encoder {
                 // Downsample logic (copied)
                 let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                        (downsample_chroma_420(&cb_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                     } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                        (downsample_chroma_422(&cb_plane, width, height), width.div_ceil(2), height)
                     } else {
                         (cb_plane, width, height)
                     }
@@ -305,9 +305,9 @@ impl Jpeg1Encoder {
                 
                 let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                        (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                     } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                        (downsample_chroma_422(&cr_plane, width, height), width.div_ceil(2), height)
                     } else {
                         (cr_plane, width, height)
                     }
@@ -317,8 +317,8 @@ impl Jpeg1Encoder {
 
                 let mcu_width = 8 * self.h_samp_y as usize;
                 let mcu_height = 8 * self.v_samp_y as usize;
-                let mcu_cols = (width + mcu_width - 1) / mcu_width;
-                let mcu_rows = (height + mcu_height - 1) / mcu_height;
+                let mcu_cols = width.div_ceil(mcu_width);
+                let mcu_rows = height.div_ceil(mcu_height);
 
                 for mcu_row in 0..mcu_rows {
                     for mcu_col in 0..mcu_cols {
@@ -463,7 +463,7 @@ impl Jpeg1Encoder {
 
         if components_count == 1 {
             // Grayscale encoding (unchanged)
-            let total_mcus = ((height + 7) / 8) * ((width + 7) / 8);
+            let total_mcus = height.div_ceil(8) * width.div_ceil(8);
             
             for block_y in (0..height).step_by(8) {
                 for block_x in (0..width).step_by(8) {
@@ -521,10 +521,10 @@ impl Jpeg1Encoder {
             let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:0
-                    (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                    (downsample_chroma_420(&cb_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                 } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:2
-                    (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                    (downsample_chroma_422(&cb_plane, width, height), width.div_ceil(2), height)
                 } else {
                     // No subsampling or unsupported mode - use 4:4:4
                     (cb_plane.clone(), width, height)
@@ -536,10 +536,10 @@ impl Jpeg1Encoder {
             let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:0
-                    (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                    (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                 } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:2
-                    (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                    (downsample_chroma_422(&cr_plane, width, height), width.div_ceil(2), height)
                 } else {
                     (cr_plane.clone(), width, height)
                 }
@@ -550,8 +550,8 @@ impl Jpeg1Encoder {
             // Step 3: Calculate MCU dimensions
             let mcu_width = 8 * self.h_samp_y as usize;
             let mcu_height = 8 * self.v_samp_y as usize;
-            let mcu_cols = (width + mcu_width - 1) / mcu_width;
-            let mcu_rows = (height + mcu_height - 1) / mcu_height;
+            let mcu_cols = width.div_ceil(mcu_width);
+            let mcu_rows = height.div_ceil(mcu_height);
             let total_mcus = mcu_rows * mcu_cols;
             
             // Step 4: Encode MCUs
@@ -721,9 +721,9 @@ impl Jpeg1Encoder {
                 // Downsample logic
                 let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                        (downsample_chroma_420(&cb_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                     } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                        (downsample_chroma_422(&cb_plane, width, height), width.div_ceil(2), height)
                     } else {
                         (cb_plane, width, height)
                     }
@@ -733,9 +733,9 @@ impl Jpeg1Encoder {
                 
                 let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                        (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                     } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                        (downsample_chroma_422(&cr_plane, width, height), width.div_ceil(2), height)
                     } else {
                         (cr_plane, width, height)
                     }
@@ -745,8 +745,8 @@ impl Jpeg1Encoder {
 
                 let mcu_width = 8 * self.h_samp_y as usize;
                 let mcu_height = 8 * self.v_samp_y as usize;
-                let mcu_cols = (width + mcu_width - 1) / mcu_width;
-                let mcu_rows = (height + mcu_height - 1) / mcu_height;
+                let mcu_cols = width.div_ceil(mcu_width);
+                let mcu_rows = height.div_ceil(mcu_height);
 
                 for mcu_row in 0..mcu_rows {
                     for mcu_col in 0..mcu_cols {
@@ -891,7 +891,7 @@ impl Jpeg1Encoder {
 
         if components_count == 1 {
             // Grayscale encoding (unchanged)
-            let total_mcus = ((height + 7) / 8) * ((width + 7) / 8);
+            let total_mcus = height.div_ceil(8) * width.div_ceil(8);
             
             for block_y in (0..height).step_by(8) {
                 for block_x in (0..width).step_by(8) {
@@ -949,10 +949,10 @@ impl Jpeg1Encoder {
             let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:0
-                    (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                    (downsample_chroma_420(&cb_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                 } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:2
-                    (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                    (downsample_chroma_422(&cb_plane, width, height), width.div_ceil(2), height)
                 } else {
                     // No subsampling or unsupported mode - use 4:4:4
                     (cb_plane.clone(), width, height)
@@ -964,10 +964,10 @@ impl Jpeg1Encoder {
             let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:0
-                    (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                    (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                 } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:2
-                    (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                    (downsample_chroma_422(&cr_plane, width, height), width.div_ceil(2), height)
                 } else {
                     (cr_plane.clone(), width, height)
                 }
@@ -978,8 +978,8 @@ impl Jpeg1Encoder {
             // Step 3: Calculate MCU dimensions
             let mcu_width = 8 * self.h_samp_y as usize;
             let mcu_height = 8 * self.v_samp_y as usize;
-            let mcu_cols = (width + mcu_width - 1) / mcu_width;
-            let mcu_rows = (height + mcu_height - 1) / mcu_height;
+            let mcu_cols = width.div_ceil(mcu_width);
+            let mcu_rows = height.div_ceil(mcu_height);
             let total_mcus = mcu_rows * mcu_cols;
             
             // Step 4: Encode MCUs
@@ -1094,11 +1094,11 @@ impl Jpeg1Encoder {
             let height = frame_info.height as usize;
             let mut mcus_encoded = 0;
             let total_mcus = if components_count == 1 {
-                 ((height + 7) / 8) * ((width + 7) / 8)
+                 height.div_ceil(8) * width.div_ceil(8)
             } else {
                  let mcu_width = 8 * self.h_samp_y as usize;
                  let mcu_height = 8 * self.v_samp_y as usize;
-                 ((height + mcu_height - 1) / mcu_height) * ((width + mcu_width - 1) / mcu_width)
+                 height.div_ceil(mcu_height) * width.div_ceil(mcu_width)
             };
 
             if components_count == 1 {
@@ -1147,9 +1147,9 @@ impl Jpeg1Encoder {
                 // Downsample logic (copied)
                 let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                        (downsample_chroma_420(&cb_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                     } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                        (downsample_chroma_422(&cb_plane, width, height), width.div_ceil(2), height)
                     } else {
                         (cb_plane, width, height)
                     }
@@ -1159,9 +1159,9 @@ impl Jpeg1Encoder {
                 
                 let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                        (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                     } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                        (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                        (downsample_chroma_422(&cr_plane, width, height), width.div_ceil(2), height)
                     } else {
                         (cr_plane, width, height)
                     }
@@ -1171,8 +1171,8 @@ impl Jpeg1Encoder {
 
                 let mcu_width = 8 * self.h_samp_y as usize;
                 let mcu_height = 8 * self.v_samp_y as usize;
-                let mcu_cols = (width + mcu_width - 1) / mcu_width;
-                let mcu_rows = (height + mcu_height - 1) / mcu_height;
+                let mcu_cols = width.div_ceil(mcu_width);
+                let mcu_rows = height.div_ceil(mcu_height);
 
                 for mcu_row in 0..mcu_rows {
                     for mcu_col in 0..mcu_cols {
@@ -1620,7 +1620,7 @@ impl Jpeg1Encoder {
             // Y
             buffers.push(CoefficientBuffer::new(width, height, self.h_samp_y, self.v_samp_y));
             // Cb
-            let (_cb_w, _cb_h) = ((width + 1) / 2, (height + 1) / 2); // Approximation for 4:2:0
+            let (_cb_w, _cb_h) = (width.div_ceil(2), height.div_ceil(2)); // Approximation for 4:2:0
             // Actually, we should use the same logic as sequential for dimensions
             // But CoefficientBuffer calculates its own block count based on h/v samp.
             // Wait, CoefficientBuffer needs logical dimensions of the component?
@@ -1686,7 +1686,7 @@ impl Jpeg1Encoder {
                     // MCU index calculation
                     let mcu_x = block_x / 8;
                     let mcu_y = block_y / 8;
-                    let mcu_width = (width + 7) / 8;
+                    let mcu_width = width.div_ceil(8);
                     let mcu_idx = mcu_y * mcu_width + mcu_x;
                     
                     Self::collect_quantized_coefficients(
@@ -1730,9 +1730,9 @@ impl Jpeg1Encoder {
             // Downsample
             let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                    (downsample_chroma_420(&cb_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                    (downsample_chroma_420(&cb_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                 } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                    (downsample_chroma_422(&cb_plane, width, height), (width + 1) / 2, height)
+                    (downsample_chroma_422(&cb_plane, width, height), width.div_ceil(2), height)
                 } else {
                     (cb_plane, width, height)
                 }
@@ -1742,9 +1742,9 @@ impl Jpeg1Encoder {
             
             let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                    (downsample_chroma_420(&cr_plane, width, height), (width + 1) / 2, (height + 1) / 2)
+                    (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
                 } else if self.h_samp_y == 2 && self.v_samp_y == 1 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
-                    (downsample_chroma_422(&cr_plane, width, height), (width + 1) / 2, height)
+                    (downsample_chroma_422(&cr_plane, width, height), width.div_ceil(2), height)
                 } else {
                     (cr_plane, width, height)
                 }
@@ -1754,8 +1754,8 @@ impl Jpeg1Encoder {
 
             let mcu_width = 8 * self.h_samp_y as usize;
             let mcu_height = 8 * self.v_samp_y as usize;
-            let mcu_cols = (width + mcu_width - 1) / mcu_width;
-            let mcu_rows = (height + mcu_height - 1) / mcu_height;
+            let mcu_cols = width.div_ceil(mcu_width);
+            let mcu_rows = height.div_ceil(mcu_height);
 
             for mcu_row in 0..mcu_rows {
                 for mcu_col in 0..mcu_cols {
@@ -1863,8 +1863,8 @@ impl Jpeg1Encoder {
         let buf0 = &buffers[0];
         let mcu_width = 8 * buf0.h_samp as usize;
         let mcu_height = 8 * buf0.v_samp as usize;
-        let mcu_cols = (buf0.width + mcu_width - 1) / mcu_width;
-        let mcu_rows = (buf0.height + mcu_height - 1) / mcu_height;
+        let mcu_cols = buf0.width.div_ceil(mcu_width);
+        let mcu_rows = buf0.height.div_ceil(mcu_height);
         let total_mcus = mcu_cols * mcu_rows;
 
         // Iterate over MCUs

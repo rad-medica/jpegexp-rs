@@ -16,7 +16,7 @@ const fn countl_zero_u8(mut x: u8) -> i8 {
     count
 }
 
-pub const GOLOMB_LUT: [[GolombCodeMatch; 256]; 32] = {
+pub static GOLOMB_LUT: [[GolombCodeMatch; 256]; 32] = {
     let mut lut = [[GolombCodeMatch {
         error_value: 0,
         bit_count: 0,

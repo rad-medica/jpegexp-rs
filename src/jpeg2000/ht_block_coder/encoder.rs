@@ -349,8 +349,8 @@ pub struct HTBlockEncoder {
 
 impl HTBlockEncoder {
     pub fn new(width: usize, height: usize) -> Self {
-        let num_quads_x = (width + 1) / 2;
-        let num_quads_y = (height + 1) / 2;
+        let num_quads_x = width.div_ceil(2);
+        let num_quads_y = height.div_ceil(2);
         Self {
             mel_encoder: MelEncoder::new(),
             vlc_encoder: VlcEncoder::new(),
@@ -691,7 +691,7 @@ impl HTBlockEncoder {
         
         // NE neighbor (qx+1, qy-1) availability:
         // Match decoder logic: valid only if qy is even (top of stripe)
-        let ne_available = (qy % 2 == 0) && (qx + 1 < self.num_quads_x) && (qy > 0);
+        let ne_available = qy.is_multiple_of(2) && (qx + 1 < self.num_quads_x) && (qy > 0);
 
         let neighbors = [
             if qx > 0 && qy > 0 { Some((qx - 1, qy - 1)) } else { None }, // NW

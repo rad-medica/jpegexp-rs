@@ -411,10 +411,10 @@ impl J2kEncoder {
                     let mu = mu_float.round().max(0.0).min(2047.0) as i32;
 
                     // Pack epsilon (5 bits) and mu (11 bits) into u16
-                    let packed = ((epsilon as u16) << 11) | (mu as u16);
+                    
 
 
-                    packed
+                    ((epsilon as u16) << 11) | (mu as u16)
                 })
                 .collect();
         } else {
@@ -463,7 +463,7 @@ impl J2kEncoder {
         let mut packets: Vec<Packet> = Vec::new();
 
         // Level shift
-        let level_shift = (1i32 << (depth - 1)) as i32;
+        let level_shift = (1i32 << (depth - 1));
         let mut component_data: Vec<Vec<i32>> = (0..components)
             .map(|c| {
                 (0..width * height)
@@ -539,7 +539,7 @@ impl J2kEncoder {
                         let row_start = y * width;
                         let row_data = &data_f32[row_start..row_start + current_w].to_vec();
 
-                        let l_len = (current_w + 1) / 2;
+                        let l_len = current_w.div_ceil(2);
                         let h_len = current_w / 2;
                         let mut l = vec![0.0; l_len];
                         let mut h = vec![0.0; h_len];
@@ -559,7 +559,7 @@ impl J2kEncoder {
                         let col_data: Vec<f32> =
                             (0..current_h).map(|y| data_f32[y * width + x]).collect();
 
-                        let l_len = (current_h + 1) / 2;
+                        let l_len = current_h.div_ceil(2);
                         let h_len = current_h / 2;
                         let mut l = vec![0.0; l_len];
                         let mut h = vec![0.0; h_len];
@@ -574,8 +574,8 @@ impl J2kEncoder {
                         }
                     }
 
-                    current_w = (current_w + 1) / 2;
-                    current_h = (current_h + 1) / 2;
+                    current_w = current_w.div_ceil(2);
+                    current_h = current_h.div_ceil(2);
                 }
 
                 // Quantization (Scalar Expounded)
@@ -666,7 +666,7 @@ impl J2kEncoder {
         }
 
         let tile_part_header_len = 12 + plt_len; // SOT (12) + PLT
-        let tile_total_len = tile_part_header_len + 2 + total_packet_len as usize; // + SOD (2) + Packets (EOC not included in Psot)
+        let tile_total_len = tile_part_header_len + 2 + total_packet_len; // + SOD (2) + Packets (EOC not included in Psot)
 
         // Write TLM (if included) in main header
         if self.include_tlm {
@@ -709,6 +709,10 @@ impl J2kEncoder {
         width: usize,
         height: usize,
     ) -> Result<Vec<i32>, JpeglsError> {
+        if self.decomposition_levels == 0 {
+            return Ok(data.to_vec());
+        }
+
         // Allocate result buffer for full coefficient array
         let mut result = vec![0i32; width * height];
         let mut current_w = width;
@@ -737,7 +741,7 @@ impl J2kEncoder {
                 let row_start = y * current_w;
                 let row: Vec<i32> = temp[row_start..row_start + current_w].to_vec();
 
-                let l_len = (current_w + 1) / 2;
+                let l_len = current_w.div_ceil(2);
                 let h_len = current_w / 2;
                 let mut out_l = vec![0i32; l_len];
                 let mut out_h = vec![0i32; h_len];
@@ -756,7 +760,7 @@ impl J2kEncoder {
             for x in 0..current_w {
                 let col: Vec<i32> = (0..current_h).map(|y| temp[y * current_w + x]).collect();
 
-                let l_len = (current_h + 1) / 2;
+                let l_len = current_h.div_ceil(2);
                 let h_len = current_h / 2;
                 let mut out_l = vec![0i32; l_len];
                 let mut out_h = vec![0i32; h_len];
@@ -773,8 +777,8 @@ impl J2kEncoder {
 
             // Copy ALL subbands back to result at their proper positions
             // LL at (0, 0), HL at (ll_w, 0), LH at (0, ll_h), HH at (ll_w, ll_h)
-            let ll_w = (current_w + 1) / 2;
-            let ll_h = (current_h + 1) / 2;
+            let ll_w = current_w.div_ceil(2);
+            let ll_h = current_h.div_ceil(2);
             let hl_w = current_w / 2;
             let lh_h = current_h / 2;
 
@@ -864,8 +868,8 @@ impl J2kEncoder {
                         _ => (0, 0),
                     }
                 };
-                let gw = (sb_w + cb_dim - 1) / cb_dim;
-                let gh = (sb_h + cb_dim - 1) / cb_dim;
+                let gw = sb_w.div_ceil(cb_dim);
+                let gh = sb_h.div_ceil(cb_dim);
                 subband_grids.push((gw, gh));
 
                 if std::env::var("J2K_GRID_DEBUG").is_ok() {
@@ -1260,8 +1264,8 @@ impl J2kEncoder {
         let mut w = width;
         let mut h = height;
         for _ in 0..reductions {
-            w = (w + 1) / 2;
-            h = (h + 1) / 2;
+            w = w.div_ceil(2);
+            h = h.div_ceil(2);
         }
         let result = (w.max(1), h.max(1));
         

@@ -29,8 +29,8 @@ impl CoefficientBuffer {
     pub fn new(width: usize, height: usize, h_samp: u8, v_samp: u8) -> Self {
         let mcu_width = 8 * h_samp as usize;
         let mcu_height = 8 * v_samp as usize;
-        let mcu_cols = (width + mcu_width - 1) / mcu_width;
-        let mcu_rows = (height + mcu_height - 1) / mcu_height;
+        let mcu_cols = width.div_ceil(mcu_width);
+        let mcu_rows = height.div_ceil(mcu_height);
 
         // Total blocks = MCUs * blocks_per_mcu
         let total_blocks = mcu_cols * mcu_rows * (h_samp as usize * v_samp as usize);
