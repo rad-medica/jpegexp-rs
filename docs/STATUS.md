@@ -13,38 +13,39 @@
 
 ## ✅ Recent Achievements
 
-### 1. JPEG 2000: COMPLETE FIX - All Patterns Now Working (2026-01-13) ⭐ NEW
-- **Fixed SUBBAND GRID BUG** - Root cause of all edge pixel encoding issues!
-- **Bug Location**: `src/jpeg2000/encoder.rs:848-866` (subband grid calculation)
-- **Problem**: For `res >= 1`, subband sizes were calculated using wrong LL size
-  - Used `ll_w - prev_w` where both were smaller than expected
-  - For 40x40 image with 1 level: ll_w=10, prev_w=20 → sb_w = -10 (WRONG!)
-- **Fix**: Changed to use ORIGINAL LL size (res=0) for all subband calculations:
+### 1. JPEG 2000: Multi-Level DWT Fix (2026-01-16) ⭐ NEW
+- **Fixed MULTI-LEVEL DWT BUG** - Resolved grid calculation for 2+ decomposition levels!
+- **Bug Location**: `src/jpeg2000/encoder.rs:854-872` (subband grid calculation for res > 0)
+- **Problem**: For multi-level decomposition, subband sizes used wrong reference LL
+  - Used `ll_0` (deepest LL) for ALL resolutions instead of parent LL at `res-1`
+  - For 128×128 with 2 levels at res=1: calculated 96×96 subbands instead of 32×32 (WRONG!)
+  - Caused tag tree to write extra non-inclusion bits for "ghost" code-blocks
+  - Decoder expected correct dimensions, causing bitstream desynchronization
+- **Fix**: Changed to use PARENT LL size (res-1) instead of deepest LL (res=0):
   ```rust
   // Before (WRONG):
-  let (sb_w, sb_h) = if res == 0 { (ll_w, ll_h) } else {
-      let (prev_w, prev_h) = get_ll_size(..., res - 1);
-      match band {
-          0 => (ll_w - prev_w, prev_h),        // HL - NEGATIVE!
-          ...
-      }
-  };
-  
+  let (ll_0_w, ll_0_h) = get_ll_size(..., 0);  // Always use deepest LL
+  match band {
+      0 => (width.saturating_sub(ll_0_w), ll_0_h),  // Uses full image width!
+      ...
+  }
+
   // After (CORRECT):
-  let (sb_w, sb_h) = if res == 0 { (ll_w, ll_h) } else {
-      let (ll_0_w, ll_0_h) = get_ll_size(..., 0); // Original LL
-      match band {
-          0 => (width.saturating_sub(ll_0_w), ll_0_h),  // HL - CORRECT!
-          ...
-      }
-  };
+  let (ref_w, ref_h) = get_ll_size(..., res - 1);     // Parent LL
+  let (target_w, target_h) = get_ll_size(..., res);   // Current resolution
+  match band {
+      0 => (target_w.saturating_sub(ref_w), ref_h),   // Correct subband size
+      ...
+  }
   ```
-- **Result**: **MAE = 0.0000** for ALL image sizes and patterns! ✅
+- **Result**: **MAE = 0.0000** for multi-level DWT! ✅
 - **Test Results**:
-  - 8x8, 16x16, 32x32, 40x40, 48x48, 64x64: **MAE = 0.0 (perfect)** ✅
-  - All patterns (solid, gradient, diagonal, checkerboard): **MAE = 0.0** ✅
-  - Multiple decomposition levels (1, 2, 3): **MAE = 0.0** ✅
+  - 64×64 with 1, 2, 3 levels: **MAE = 0.0** ✅
+  - 128×128 with 1, 2, 3, 5 levels: **MAE = 0.0** ✅ (previously failed with MAE=0.06-29.61)
+  - All lib tests (39/39) still pass ✅
+  - J2K roundtrip tests (16/16) still pass ✅
 - **Files Modified**: `src/jpeg2000/encoder.rs`
+- **Verified**: Matches decoder logic in `decoder.rs:330-347`
 
 ### 2. Comprehensive Interoperability Test Suite (2026-01-11)
 - **Implemented**: Full cross-codec validation framework against reference implementations
@@ -92,13 +93,20 @@
 
 ---
 
-## 🧩 Remaining Gaps (All Previously Fixed!)
+## 🧩 Remaining Gaps
 
-### ✅ JPEG 2000: Edge Pixel Encoding - FIXED (2026-01-13)
-- **Status**: ✅ COMPLETE - All patterns now work with MAE = 0.0
-- **Problem**: Single non-zero coefficients at image boundaries were lost
-- **Root Cause**: Subband grid calculation bug (fixed above)
-- **Result**: Perfect encoding for all sizes (8x8 through 128x128+)
+### 1. JPEG 2000: Large Image Multi-Code-Block Issues (>128 pixels)
+- **Status**: ⚠️ UNDER INVESTIGATION
+- **Problem**: Images >128×128 fail with small MAE (0.0001-0.6) in lossless mode
+  - 160×160 with 1 level: MAE = 0.000078 (very small, possible rounding)
+  - 256×256 with 1 level: MAE = 0.600 (significant error)
+  - 64×64, 128×128: MAE = 0.0 (perfect) ✅
+- **Root Cause**: NOT the grid calculation (now fixed for multi-level DWT)
+  - Issue appears when subbands contain 2×2 or larger code-block grids
+  - 128×128 has 1×1 grid (64×64 codeblocks), 256×256 has 2×2 grid
+  - Suspected buffer stride/indexing issue in code-block reconstruction
+- **Next Steps**: Investigate `get_subband_coeffs` (image.rs:128-154) and code-block positioning logic
+- **Priority**: MEDIUM - workaround exists (use images ≤128×128 or increase codeblock size)
 
 ### 2. JPEG-LS: High Bit-Depth Interoperability
 - **Problem**: 10/12-bit images fail to decode from CharLS reference
@@ -117,9 +125,13 @@
 
 ## 🧪 Verification Ground Truth
 All claims are backed by the following test suites:
-- **Comprehensive Interop Suite**: `cargo test --release --test comprehensive_interop` 
+- **Multi-Level DWT Fix**: `cargo test --release --test test_j2k_bugs test_bug1_multilevel_dwt` (**MAE = 0.0 verified** ✅)
+  - 64×64 with 1-3 decomposition levels: MAE = 0.0
+  - 128×128 with 1-5 decomposition levels: MAE = 0.0
+- **Comprehensive Interop Suite**: `cargo test --release --test comprehensive_interop`
   - See [Full Report](test-results/INTEROP_REPORT.md) for detailed 1,260 test results
-- **JPEG 2000 Complete Fix Test**: `cargo test --release --test test_40x40_dwt_fix` (**MAE = 0.0 verified** ✅)
+- **Library Tests**: `cargo test --release --lib` (39/39 PASS)
+- **J2K Roundtrip**: `cargo test --release --test j2k_roundtrip_test` (16/16 PASS)
 - `cargo test --release --test test_jpeg1_12bit` (SOF1 validated)
 - `cargo test --release --test jpegls_charls_validation` (23/23 PASS, MAE=0)
 - `cargo test --release --test test_j2k_interop` (OpenJPEG compatibility)

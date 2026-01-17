@@ -853,18 +853,20 @@ impl J2kEncoder {
 
             for band in 0..num_bands {
                 // For res=0, subband is the LL itself
-                // For res>=1, subbands are HL/LH/HH extracted from the LL at res=0
-                // The subband sizes must be based on the ORIGINAL image dimensions and the LL at res=0
+                // For res>=1, subbands are HL/LH/HH extracted from the DWT output
+                // The sizes must match what extract_subband_coeffs returns
                 let (sb_w, sb_h) = if res == 0 {
                     (ll_w, ll_h)
                 } else {
-                    // Get the LL size at res=0 (the first LL after full decomposition)
-                    let (ll_0_w, ll_0_h) = self.get_ll_size(width, height, num_levels as usize, 0);
+                    // Get dimensions based on how extract_subband_coeffs calculates them
+                    // ref_w/h is LL size at res-1, target_w/h is LL size at res
+                    let (ref_w, ref_h) = self.get_ll_size(width, height, num_levels as usize, res - 1);
+                    let (target_w, target_h) = self.get_ll_size(width, height, num_levels as usize, res);
 
                     match band {
-                        0 => (width.saturating_sub(ll_0_w), ll_0_h),        // HL (right of LL)
-                        1 => (ll_0_w, height.saturating_sub(ll_0_h)),       // LH (below LL)
-                        2 => (width.saturating_sub(ll_0_w), height.saturating_sub(ll_0_h)), // HH (diagonal)
+                        0 => (target_w.saturating_sub(ref_w), ref_h),        // HL
+                        1 => (ref_w, target_h.saturating_sub(ref_h)),        // LH
+                        2 => (target_w.saturating_sub(ref_w), target_h.saturating_sub(ref_h)), // HH
                         _ => (0, 0),
                     }
                 };

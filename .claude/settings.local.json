@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(J2K_GRID_DEBUG=1 J2K_LL_SIZE_DEBUG=1 cargo test:*)",
+      "Bash(J2K_GRID_DEBUG=1 cargo test:*)",
+      "Bash(J2K_EXTRACT_DEBUG=1 cargo test:*)",
+      "Bash(git stash:*)",
+      "Bash(J2K_EXTRACT_DEBUG=1 J2K_GRID_DEBUG=1 cargo test:*)",
+      "Bash(timeout 25 tail -f \"C:\\\\Users\\\\aroja\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-aroja--claude-worktrees-jpegexp-rs-priceless-gagarin\\\\tasks\"\"*.output)",
+      "Bash(J2K_RECON_DEBUG=1 cargo test:*)",
+      "Bash(J2K_PKT_DEBUG=1 cargo test:*)",
+      "Bash(J2K_ORIENT_DEBUG=1 cargo test:*)",
+      "Bash(cargo build:*)"
+    ]
+  }
+}
