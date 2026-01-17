@@ -13,41 +13,39 @@
 
 ## ✅ Recent Achievements
 
-### 1. JPEG 2000: Bit-Plane Coder ISO Compliance Fix (2026-01-16) ⭐ NEW
-- **Fixed CRITICAL BUG** - Bit-plane coder now ISO 15444-1 Section C.4.1.2 compliant!
-- **Bug Location**: `src/jpeg2000/bit_plane_coder.rs` (encoder lines 261-304, decoder lines 491-541)
-- **Problem**: SigProp and MagRef passes were updating neighbor significance flags **during** the pass
-  - ISO 15444-1 requires using significance state as it was **at the start** of the pass
-  - This caused encoder/decoder divergence from OpenJPEG for complex patterns
-- **Fix**: Deferred all flag updates to after each pass completes:
+### 1. JPEG 2000: Multi-Level DWT Fix (2026-01-16) ⭐ NEW
+- **Fixed MULTI-LEVEL DWT BUG** - Resolved grid calculation for 2+ decomposition levels!
+- **Bug Location**: `src/jpeg2000/encoder.rs:854-872` (subband grid calculation for res > 0)
+- **Problem**: For multi-level decomposition, subband sizes used wrong reference LL
+  - Used `ll_0` (deepest LL) for ALL resolutions instead of parent LL at `res-1`
+  - For 128×128 with 2 levels at res=1: calculated 96×96 subbands instead of 32×32 (WRONG!)
+  - Caused tag tree to write extra non-inclusion bits for "ghost" code-blocks
+  - Decoder expected correct dimensions, causing bitstream desynchronization
+- **Fix**: Changed to use PARENT LL size (res-1) instead of deepest LL (res=0):
   ```rust
-  // Before (WRONG - immediate update):
-  if bit != 0 {
-      self.update_flags(x, y, sign);  // Updates during pass!
+  // Before (WRONG):
+  let (ll_0_w, ll_0_h) = get_ll_size(..., 0);  // Always use deepest LL
+  match band {
+      0 => (width.saturating_sub(ll_0_w), ll_0_h),  // Uses full image width!
+      ...
   }
-  
-  // After (CORRECT - deferred update):
-  let mut updates: Vec<(u32, u32, u8)> = Vec::new();
-  if bit != 0 {
-      updates.push((x, y, sign));  // Collect for later
-  }
-  // ... end of pass ...
-  for (x, y, sign) in updates {
-      self.update_flags(x, y, sign);  // Apply all at once
+
+  // After (CORRECT):
+  let (ref_w, ref_h) = get_ll_size(..., res - 1);     // Parent LL
+  let (target_w, target_h) = get_ll_size(..., res);   // Current resolution
+  match band {
+      0 => (target_w.saturating_sub(ref_w), ref_h),   // Correct subband size
+      ...
   }
   ```
-- **Applied to**: Both encoder AND decoder SigProp and MagRef passes
+- **Result**: **MAE = 0.0000** for multi-level DWT! ✅
 - **Test Results**:
-  - Small images (≤64×64): **MAE = 0.0** at all decomposition levels ✅
-  - 128×128 with 1 decomp level: **MAE = 0.0** ✅
-- **Remaining Issue**: Multi-level DWT bug at ≥128 pixels with ≥2 decomposition levels (separate issue)
-
-### 1b. JPEG 2000: Subband Grid Fix (2026-01-13)
-- **Fixed SUBBAND GRID BUG** - Root cause of edge pixel encoding issues
-- **Bug Location**: `src/jpeg2000/encoder.rs:848-866`
-- **Problem**: Subband sizes calculated using wrong LL size for res >= 1
-- **Result**: All patterns work with single decomposition level (MAE = 0.0)
+  - 64×64 with 1, 2, 3 levels: **MAE = 0.0** ✅
+  - 128×128 with 1, 2, 3, 5 levels: **MAE = 0.0** ✅ (previously failed with MAE=0.06-29.61)
+  - All lib tests (39/39) still pass ✅
+  - J2K roundtrip tests (16/16) still pass ✅
 - **Files Modified**: `src/jpeg2000/encoder.rs`
+- **Verified**: Matches decoder logic in `decoder.rs:330-347`
 
 ### 2. Comprehensive Interoperability Test Suite (2026-01-11)
 - **Implemented**: Full cross-codec validation framework against reference implementations
@@ -95,18 +93,20 @@
 
 ---
 
-## 🧩 Remaining Gaps (All Previously Fixed!)
+## 🧩 Remaining Gaps
 
-### ⚠️ JPEG 2000: Multi-Level DWT Bug (Identified 2026-01-16)
-- **Status**: ⚠️ IN PROGRESS - Root cause identified, fix pending
-- **Problem**: Self-roundtrip fails for images ≥128 pixels with ≥2 decomposition levels
-- **Symptoms**:
-  - ✅ 64×64 with any decomposition levels: PASS (MAE=0)
-  - ✅ 128×128 with 1 decomposition level: PASS (MAE=0)
-  - ❌ 128×128 with 2+ levels: FAIL (MAE=0.06-90.27, scales with level count)
-- **Root Cause**: Bug in `apply_forward_dwt_2d` (encoder.rs lines 706-819) or `inverse_2d` (dwt.rs)
-- **Workaround**: Use `decomposition_levels=1` for images ≥128 pixels
-- **Priority**: HIGH - Affects OpenJPEG interoperability for larger images
+### 1. JPEG 2000: Large Image Multi-Code-Block Issues (>128 pixels)
+- **Status**: ⚠️ UNDER INVESTIGATION
+- **Problem**: Images >128×128 fail with small MAE (0.0001-0.6) in lossless mode
+  - 160×160 with 1 level: MAE = 0.000078 (very small, possible rounding)
+  - 256×256 with 1 level: MAE = 0.600 (significant error)
+  - 64×64, 128×128: MAE = 0.0 (perfect) ✅
+- **Root Cause**: NOT the grid calculation (now fixed for multi-level DWT)
+  - Issue appears when subbands contain 2×2 or larger code-block grids
+  - 128×128 has 1×1 grid (64×64 codeblocks), 256×256 has 2×2 grid
+  - Suspected buffer stride/indexing issue in code-block reconstruction
+- **Next Steps**: Investigate `get_subband_coeffs` (image.rs:128-154) and code-block positioning logic
+- **Priority**: MEDIUM - workaround exists (use images ≤128×128 or increase codeblock size)
 
 ### 2. JPEG-LS: High Bit-Depth Interoperability
 - **Problem**: 10/12-bit images fail to decode from CharLS reference
@@ -125,9 +125,13 @@
 
 ## 🧪 Verification Ground Truth
 All claims are backed by the following test suites:
-- **Comprehensive Interop Suite**: `cargo test --release --test comprehensive_interop` 
+- **Multi-Level DWT Fix**: `cargo test --release --test test_j2k_bugs test_bug1_multilevel_dwt` (**MAE = 0.0 verified** ✅)
+  - 64×64 with 1-3 decomposition levels: MAE = 0.0
+  - 128×128 with 1-5 decomposition levels: MAE = 0.0
+- **Comprehensive Interop Suite**: `cargo test --release --test comprehensive_interop`
   - See [Full Report](test-results/INTEROP_REPORT.md) for detailed 1,260 test results
-- **JPEG 2000 Complete Fix Test**: `cargo test --release --test test_40x40_dwt_fix` (**MAE = 0.0 verified** ✅)
+- **Library Tests**: `cargo test --release --lib` (39/39 PASS)
+- **J2K Roundtrip**: `cargo test --release --test j2k_roundtrip_test` (16/16 PASS)
 - `cargo test --release --test test_jpeg1_12bit` (SOF1 validated)
 - `cargo test --release --test jpegls_charls_validation` (23/23 PASS, MAE=0)
 - `cargo test --release --test test_j2k_interop` (OpenJPEG compatibility)

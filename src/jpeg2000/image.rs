@@ -130,9 +130,21 @@ impl J2kImage {
                 for sb in &res.subbands {
                     if sb.orientation == orientation {
                         let mut sb_data = vec![0i32; (sb.width * sb.height) as usize];
+
+                        if std::env::var("J2K_RECON_DEBUG").is_ok() {
+                            eprintln!("[RECON] Subband {:?}: {}×{}, {} codeblocks, nom_size={}×{}",
+                                orientation, sb.width, sb.height, sb.codeblocks.len(), nom_w, nom_h);
+                        }
+
                         for cb in &sb.codeblocks {
                             let start_x = cb.x * nom_w;
                             let start_y = cb.y * nom_h;
+
+                            if std::env::var("J2K_RECON_DEBUG").is_ok() {
+                                eprintln!("[RECON]   CB ({},{}) size={}×{}, pos=({},{}) coeffs={}",
+                                    cb.x, cb.y, cb.width, cb.height, start_x, start_y, cb.coefficients.len());
+                            }
+
                             for cy in 0..cb.height {
                                 for cx in 0..cb.width {
                                     let src_idx = (cy * cb.width + cx) as usize;
@@ -150,7 +162,36 @@ impl J2kImage {
                         return sb_data;
                     }
                 }
-                vec![0; (res.width * res.height) as usize]
+
+                // Subband not found (all code-blocks were zero and skipped by encoder)
+                // Calculate the correct subband size based on orientation
+                // For res > 0, subbands split the resolution dimensions
+                let (sb_w, sb_h) = if orientation == SubbandOrientation::LL {
+                    // LL shouldn't reach here since it always exists
+                    (res.width as usize, res.height as usize)
+                } else {
+                    // HL, LH, HH split the resolution
+                    // LL(0), LH(2): width = ceil(res_w/2), HL(1), HH(3): width = floor(res_w/2)
+                    // LL(0), HL(1): height = ceil(res_h/2), LH(2), HH(3): height = floor(res_h/2)
+                    let w = if orientation == SubbandOrientation::HL || orientation == SubbandOrientation::HH {
+                        res.width as usize / 2
+                    } else {
+                        (res.width as usize).div_ceil(2)
+                    };
+                    let h = if orientation == SubbandOrientation::LH || orientation == SubbandOrientation::HH {
+                        res.height as usize / 2
+                    } else {
+                        (res.height as usize).div_ceil(2)
+                    };
+                    (w, h)
+                };
+
+                if std::env::var("J2K_RECON_DEBUG").is_ok() {
+                    eprintln!("[RECON] Subband {:?}: MISSING, creating empty {}×{} (res={}×{})",
+                        orientation, sb_w, sb_h, res.width, res.height);
+                }
+
+                vec![0; sb_w * sb_h]
             };
 
         let mut component_buffers: Vec<Vec<i32>> = Vec::new();

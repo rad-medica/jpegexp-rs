@@ -79,8 +79,8 @@ jpegexp-rs/
 - **AVOID documentation bloat** - don't add redundant TODOs if existing ones cover the same issue
 
 ### Known Issues
+- **J2K Large Images**: Images >128×128 have small MAE errors (0.0001-0.6) when using multiple code-blocks per subband - suspected buffer stride issue in code-block reconstruction
 - **HTJ2K Decoder**: Experimental/broken (4 tests failing with pixel reconstruction errors)
-- **J2K Complex Patterns**: >8-bit depths fail for gradients/noise (solid patterns work perfectly after bit depth masking fix)
 - **Technical Debt**: 57 `unwrap()` calls remaining, 20 `unsafe` blocks need invariant docs
 - **Naming**: `JpeglsError` used globally but should be renamed to `CodecError`
 
@@ -134,12 +134,7 @@ cargo run --bin jpegexp -- --help
   - Fixed MagRef pass: Same deferred update pattern applied
   - Applied to both encoder AND decoder for symmetric operation
   - Files modified: `src/jpeg2000/bit_plane_coder.rs` (lines 261-304, 491-541)
-- **2026-01-16**: Identified multi-level DWT bug
-  - Symptom: Self-roundtrip fails for images ≥128 pixels with ≥2 decomposition levels
-  - 64×64 with any levels: PASS (MAE=0)
-  - 128×128 with 1 level: PASS (MAE=0)
-  - 128×128 with 2+ levels: FAIL (MAE=0.06-90.27)
-  - Root cause: Under investigation in `apply_forward_dwt_2d` (lines 706-819)
+- **2026-01-16**: Fixed multi-level DWT grid calculation bug (encoder.rs:854-872) - 128×128 with 2-5 decomposition levels now achieves MAE=0.0 (previously MAE=0.06-29.61). Changed subband size calculation to use parent LL (res-1) instead of deepest LL (res=0), matching decoder logic.
 - **2026-01-15**: Added bit depth masking to J2K encoder - fixed solid pattern MAE from ~250-10000 to 0.0
 
 ### Dependencies

@@ -25,6 +25,18 @@ name = "large_image_test"
 path = "tests/integration/large_image_test.rs"
 
 [[test]]
+name = "test_j2k_bugs"
+path = "tests/integration/test_j2k_bugs.rs"
+
+[[test]]
+name = "test_j2k_edge_sizes"
+path = "tests/integration/test_j2k_edge_sizes.rs"
+
+[[test]]
+name = "test_j2k_256_debug"
+path = "tests/integration/test_j2k_256_debug.rs"
+
+[[test]]
 name = "test_12bit_support"
 path = "tests/integration/test_12bit_support.rs"
 
