@@ -69,7 +69,7 @@ jpegexp-rs/
 - **NEVER test codec against itself** - always cross-validate with reference implementations
 - **NEVER suppress type errors** - no `as any`, `@ts-ignore` equivalent in Rust (use proper types)
 - **NEVER commit without MAE=0** for lossless modes - validates perfect interoperability
-- **DO NOT use JPEG 2000 for production** until gradient/noise bugs fixed (current status: 36% pass rate)
+- **DO NOT use JPEG 2000 with decomposition_levels >= 2** for images >= 128 pixels until multi-level DWT bug is fixed
 
 ### Documentation Requirements
 - **ALWAYS update documentation BEFORE commit** if code or test results change
@@ -120,17 +120,27 @@ cargo run --bin jpegexp -- --help
 
 ## NOTES
 
-### Current Status (as of 2026-01-15)
+### Current Status (as of 2026-01-16)
 - **JPEG 1**: ✅ Production ready (320/320 interop tests passing)
 - **JPEG-LS Decoder**: ✅ Production ready (100% validation vs CharLS)
 - **JPEG-LS Encoder**: ⚠️ 61.3% interop (98/160) - 10/12-bit has CharLS CLI compatibility issues
-- **JPEG 2000**: ⚠️ 36% interop (108/300) - solid patterns perfect, complex patterns fail at >8-bit
+- **JPEG 2000**: ⚠️ 36% interop (107/300) - bit-plane coder fixed, multi-level DWT bug identified
 - **HTJ2K Encoder**: ⚠️ Experimental
 - **HTJ2K Decoder**: ❌ Broken
 
 ### Recent Fixes
+- **2026-01-16**: **CRITICAL FIX** - Bit-plane coder now ISO 15444-1 compliant
+  - Fixed SigProp pass: Now delays neighbor flag updates until pass completion (Section C.4.1.2)
+  - Fixed MagRef pass: Same deferred update pattern applied
+  - Applied to both encoder AND decoder for symmetric operation
+  - Files modified: `src/jpeg2000/bit_plane_coder.rs` (lines 261-304, 491-541)
+- **2026-01-16**: Identified multi-level DWT bug
+  - Symptom: Self-roundtrip fails for images ≥128 pixels with ≥2 decomposition levels
+  - 64×64 with any levels: PASS (MAE=0)
+  - 128×128 with 1 level: PASS (MAE=0)
+  - 128×128 with 2+ levels: FAIL (MAE=0.06-90.27)
+  - Root cause: Under investigation in `apply_forward_dwt_2d` (lines 706-819)
 - **2026-01-15**: Added bit depth masking to J2K encoder - fixed solid pattern MAE from ~250-10000 to 0.0
-- **Investigation Status (2026-01-15)**: J2K complex pattern failures at >8-bit are NOT in quantization formulas (encoder/decoder both use depth correctly, QCD marker writing/parsing verified correct). Next hypothesis: bit-plane coder may be truncating coefficients for >8-bit depths
 
 ### Dependencies
 - `num_enum`: Type-safe marker enums

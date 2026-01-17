@@ -13,37 +13,40 @@
 
 ## ✅ Recent Achievements
 
-### 1. JPEG 2000: COMPLETE FIX - All Patterns Now Working (2026-01-13) ⭐ NEW
-- **Fixed SUBBAND GRID BUG** - Root cause of all edge pixel encoding issues!
-- **Bug Location**: `src/jpeg2000/encoder.rs:848-866` (subband grid calculation)
-- **Problem**: For `res >= 1`, subband sizes were calculated using wrong LL size
-  - Used `ll_w - prev_w` where both were smaller than expected
-  - For 40x40 image with 1 level: ll_w=10, prev_w=20 → sb_w = -10 (WRONG!)
-- **Fix**: Changed to use ORIGINAL LL size (res=0) for all subband calculations:
+### 1. JPEG 2000: Bit-Plane Coder ISO Compliance Fix (2026-01-16) ⭐ NEW
+- **Fixed CRITICAL BUG** - Bit-plane coder now ISO 15444-1 Section C.4.1.2 compliant!
+- **Bug Location**: `src/jpeg2000/bit_plane_coder.rs` (encoder lines 261-304, decoder lines 491-541)
+- **Problem**: SigProp and MagRef passes were updating neighbor significance flags **during** the pass
+  - ISO 15444-1 requires using significance state as it was **at the start** of the pass
+  - This caused encoder/decoder divergence from OpenJPEG for complex patterns
+- **Fix**: Deferred all flag updates to after each pass completes:
   ```rust
-  // Before (WRONG):
-  let (sb_w, sb_h) = if res == 0 { (ll_w, ll_h) } else {
-      let (prev_w, prev_h) = get_ll_size(..., res - 1);
-      match band {
-          0 => (ll_w - prev_w, prev_h),        // HL - NEGATIVE!
-          ...
-      }
-  };
+  // Before (WRONG - immediate update):
+  if bit != 0 {
+      self.update_flags(x, y, sign);  // Updates during pass!
+  }
   
-  // After (CORRECT):
-  let (sb_w, sb_h) = if res == 0 { (ll_w, ll_h) } else {
-      let (ll_0_w, ll_0_h) = get_ll_size(..., 0); // Original LL
-      match band {
-          0 => (width.saturating_sub(ll_0_w), ll_0_h),  // HL - CORRECT!
-          ...
-      }
-  };
+  // After (CORRECT - deferred update):
+  let mut updates: Vec<(u32, u32, u8)> = Vec::new();
+  if bit != 0 {
+      updates.push((x, y, sign));  // Collect for later
+  }
+  // ... end of pass ...
+  for (x, y, sign) in updates {
+      self.update_flags(x, y, sign);  // Apply all at once
+  }
   ```
-- **Result**: **MAE = 0.0000** for ALL image sizes and patterns! ✅
+- **Applied to**: Both encoder AND decoder SigProp and MagRef passes
 - **Test Results**:
-  - 8x8, 16x16, 32x32, 40x40, 48x48, 64x64: **MAE = 0.0 (perfect)** ✅
-  - All patterns (solid, gradient, diagonal, checkerboard): **MAE = 0.0** ✅
-  - Multiple decomposition levels (1, 2, 3): **MAE = 0.0** ✅
+  - Small images (≤64×64): **MAE = 0.0** at all decomposition levels ✅
+  - 128×128 with 1 decomp level: **MAE = 0.0** ✅
+- **Remaining Issue**: Multi-level DWT bug at ≥128 pixels with ≥2 decomposition levels (separate issue)
+
+### 1b. JPEG 2000: Subband Grid Fix (2026-01-13)
+- **Fixed SUBBAND GRID BUG** - Root cause of edge pixel encoding issues
+- **Bug Location**: `src/jpeg2000/encoder.rs:848-866`
+- **Problem**: Subband sizes calculated using wrong LL size for res >= 1
+- **Result**: All patterns work with single decomposition level (MAE = 0.0)
 - **Files Modified**: `src/jpeg2000/encoder.rs`
 
 ### 2. Comprehensive Interoperability Test Suite (2026-01-11)
@@ -94,11 +97,16 @@
 
 ## 🧩 Remaining Gaps (All Previously Fixed!)
 
-### ✅ JPEG 2000: Edge Pixel Encoding - FIXED (2026-01-13)
-- **Status**: ✅ COMPLETE - All patterns now work with MAE = 0.0
-- **Problem**: Single non-zero coefficients at image boundaries were lost
-- **Root Cause**: Subband grid calculation bug (fixed above)
-- **Result**: Perfect encoding for all sizes (8x8 through 128x128+)
+### ⚠️ JPEG 2000: Multi-Level DWT Bug (Identified 2026-01-16)
+- **Status**: ⚠️ IN PROGRESS - Root cause identified, fix pending
+- **Problem**: Self-roundtrip fails for images ≥128 pixels with ≥2 decomposition levels
+- **Symptoms**:
+  - ✅ 64×64 with any decomposition levels: PASS (MAE=0)
+  - ✅ 128×128 with 1 decomposition level: PASS (MAE=0)
+  - ❌ 128×128 with 2+ levels: FAIL (MAE=0.06-90.27, scales with level count)
+- **Root Cause**: Bug in `apply_forward_dwt_2d` (encoder.rs lines 706-819) or `inverse_2d` (dwt.rs)
+- **Workaround**: Use `decomposition_levels=1` for images ≥128 pixels
+- **Priority**: HIGH - Affects OpenJPEG interoperability for larger images
 
 ### 2. JPEG-LS: High Bit-Depth Interoperability
 - **Problem**: 10/12-bit images fail to decode from CharLS reference

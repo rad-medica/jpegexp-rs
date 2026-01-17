@@ -259,6 +259,11 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     fn encode_sigprop(&mut self, bp: u8, orient: u8) {
+        // CRITICAL FIX: ISO 15444-1 Section C.4.1.2 requires that SigProp pass
+        // uses significance state as it was at the START of the pass.
+        // We delay flag updates until after all encoding is done.
+        let mut updates: Vec<(u32, u32, u8)> = Vec::new(); // (x, y, sign)
+        
         for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 for y in y_stripe..(y_stripe + 4).min(self.height) {
@@ -275,7 +280,8 @@ impl<'a> BitPlaneCoder<'a> {
                                 let (cx_sc, xor) = self.get_context_sc(x, y);
                                 self.mq.encode(sign ^ xor, cx_sc);
                                 self.state[idx] |= Self::SIG;
-                                self.update_flags(x, y, true, Some(sign));
+                                // Delay flag update until after pass completes
+                                updates.push((x, y, sign));
                             }
                             self.state[idx] |= Self::VISITED;
                         }
@@ -283,9 +289,19 @@ impl<'a> BitPlaneCoder<'a> {
                 }
             }
         }
+        
+        // Now apply all flag updates
+        for (x, y, sign) in updates {
+            self.update_flags(x, y, true, Some(sign));
+        }
     }
 
     fn encode_magref(&mut self, bp: u8) {
+        // CRITICAL FIX: ISO 15444-1 Section C.4.1.2 requires that MagRef pass
+        // uses significance state as it was at the START of the pass.
+        // We delay flag updates until after all encoding is done.
+        let mut updates: Vec<(u32, u32)> = Vec::new(); // (x, y)
+        
         for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 for y in y_stripe..(y_stripe + 4).min(self.height) {
@@ -296,10 +312,16 @@ impl<'a> BitPlaneCoder<'a> {
                         let cx = self.get_context_mag(x, y);
                         self.mq.encode(bit, cx);
                         self.state[idx] |= Self::REFINE;
-                        self.update_flag_refined(x, y);
+                        // Delay flag update until after pass completes
+                        updates.push((x, y));
                     }
                 }
             }
+        }
+        
+        // Now apply all flag updates
+        for (x, y) in updates {
+            self.update_flag_refined(x, y);
         }
     }
 
@@ -467,6 +489,11 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     fn decode_sigprop(&mut self, bp: u8, orient: u8) {
+        // CRITICAL FIX: ISO 15444-1 Section C.4.1.2 requires that SigProp pass
+        // uses significance state as it was at the START of the pass.
+        // We delay flag updates until after all decoding is done.
+        let mut updates: Vec<(u32, u32, u8)> = Vec::new(); // (x, y, sign)
+        
         for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 for y in y_stripe..(y_stripe + 4).min(self.height) {
@@ -484,7 +511,8 @@ impl<'a> BitPlaneCoder<'a> {
                                 if sign != 0 {
                                     self.coefficients[idx] = -self.coefficients[idx];
                                 }
-                                self.update_flags(x, y, true, Some(sign));
+                                // Delay flag update until after pass completes
+                                updates.push((x, y, sign));
                             }
                             self.state[idx] |= Self::VISITED;
                         }
@@ -492,9 +520,19 @@ impl<'a> BitPlaneCoder<'a> {
                 }
             }
         }
+        
+        // Now apply all flag updates
+        for (x, y, sign) in updates {
+            self.update_flags(x, y, true, Some(sign));
+        }
     }
 
     fn decode_magref(&mut self, bp: u8) {
+        // CRITICAL FIX: ISO 15444-1 Section C.4.1.2 requires that MagRef pass
+        // uses significance state as it was at the START of the pass.
+        // We delay flag updates until after all decoding is done.
+        let mut updates: Vec<(u32, u32)> = Vec::new(); // (x, y)
+        
         for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 for y in y_stripe..(y_stripe + 4).min(self.height) {
@@ -511,10 +549,16 @@ impl<'a> BitPlaneCoder<'a> {
                             }
                         }
                         self.state[idx] |= Self::REFINE;
-                        self.update_flag_refined(x, y);
+                        // Delay flag update until after pass completes
+                        updates.push((x, y));
                     }
                 }
             }
+        }
+        
+        // Now apply all flag updates
+        for (x, y) in updates {
+            self.update_flag_refined(x, y);
         }
     }
 
