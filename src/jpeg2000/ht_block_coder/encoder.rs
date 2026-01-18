@@ -51,7 +51,7 @@ impl MelEncoder {
             eprintln!("MelEncoder: encode({}) run={} t={} k={}", is_significant, self.run, self.t, self.k);
         }
         let mel_e = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 5];
-        
+
         if !is_significant {
             // Insignificant (0)
             self.run += 1;
@@ -66,12 +66,12 @@ impl MelEncoder {
             // Significant (1)
             self.write_bit(0);
             let mut eval = mel_e[self.k as usize];
-            
+
             while eval > 0 {
                 eval -= 1;
                 self.write_bit(((self.run >> eval) & 1) as u8);
             }
-            
+
             self.run = 0;
             self.k = (self.k - 1).max(0);
             let eval = mel_e[self.k as usize];
@@ -85,7 +85,7 @@ impl MelEncoder {
         if self.run > 0 {
             self.write_bit(1);
         }
-    
+
         if self.bits_in_byte > 0 {
             // Pad with zeros
             // If limit was 7, we shift by (7 - bits). If 8, (8 - bits).
@@ -202,7 +202,7 @@ impl VlcEncoder {
             // Note: OpenHTJ2K logic: available = 8 - (last > 0x8F) - bits
             // But 'last' refers to the *previous* byte written to buffer.
             // Here we are filling 'current_byte'.
-            
+
             // We need to know if the *previously written* byte was > 0x8F to determine if we have 7 or 8 bits.
             // In our forward-accumulation-for-reverse scheme:
             // The byte we are filling NOW will eventually be written "before" the previous one in the stream?
@@ -210,7 +210,7 @@ impl VlcEncoder {
             // OpenHTJ2K: buf[pos] = tmp; pos--;
             // So the byte written AT pos is physically after byte at pos-1.
             // But decoding order is pos, pos-1...
-            
+
             // Let's stick to OpenHTJ2K logic:
             // "last" is the byte at pos+1 (the one just written).
             // We are writing at pos.
@@ -223,12 +223,12 @@ impl VlcEncoder {
             // It writes from High Address to Low Address.
             // Decoder reads from High Address to Low Address?
             // No, Decoder reads bytes and consumes them.
-            
+
             // Let's simulate:
             // Write Byte A at 100. last = A.
             // Write Byte B at 99. Check last (A). If A > 0x8F, B can only have 7 bits.
             // This is bit stuffing!
-            
+
             // So if I store bytes in a Vec in the order they are generated (A, B, C...)
             // Then I reverse them at the end -> (... C, B, A).
             // Then Byte A is at the END of the stream.
@@ -236,92 +236,92 @@ impl VlcEncoder {
             // So B checks A.
             // So current byte checks *previous byte in this vector*?
             // Yes!
-            
+
             let limit = if self.last_byte_was_ff { 7 } else { 8 };
             let available = limit - self.bits_in_byte;
-            
+
             let t = available.min(count);
-            
+
             // Pack bits: LSB of value goes to next available bit in current_byte (from LSB)
             // current_byte fills 0..7
             self.current_byte |= ((value & ((1 << t) - 1)) as u8) << self.bits_in_byte;
-            
+
             self.bits_in_byte += t;
             value >>= t;
             count -= t;
-            
+
             if self.bits_in_byte == limit {
                 // Byte full (at limit)
-                
+
                 // OpenHTJ2K Logic:
                 // if ((last > 0x8f) && tmp != 0x7F) { last = 0x00; continue; }
                 // This allows using the 8th bit (bit 7) if the first 7 bits (0-6) don't form 0x7F.
-                // Because if they are not 0x7F, then even if bit 7 becomes 1 (making it > 0x7F?), 
+                // Because if they are not 0x7F, then even if bit 7 becomes 1 (making it > 0x7F?),
                 // Wait.
                 // If tmp != 0x7F (e.g. 0x3F), bit 7 is 0.
                 // If we add another bit at bit 7.
                 // If that bit is 0 -> 0x3F. (Safe after FF).
                 // If that bit is 1 -> 0xBF. (Unsafe after FF? FF BF is Reserved).
-                
+
                 // OpenHTJ2K logic effectively extends the limit to 8 if tmp != 0x7F.
                 // But wait, if we extend to 8, we might write a 1 in bit 7.
                 // Then byte becomes > 0x7F.
                 // If last was FF, then FF 8x is a marker.
-                
+
                 // Let's look at OpenHTJ2K again.
                 // if ((last > 0x8f) && tmp != 0x7F) { last = 0x00; continue; }
                 // It resets `last` to 0.
                 // Then `available` recalculates: 8 - (0 > 0x8F) - 7 = 1.
                 // So it allows writing ONE more bit.
-                
+
                 // If that next bit is 1:
                 // tmp (was say 0x00) becomes 0x80.
                 // Then next loop:
                 // last was 0x00.
                 // Write buf = 0x80.
                 // last = 0x80.
-                
+
                 // But real last was 0xFF!
                 // So we wrote FF 80.
                 // FF 80 is NOT a marker (markers are FF90..FFFF).
                 // So this is safe.
-                
+
                 // What if tmp was 0x7F?
                 // Then bit 7 is 0.
                 // If we allow 8th bit, and it is 1 -> 0xFF.
                 // FF FF.
                 // This requires next byte stuffing.
-                
+
                 // What if tmp was 0x7F and we DON'T continue?
                 // We write 0x7F.
                 // FF 7F. Safe.
-                
+
                 // The check `tmp != 0x7F` prevents extending if we are at 0x7F.
                 // Because 0x7F + 1-bit could become 0xFF.
                 // Any other value < 0x7F, plus 1-bit (at pos 7), results in value < 0xFF.
                 // e.g. 0x00 + 1<<7 = 0x80.
                 // 0x7E + 1<<7 = 0xFE.
                 // 0xFE is safe after FF? FF FE is safe.
-                
+
                 // So the logic is: "If we are limited to 7 bits, BUT the 7 bits we have are NOT 0x7F, we can safely use the 8th bit."
-                
+
                 if self.last_byte_was_ff && self.current_byte != 0x7F {
                     // Pretend last byte wasn't FF, to allow filling 8th bit
                     self.last_byte_was_ff = false;
                     continue;
                 }
-                
+
                 self.buffer.push(self.current_byte);
-                
+
                 // Check if THIS byte is > 0x8F, affecting the NEXT one.
                 self.last_byte_was_ff = self.current_byte > 0x8F;
-                
+
                 self.current_byte = 0;
                 self.bits_in_byte = 0;
             }
         }
     }
-    
+
     pub fn get_buffer(&self) -> &[u8] {
         &self.buffer
     }
@@ -372,9 +372,9 @@ impl HTBlockEncoder {
 
     /// Encode an entire code-block
     pub fn encode_block(&mut self, block: &J2kCodeBlock) -> Result<Vec<u8>, JpeglsError> {
-        eprintln!("ENC: encode_block called for block ({},{}) {}x{}", 
+        eprintln!("ENC: encode_block called for block ({},{}) {}x{}",
                   block.x, block.y, self.width, self.height);
-        
+
         // HTJ2K encoding flow:
         // 1. Process quads in stripe order
         // 2. For each quad pair (within a stripe):
@@ -393,7 +393,7 @@ impl HTBlockEncoder {
         self.mel_encoder.flush();
         self.magsgn_encoder.flush();
         // VLC doesn't need explicit flush, the last partial byte is handled in termination
-        
+
         // Combine streams:
         // MagSgn grows from start, MEL/VLC grows from end
         let mut output = self.magsgn_encoder.get_buffer().to_vec();
@@ -402,38 +402,38 @@ impl HTBlockEncoder {
         // Terminate and merge MEL and VLC
         // This implements termMELandVLC from OpenHTJ2K
         let mel_buf = self.mel_encoder.buffer.clone(); // Copy for manipulation
-        let vlc_buf = self.vlc_encoder.buffer.clone(); 
-        
+        let vlc_buf = self.vlc_encoder.buffer.clone();
+
         // OpenHTJ2K Termination Logic:
         // MEL is at buffer start (forward), VLC is at buffer end (backward).
         // They might share the "fuse" byte in the middle.
-        
+
         // In our struct:
         // mel_encoder.current_byte contains the partial MEL byte (MSB aligned).
         // vlc_encoder.current_byte contains the partial VLC byte (LSB aligned).
-        
+
         let mut final_mel = mel_buf;
         let mut final_vlc = vlc_buf; // These are in Forward generation order
-        
+
         let mel_rem = if self.mel_encoder.bits_in_byte == 0 { 8 } else { 8 - self.mel_encoder.bits_in_byte }; // Bits remaining in MEL byte
         let vlc_bits = self.vlc_encoder.bits_in_byte; // Valid bits in VLC byte
-        
+
         // Check if we can fuse
         // MEL fills from MSB. Mask covers unused LSBs.
         // VLC fills from LSB. Mask covers unused MSBs.
-        
+
         // MEL.tmp is ALREADY shifted left by flush() in MelEncoder?
-        // No, MelEncoder::flush() pushes the byte. 
+        // No, MelEncoder::flush() pushes the byte.
         // But here we want the UNFLUSHED partial state.
         // I called flush() above, which pushed the partial byte.
         // Let's UNDO that push for logic correctness or adjust.
-        
+
         // If I called flush(), mel_encoder pushed the padded byte.
         // I should probably pop it to treat it as partial.
-        
+
         let mut mel_partial = 0u8;
         let mut mel_has_partial = false;
-        
+
         if self.mel_encoder.bits_in_byte > 0 {
              // It was flushed. Pop it.
              if let Some(b) = final_mel.pop() {
@@ -441,32 +441,32 @@ impl HTBlockEncoder {
                  mel_has_partial = true;
              }
         }
-        
+
         // vlc_partial comes from current_byte.
         // If vlc_bits == 0, current_byte might be 0 or 0xF (init).
         // We only use it if vlc_bits > 0.
         let vlc_partial = self.vlc_encoder.current_byte;
         let vlc_has_partial = vlc_bits > 0;
-        
+
         // Logic:
         // MEL_mask = (0xFF << MEL.rem) & 0xFF; // The bits MEL used
         // VLC_mask = 0xFF >> (8 - VLC.bits); // The bits VLC used
-        
+
         // mel_partial has 1s in MEL_mask position (data) and 0s elsewhere.
         // vlc_partial has 1s in VLC_mask position (data) and 0s elsewhere.
-        
+
         let mel_mask = if mel_has_partial { 0xFFu8 << mel_rem } else { 0 };
         let vlc_mask = if vlc_has_partial { 0xFFu8 >> (8 - vlc_bits) } else { 0 };
-        
+
         if (mel_mask | vlc_mask) != 0 {
              let fuse = mel_partial | vlc_partial;
-             
+
              // Check for conflict
              // (((fuse ^ MEL) & MEL_mask) | ((fuse ^ VLC) & VLC_mask)) == 0
              // means fuse bits match original bits in valid regions
              let match_mel = ((fuse ^ mel_partial) & mel_mask) == 0;
              let match_vlc = ((fuse ^ vlc_partial) & vlc_mask) == 0;
-             
+
              if match_mel && match_vlc && fuse != 0xFF {
                  // FUSE SUCCESS
                  final_mel.push(fuse);
@@ -477,24 +477,24 @@ impl HTBlockEncoder {
              }
 
         }
-        
+
         // Append VLC (reversed) to MEL
         for &b in final_vlc.iter().rev() {
             final_mel.push(b);
         }
-        
+
         // Append Suffix Length Indicator (Scup) if prefix is not empty
         if magsgn_len > 0 {
             // Scup is the length of the suffix (MEL + VLC)
             let scup = final_mel.len() as u32;
             let mut val = scup;
-            
+
             // First 7 bits (Last byte in stream) - MSB 0
             let last_byte = (val & 0x7F) as u8;
             val >>= 7;
-            
+
             let mut scup_bytes = Vec::new();
-            
+
             // Higher bits (Earlier bytes) - MSB 1
             while val > 0 {
                 scup_bytes.push(((val & 0x7F) | 0x80) as u8);
@@ -503,7 +503,7 @@ impl HTBlockEncoder {
             // Push higher bits first (reverse of generation)
             scup_bytes.reverse();
             scup_bytes.push(last_byte);
-            
+
             // Append suffix then Scup
             output.extend_from_slice(&final_mel);
             output.extend_from_slice(&scup_bytes);
@@ -512,9 +512,9 @@ impl HTBlockEncoder {
             output.extend_from_slice(&final_mel);
         }
 
-        eprintln!("ENC: encode_block finished for block ({},{}), output len={}", 
+        eprintln!("ENC: encode_block finished for block ({},{}), output len={}",
                   block.x, block.y, output.len());
-        
+
         if block.x == 0 && block.y == 0 && self.width == 2 && self.height == 2 {
             eprintln!("ENC: First 2x2 block output (hex): {:02X?}", output);
         }
@@ -523,36 +523,36 @@ impl HTBlockEncoder {
     }
 
     /// Calculate embedded bits (emb_k and emb_1) from quad coefficients
-    /// 
+    ///
     /// For HTJ2K encoding:
     /// - bit_k: 1 if we want to skip transmitting the MSB in MagSgn (embed it implicitly)
     /// - bit_1: The actual value of the bit at position m (where m = u_val - bit_k)
-    /// 
+    ///
     /// For lossless coding:
     /// - All significant samples have their MSB = 1
     /// - We set bit_k = 1 to skip transmitting this known bit
     /// - bit_1 then represents the MSB value (which is 1 for significant samples)
-    /// 
+    ///
     /// # Parameters
     /// - `rho`: Significance pattern (which samples are non-zero)
     /// - `u_val`: Exponent for the quad (MSB position of largest sample + 1)
     /// - `coeffs`: The 4 coefficient values in the quad
-    /// 
+    ///
     /// # Returns
     /// - `emb_k`: For each significant sample, 1 if MSB should be skipped
     /// - `emb_1`: For each sample, the value of the bit at position m
     fn calculate_emb_bits(&self, rho: u8, u_val: u8, coeffs: &[i32; 4]) -> (u8, u8) {
         let mut emb_k = 0u8;
         let mut emb_1 = 0u8;
-        
+
         for (i, &coeff) in coeffs.iter().enumerate().take(4) {
             if (rho >> i) & 1 == 1 {
                 let mag = coeff.unsigned_abs();
-                
+
                 // For lossless: all significant samples have MSB = 1
                 // We can skip transmitting it (bit_k = 1)
                 emb_k |= 1 << i;
-                
+
                 // bit_1 is the value at position m = u_val - 1 (since bit_k = 1)
                 // This is the MSB itself, which is 1 for significant samples
                 if u_val > 0 {
@@ -561,7 +561,7 @@ impl HTBlockEncoder {
                 }
             }
         }
-        
+
         (emb_k, emb_1)
     }
 
@@ -574,7 +574,7 @@ impl HTBlockEncoder {
         let (rho0, e_max_actual0, quad_coeffs0) = self.get_quad_info(x, y_base, block);
         let gamma0 = if rho0.count_ones() > 1 { 1 } else { 0 };
         let kappa0 = self.get_kappa(qx, qy0, gamma0);
-        
+
         let u0 = e_max_actual0.max(kappa0);
         let u_q0 = u0 - kappa0;
         let u_off0 = if u_q0 > 0 { 1 } else { 0 };
@@ -585,7 +585,7 @@ impl HTBlockEncoder {
         let (emb_k0, emb_1_0) = self.calculate_emb_bits(rho0, u0, &quad_coeffs0);
 
         if qx == 0 && qy0 == 0 {
-             eprintln!("ENC Q(0,0): rho={:04b} E_max={} kappa={} u={} u_q={} u_off={} emb_k={:04b} emb_1={:04b}", 
+             eprintln!("ENC Q(0,0): rho={:04b} E_max={} kappa={} u={} u_q={} u_off={} emb_k={:04b} emb_1={:04b}",
                        rho0, e_max_actual0, kappa0, u0, u_q0, u_off0, emb_k0, emb_1_0);
         }
 
@@ -619,15 +619,15 @@ impl HTBlockEncoder {
         // 2. VLC encoding Quad 0
         // Pass calculated emb_k and emb_1 to encode_vlc
         let vlc0 = vlc::encode_vlc(rho0, context0, u_off0, emb_k0, emb_1_0);
-        
+
         if qx == 0 && qy0 == 0 {
-             eprintln!("ENC Q(0,0): context={} vlc_value={:04X} vlc_bits={} coeffs={:?}", 
+             eprintln!("ENC Q(0,0): context={} vlc_value={:04X} vlc_bits={} coeffs={:?}",
                        context0, vlc0.value, vlc0.bits, quad_coeffs0);
         }
-        
+
         // Write VLC bits (LSB-first packing handled by VlcEncoder)
         self.write_vlc_bits(vlc0.value, vlc0.bits);
-        
+
         // Update significance state for Quad 0
         self.quad_significance[qy0 * self.num_quads_x + qx] = rho0 != 0;
 
@@ -641,7 +641,7 @@ impl HTBlockEncoder {
             false
         };
         let context1 = if sigma_n || sigma_w { 1 } else { 0 };
-        
+
         if has_q1 {
             // 3. MEL encoding Quad 1
             if context1 == 0 {
@@ -651,7 +651,7 @@ impl HTBlockEncoder {
             // 4. VLC encoding Quad 1
             let vlc1 = vlc::encode_vlc(rho1, context1, u_off1, emb_k1, emb_1_1);
             self.write_vlc_bits(vlc1.value, vlc1.bits);
-            
+
             // Update significance state for Quad 1
             self.quad_significance[qy1 * self.num_quads_x + qx] = rho1 != 0;
 
@@ -659,7 +659,7 @@ impl HTBlockEncoder {
             // u_q encoded is u_q - u_off
             let uvlc = vlc::encode_uvlc(u_q0.saturating_sub(u_off0), u_q1.saturating_sub(u_off1), 0);
             if qx == 0 && qy0 == 0 {
-                eprintln!("ENC Q(0,0): UVLC (2quad) uq0={} uq1={} value={:04X} bits={}", 
+                eprintln!("ENC Q(0,0): UVLC (2quad) uq0={} uq1={} value={:04X} bits={}",
                           u_q0.saturating_sub(u_off0), u_q1.saturating_sub(u_off1), uvlc.value, uvlc.bits);
             }
             self.write_vlc_bits(uvlc.value, uvlc.bits);
@@ -670,12 +670,12 @@ impl HTBlockEncoder {
         } else {
             // Only Quad 0 UVLC
             let uvlc = vlc::encode_uvlc(u_q0.saturating_sub(u_off0), 0, 0);
-            
+
             if qx == 0 && qy0 == 0 {
-                eprintln!("ENC Q(0,0): UVLC (1quad) uq0={} value={:04X} bits={}", 
+                eprintln!("ENC Q(0,0): UVLC (1quad) uq0={} value={:04X} bits={}",
                           u_q0.saturating_sub(u_off0), uvlc.value, uvlc.bits);
             }
-            
+
             self.write_vlc_bits(uvlc.value, uvlc.bits);
             self.emit_quad_magsgn(rho0, u0, emb_k0, &quad_coeffs0);
         }
@@ -688,7 +688,7 @@ impl HTBlockEncoder {
             return 1;
         }
         let mut max_e = 0u8;
-        
+
         // NE neighbor (qx+1, qy-1) availability:
         // Match decoder logic: valid only if qy is even (top of stripe)
         let ne_available = qy.is_multiple_of(2) && (qx + 1 < self.num_quads_x) && (qy > 0);
@@ -753,7 +753,7 @@ impl HTBlockEncoder {
                 let coord_x = i % 2;
                 let coord_y = i / 2;
                 if coord_x == 0 && coord_y == 0 {
-                    eprintln!("ENC sample[0,0]: coeff={} mag={} u_val={} bit_k={} e_k={} bits_to_write={}", 
+                    eprintln!("ENC sample[0,0]: coeff={} mag={} u_val={} bit_k={} e_k={} bits_to_write={}",
                               c, mag, u_val, bit_k, e_k, e_k);
                 }
 
@@ -774,12 +774,12 @@ impl HTBlockEncoder {
         // Context is 1 if at least one of the two previously encoded quads is significant.
         // Neighbors: Left (x-2, y) and Top (x, y-2)
         // In Quad coords: (qx-1, qy) and (qx, qy-1)
-        
+
         let qx = x / 2;
         let qy = y_base / 2;
-        
+
         let mut context = 0;
-        
+
         // Check Left Neighbor (qx-1, qy)
         if qx > 0 {
             let idx = qy * self.num_quads_x + (qx - 1);
@@ -787,7 +787,7 @@ impl HTBlockEncoder {
                 context |= 1;
             }
         }
-        
+
         // Check Top Neighbor (qx, qy-1)
         if qy > 0 {
             let idx = (qy - 1) * self.num_quads_x + qx;
@@ -795,7 +795,7 @@ impl HTBlockEncoder {
                 context |= 1;
             }
         }
-        
+
         context
     }
 }

@@ -1,5 +1,5 @@
 //! JPEG 1 Lossless (SOF3) Encoding/Decoding Tests
-//! 
+//!
 //! Tests lossless mode (ISO/IEC 10918-1 Annex H) with all predictor functions.
 //! Target: MAE=0 for all tests (perfect reconstruction).
 
@@ -25,7 +25,7 @@ fn test_lossless_8bit_grayscale_predictor1() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u8; width * height];
-    
+
     // Generate gradient pattern
     for y in 0..height {
         for x in 0..width {
@@ -42,7 +42,7 @@ fn test_lossless_8bit_grayscale_predictor1() {
 
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_lossless(1); // Predictor 1
-    
+
     let mut encoded = vec![0u8; 100000];
     let enc_len = encoder.encode(&source, &frame_info, &mut encoded)
         .expect("Lossless encode failed");
@@ -62,7 +62,7 @@ fn test_lossless_8bit_grayscale_predictor2() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u8; width * height];
-    
+
     for y in 0..height {
         for x in 0..width {
             source[y * width + x] = ((x * y) % 256) as u8;
@@ -78,7 +78,7 @@ fn test_lossless_8bit_grayscale_predictor2() {
 
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_lossless(2); // Predictor 2
-    
+
     let mut encoded = vec![0u8; 100000];
     let enc_len = encoder.encode(&source, &frame_info, &mut encoded)
         .expect("Lossless encode failed");
@@ -98,7 +98,7 @@ fn test_lossless_8bit_grayscale_predictor4() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u8; width * height];
-    
+
     // Checkerboard pattern
     for y in 0..height {
         for x in 0..width {
@@ -115,7 +115,7 @@ fn test_lossless_8bit_grayscale_predictor4() {
 
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_lossless(4); // Predictor 4 (A + B - C)
-    
+
     let mut encoded = vec![0u8; 100000];
     let enc_len = encoder.encode(&source, &frame_info, &mut encoded)
         .expect("Lossless encode failed");
@@ -135,7 +135,7 @@ fn test_lossless_8bit_grayscale_predictor7() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u8; width * height];
-    
+
     // Random-like pattern
     for y in 0..height {
         for x in 0..width {
@@ -152,7 +152,7 @@ fn test_lossless_8bit_grayscale_predictor7() {
 
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_lossless(7); // Predictor 7 ((A + B) / 2)
-    
+
     let mut encoded = vec![0u8; 100000];
     let enc_len = encoder.encode(&source, &frame_info, &mut encoded)
         .expect("Lossless encode failed");
@@ -172,7 +172,7 @@ fn test_lossless_8bit_rgb() {
     let width = 32;
     let height = 32;
     let mut source = vec![0u8; width * height * 3];
-    
+
     for y in 0..height {
         for x in 0..width {
             let idx = (y * width + x) * 3;
@@ -191,7 +191,7 @@ fn test_lossless_8bit_rgb() {
 
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_lossless(1); // Predictor 1
-    
+
     let mut encoded = vec![0u8; 100000];
     let enc_len = encoder.encode(&source, &frame_info, &mut encoded)
         .expect("Lossless RGB encode failed");
@@ -212,7 +212,7 @@ fn test_lossless_12bit_grayscale() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u16; width * height];
-    
+
     // 12-bit gradient (medical imaging use case)
     for y in 0..height {
         for x in 0..width {
@@ -230,7 +230,7 @@ fn test_lossless_12bit_grayscale() {
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_bits_per_sample(12);
     encoder.set_lossless(1);
-    
+
     let mut encoded = vec![0u8; 100000];
     let enc_len = encoder.encode_u16(&source, &frame_info, &mut encoded)
         .expect("12-bit lossless encode failed");
@@ -245,7 +245,7 @@ fn test_lossless_12bit_grayscale() {
         .zip(decoded.iter())
         .map(|(&a, &b)| (a as i32 - b as i32).abs() as f64)
         .sum::<f64>() / source.len() as f64;
-    
+
     assert_eq!(mae, 0.0, "12-bit lossless: MAE must be 0, got {}", mae);
 }
 
@@ -255,9 +255,9 @@ fn test_lossless_all_predictors() {
     let width = 32;
     let height = 32;
     let mut source = vec![0u8; width * height];
-    
-    for i in 0..source.len() {
-        source[i] = (i * 7 % 256) as u8;
+
+    for (i, val) in source.iter_mut().enumerate() {
+        *val = (i * 7 % 256) as u8;
     }
 
     let frame_info = FrameInfo {
@@ -270,7 +270,7 @@ fn test_lossless_all_predictors() {
     for predictor in 1..=7 {
         let mut encoder = Jpeg1Encoder::new();
         encoder.set_lossless(predictor);
-        
+
         let mut encoded = vec![0u8; 100000];
         let enc_len = encoder.encode(&source, &frame_info, &mut encoded)
             .unwrap_or_else(|_| panic!("Predictor {} encode failed", predictor));

@@ -614,7 +614,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         } else {
                             1 + (res - 1) * 3 + cb_info.subband_index as usize
                         };
-                        
+
                         // For reversible mode, calculate epsilon from depth + gain (not from QCD)
                         let quant_type = qcd.quant_style & 0x1F;
                         let epsilon_b = if quant_type == 0 || quant_type == 1 {
@@ -733,23 +733,23 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         y: cb_info.y as u32,
                         width: cb_width as u32,
                         height: cb_height as u32,
+                        layer_data: vec![data.clone()],
+                        layers_decoded: (layer + 1) as u8,
                         ..crate::jpeg2000::image::J2kCodeBlock::default()
                     };
-                    block.layer_data.push(data.clone());
-                    block.layers_decoded = (layer + 1) as u8;
 
                     // HTJ2K cleanup pass structure (ISO 15444-15):
                     // - First Pcup bytes: MagSgn data (forward stream)
                     // - Last Scup bytes: MEL+VLC data (backward stream) + 2 bytes for Scup value
                     // Scup = (data[len-1] << 4) + (data[len-2] & 0x0F)
-                    
+
                     let lcup = data.len();
                     if lcup < 2 {
                         // Empty or too small - skip
                         subband.codeblocks.push(block);
                         continue;
                     }
-                    
+
                     // Parse Scup (Suffix Length Indicator)
                     // ISO 15444-15: Scup is encoded at the end of the stream.
                     // It is a sequence of bytes where the last byte has MSB=0, and preceding bytes have MSB=1.
@@ -757,13 +757,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                     let mut scup = 0usize;
                     let mut shift = 0;
                     let mut idx = lcup - 1;
-                    
+
                     // First byte (last in stream)
                     if idx < data.len() {
                         let b = data[idx];
                         scup |= (b & 0x7F) as usize;
                         shift += 7;
-                        
+
                         // Scan backwards for bytes with MSB 1
                         while idx > 0 {
                             idx -= 1;
@@ -779,14 +779,14 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         }
                     }
                     let pcup = (idx + 1).saturating_sub(scup);
-                    
+
                     if std::env::var("HTJ2K_DEBUG").is_ok() {
                         eprintln!(
                             "[HTJ2K] Decoding block [{},{}] {}x{} Lcup={} Scup={} Pcup={}",
                             block.x, block.y, block.width, block.height, lcup, scup, pcup
                         );
                     }
-                    
+
                     // Validate Scup (must be >= 2 and <= Lcup and <= 4079)
                     if scup < 2 || scup > lcup || scup > 4079 {
                         eprintln!("[HTJ2K] WARNING: Invalid Scup={}, using whole buffer", scup);
@@ -801,7 +801,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         subband.codeblocks.push(block);
                         continue;
                     }
-                    
+
                     // Clone data to make it mutable for buffer modification
                     let mut data_copy = data.to_vec();
 
@@ -830,7 +830,7 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                                     block.coefficients.len()
                                 );
                             }
-                            
+
                             // Apply zero_bp shift (ISO 15444-15 6.1)
                             // The decoded values are M_q. Final coefficients are M_q * 2^Z_bp.
                             let zero_bp = cb_info.zero_bp;
@@ -948,10 +948,10 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                             height: cb_height as u32,
                             coding_passes: 0,
                             zero_bit_planes: zero_bp,
+                            layer_data: vec![data.clone()],
+                            layers_decoded: (layer + 1) as u8,
                             ..crate::jpeg2000::image::J2kCodeBlock::default()
                         };
-                        block.layer_data.push(data.clone());
-                        block.layers_decoded = (layer + 1) as u8;
 
                         let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
                             block.width,
@@ -1007,16 +1007,18 @@ mod tests {
         // Mock image with 2 components:
         // Comp 0: 1x1 subsampling (Full res)
         // Comp 1: 2x2 subsampling (Half res)
-        let mut image = J2kImage::default();
-        image.width = 512;
-        image.height = 512;
-        image.x_origin = 0;
-        image.y_origin = 0;
-        image.tile_width = 512;
-        image.tile_height = 512;
-        image.tile_x_origin = 0;
-        image.tile_y_origin = 0;
-        image.component_count = 2;
+        let mut image = J2kImage {
+            width: 512,
+            height: 512,
+            x_origin: 0,
+            y_origin: 0,
+            tile_width: 512,
+            tile_height: 512,
+            tile_x_origin: 0,
+            tile_y_origin: 0,
+            component_count: 2,
+            ..J2kImage::default()
+        };
 
         // Component 0
         image.components.push(J2kComponentInfo {

@@ -1,4 +1,4 @@
-/// Test JPEG 2000 with various edge case sizes to identify DWT or grid issues
+//! Test JPEG 2000 with various edge case sizes to identify DWT or grid issues
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -8,7 +8,7 @@ fn calculate_mae(original: &[u8], reconstructed: &[u8]) -> f64 {
     assert_eq!(original.len(), reconstructed.len());
     let mut sum_error = 0u64;
     for i in 0..original.len() {
-        sum_error += (original[i] as i64 - reconstructed[i] as i64).abs() as u64;
+        sum_error += original[i].abs_diff(reconstructed[i]) as u64;
     }
     sum_error as f64 / original.len() as f64
 }

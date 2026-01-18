@@ -146,7 +146,7 @@ mod tests {
         for (orig, &recon) in original_pixels.iter().zip(reconstructed.iter()) {
             let orig_val = *orig as i32;
             let recon_val = recon as i32;
-            let diff = (orig_val - recon_val).abs() as u32;
+            let diff = orig_val.abs_diff(recon_val);
             total_diff += diff as u64;
             max_diff = max_diff.max(diff);
             pixel_count += 1;

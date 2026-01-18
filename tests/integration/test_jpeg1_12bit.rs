@@ -7,8 +7,8 @@ fn test_jpeg1_12bit_roundtrip() {
     let width = 16;
     let height = 16;
     let mut source = vec![0u16; width * height];
-    for i in 0..source.len() {
-        source[i] = (i * 4) as u16; // 0 to 1020
+    for (i, val) in source.iter_mut().enumerate() {
+        *val = (i * 4) as u16; // 0 to 1020
     }
 
     let frame_info = FrameInfo {
@@ -34,8 +34,8 @@ fn test_jpeg1_12bit_roundtrip() {
     } else {
         0xC0
     };
-    for i in 0..enc_len - 1 {
-        if encoded[i] == 0xFF && encoded[i + 1] == expected_sof {
+    for (i, &byte) in encoded.iter().enumerate().take(enc_len - 1) {
+        if byte == 0xFF && encoded[i + 1] == expected_sof {
             found_sof = true;
             break;
         }
@@ -58,15 +58,15 @@ fn test_jpeg1_12bit_roundtrip() {
     println!("First 8 source: {:?}", &source[0..8]);
     println!("First 8 decoded: {:?}", &decoded[0..8]);
 
-    for i in 0..source.len() {
-        let diff = (source[i] as i32 - decoded[i] as i32).abs();
+    for (i, (&src, &dec)) in source.iter().zip(decoded.iter()).enumerate() {
+        let diff = src.abs_diff(dec);
         // 12-bit DCT is lossy, allow some error
         assert!(
             diff < 100,
             "Mismatch at index {}: src={} dec={} diff={}",
             i,
-            source[i],
-            decoded[i],
+            src,
+            dec,
             diff
         );
     }

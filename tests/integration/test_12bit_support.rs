@@ -1,8 +1,7 @@
-/// Test suite for 12-bit JPEG 2000 support
-///
-/// Validates that jpegexp-rs correctly handles 12-bit medical images
-/// per DICOM requirements (PS3.5 Section 8.2.4)
-
+//! Test suite for 12-bit JPEG 2000 support
+//!
+//! Validates that jpegexp-rs correctly handles 12-bit medical images
+//! per DICOM requirements (PS3.5 Section 8.2.4)
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;

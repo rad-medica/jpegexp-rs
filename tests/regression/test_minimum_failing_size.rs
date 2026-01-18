@@ -1,5 +1,4 @@
-/// Find the minimum failing size
-
+//! Find the minimum failing size
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -8,7 +7,7 @@ use jpegexp_rs::FrameInfo;
 fn mae(a: &[u8], b: &[u8]) -> f64 {
     let sum: u64 = a.iter()
         .zip(b.iter())
-        .map(|(&x, &y)| (x as i32 - y as i32).abs() as u64)
+        .map(|(&x, &y)| x.abs_diff(y) as u64)
         .sum();
     sum as f64 / a.len() as f64
 }

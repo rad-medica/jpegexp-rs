@@ -81,7 +81,7 @@ fn test_htj2k_2x2_gradient() {
     println!("\n=== Testing HTJ2K 2x2 gradient ===");
 
     // Create 2x2 gradient: [0, 85, 170, 255]
-    let pixels = vec![0u8, 85, 170, 255];
+    let pixels = [0u8, 85, 170, 255];
 
     let frame_info = FrameInfo {
         width: 2,

@@ -37,14 +37,14 @@ impl Dwt53 {
         // De-interleave
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for (i, &val) in x.iter().enumerate().take(len) {
+        for (i, val) in x.iter().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < out_l.len() {
-                    out_l[l_idx] = val;
+                    out_l[l_idx] = *val;
                     l_idx += 1;
                 }
             } else if h_idx < out_h.len() {
-                out_h[h_idx] = val;
+                out_h[h_idx] = *val;
                 h_idx += 1;
             }
         }
@@ -257,14 +257,14 @@ impl Dwt97 {
 
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for (i, &val) in x.iter().enumerate().take(len) {
+        for (i, val) in x.iter().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < out_l.len() {
-                    out_l[l_idx] = val;
+                    out_l[l_idx] = *val;
                     l_idx += 1;
                 }
             } else if h_idx < out_h.len() {
-                out_h[h_idx] = val;
+                out_h[h_idx] = *val;
                 h_idx += 1;
             }
         }
@@ -420,7 +420,7 @@ mod tests {
     fn test_dwt_53_roundtrip() {
         let input = [10, 20, 30, 40, 50, 60, 70, 80];
         let len = input.len();
-        let l_len = (len + 1) / 2;
+        let l_len = len.div_ceil(2);
         let h_len = len / 2;
         let mut l = vec![0i32; l_len];
         let mut h = vec![0i32; h_len];
@@ -434,7 +434,7 @@ mod tests {
     fn test_dwt_53_odd_length() {
         let input = [10, 20, 30, 40, 50];
         let len = input.len();
-        let l_len = (len + 1) / 2;
+        let l_len = len.div_ceil(2);
         let h_len = len / 2;
         let mut l = vec![0i32; l_len];
         let mut h = vec![0i32; h_len];
@@ -448,7 +448,7 @@ mod tests {
     fn test_dwt_97_roundtrip() {
         let input = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
         let len = input.len();
-        let l_len = (len + 1) / 2;
+        let l_len = len.div_ceil(2);
         let h_len = len / 2;
         let mut l = vec![0.0f32; l_len];
         let mut h = vec![0.0f32; h_len];

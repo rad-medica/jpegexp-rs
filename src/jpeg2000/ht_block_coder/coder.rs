@@ -6,7 +6,7 @@ use crate::jpeg2000::image::J2kCodeBlock;
 use crate::JpeglsError;
 
 /// HTJ2K Block Decoder (ISO/IEC 15444-15)
-/// 
+///
 /// The cleanup pass data is structured as:
 /// - MagSgn data: forward stream from byte 0
 /// - MEL+VLC data: backward (MEL) and forward (VLC) from the same buffer
@@ -60,12 +60,12 @@ impl<'a> HTBlockCoder<'a> {
 
     pub fn decode_block(&mut self, block: &mut J2kCodeBlock) -> Result<(), JpeglsError> {
         let debug = std::env::var("HTJ2K_DEBUG").is_ok();
-        
+
         if debug {
-            eprintln!("DEC: decode_block called for block ({},{}) {}x{}", 
+            eprintln!("DEC: decode_block called for block ({},{}) {}x{}",
                       block.x, block.y, self.width, self.height);
         }
-        
+
         if block.width == 0 {
             block.width = self.width as u32;
         }
@@ -78,7 +78,7 @@ impl<'a> HTBlockCoder<'a> {
         }
 
         if debug {
-            eprintln!("DEC: Starting decode loop, num_quads_x={} num_quads_y={}", 
+            eprintln!("DEC: Starting decode loop, num_quads_x={} num_quads_y={}",
                       self.num_quads_x, self.height.div_ceil(2));
         }
 
@@ -259,9 +259,9 @@ impl<'a> HTBlockCoder<'a> {
         let kappa0 = self.get_kappa(qx, qy0, if rho0.count_ones() > 1 { 1 } else { 0 });
         let u0 = kappa0 + u_q0;
         self.quad_exponents[qy0 * self.num_quads_x + qx] = u0;
-        
+
         if debug && qx == 0 && qy0 == 0 {
-             eprintln!("DEC Q(0,0): rho={:04b} u={} kappa={} u_q={} emb_k={:04b} emb_1={:04b}", 
+             eprintln!("DEC Q(0,0): rho={:04b} u={} kappa={} u_q={} emb_k={:04b} emb_1={:04b}",
                        rho0, u0, kappa0, u_q0, emb_k0, emb_1_0);
         }
 
@@ -281,7 +281,7 @@ impl<'a> HTBlockCoder<'a> {
     fn get_kappa(&self, qx: usize, qy: usize, gamma: u8) -> u8 {
         if gamma == 0 { return 1; }
         let mut max_e = 0u8;
-        
+
         let ne_available = qy.is_multiple_of(2) && (qx + 1 < self.num_quads_x) && (qy > 0);
 
         let neighbors = [
@@ -309,28 +309,28 @@ impl<'a> HTBlockCoder<'a> {
         block: &mut J2kCodeBlock,
     ) -> Result<(), JpeglsError> {
         let debug = std::env::var("HTJ2K_DEBUG").is_ok();
-        
+
         if debug && x == 0 && y == 0 {
             eprintln!("DEC reconstruct_quad: x={} y={} rho={:04b} u_val={} emb_k={:04b} emb_1={:04b}",
                       x, y, rho, u_val, emb_k, emb_1);
         }
-        
-        if rho == 0 { 
-            return Ok(()); 
+
+        if rho == 0 {
+            return Ok(());
         }
 
         let w = block.width as usize;
         let h = block.height as usize;
-        
+
         // For each sample in the quad (sample order: 0=TL, 1=TR, 2=BL, 3=BR)
         // ISO 15444-15 Table 2: 0=(0,0), 1=(1,0), 2=(0,1), 3=(1,1)
         for i in 0..4 {
             let sigma = (rho >> i) & 1;
-            
+
             if sigma == 0 {
                 continue;
             }
-            
+
             // NOTE: We observed OpenHTJ2K producing rho=2 (bit 1) for pixel (0,0).
             // Standard says bit 0 is (0,0).
             // This suggests scan order swap between 0 and 1.
@@ -340,14 +340,14 @@ impl<'a> HTBlockCoder<'a> {
             // i=1 -> (1,0)
             // i=2 -> (0,1)
             // i=3 -> (1,1)
-            
+
             let px = x + (i % 2);
             let py = y + (i / 2);
-            
+
             if px >= w || py >= h {
                 continue;
             }
-            
+
             // Calculate m: number of magnitude bits to read
             let bit_k = (emb_k >> i) & 1;
             let m = u_val.saturating_sub(bit_k);
@@ -376,25 +376,25 @@ impl<'a> HTBlockCoder<'a> {
             // Add emb_1 bit at position m
             let known_1 = (emb_1 >> i) & 1;
             let v = v_n | ((known_1 as u32) << m);
-            
+
             if debug && px == 0 && py == 0 {
                 eprintln!("DEC sample[{},{}]: bit_k={} m={} ms_val={:06b} v_n={} known_1={} v={} sign={}",
                           px, py, bit_k, m, ms_val, v_n, known_1, v, sign);
             }
-            
+
             let mu = v as i32;
             block.coefficients[py * w + px] = mu * sign;
         }
-        
+
         Ok(())
     }
 
     fn calculate_context(&self, x: usize, y_base: usize, _block: &J2kCodeBlock) -> u8 {
         let qx = x / 2;
         let qy = y_base / 2;
-        
+
         let mut context = 0;
-        
+
         // Check Left Neighbor (qx-1, qy)
         if qx > 0 {
             let idx = qy * self.num_quads_x + (qx - 1);
@@ -402,7 +402,7 @@ impl<'a> HTBlockCoder<'a> {
                 context |= 1;
             }
         }
-        
+
         // Check Top Neighbor (qx, qy-1)
         if qy > 0 {
              let idx = (qy - 1) * self.num_quads_x + qx;
@@ -410,7 +410,7 @@ impl<'a> HTBlockCoder<'a> {
                 context |= 1;
             }
         }
-        
+
         context
     }
 }

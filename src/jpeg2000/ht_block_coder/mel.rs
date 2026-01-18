@@ -31,7 +31,7 @@ impl<'a> MelDecoder<'a> {
 
         // Initial fill of tmp buffer (align to 4-byte boundary like OpenHTJ2K)
         // Calculate alignment: 4 - (buf address & 0x3)
-        let num = 4 - (decoder.pos & 0x3);
+        let num = 4 - (decoder.pos % 4);
         let num_initial = num.min(decoder.length as usize);
 
         for _ in 0..num_initial {

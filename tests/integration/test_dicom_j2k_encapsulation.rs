@@ -1,11 +1,10 @@
-/// Integration test for DICOM-encapsulated JPEG 2000
-///
-/// Tests the complete workflow:
-/// 1. Encode images to JPEG 2000 codestreams
-/// 2. Encapsulate codestreams in DICOM format
-/// 3. Parse DICOM encapsulation and extract codestreams
-/// 4. Decode and verify quality
-
+//! Integration test for DICOM-encapsulated JPEG 2000
+//!
+//! Tests the complete workflow:
+//! 1. Encode images to JPEG 2000 codestreams
+//! 2. Encapsulate codestreams in DICOM format
+//! 3. Parse DICOM encapsulation and extract codestreams
+//! 4. Decode and verify quality
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -18,8 +17,8 @@ fn calculate_mae(original: &[u8], decoded: &[u8]) -> f64 {
     let sum: i32 = original
         .iter()
         .zip(decoded.iter())
-        .map(|(a, b)| (*a as i32 - *b as i32).abs())
-        .sum();
+        .map(|(a, b)| a.abs_diff(*b))
+        .sum::<u32>() as i32;
     sum as f64 / original.len() as f64
 }
 
@@ -124,7 +123,7 @@ fn test_dicom_j2k_multi_frame_lossless() {
         }
     }
 
-    let frames = vec![frame1, frame2, frame3];
+    let frames = [frame1, frame2, frame3];
 
     // Encode each frame to JPEG 2000
     let mut encoder = J2kEncoder::new();

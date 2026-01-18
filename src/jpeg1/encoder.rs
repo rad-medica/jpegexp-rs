@@ -26,19 +26,19 @@ fn downsample_chroma_420(full_res: &[f32], width: usize, height: usize) -> Vec<f
     let sub_width = width.div_ceil(2);
     let sub_height = height.div_ceil(2);
     let mut result = vec![0.0f32; sub_width * sub_height];
-    
+
     for y in 0..sub_height {
         for x in 0..sub_width {
             let x0 = x * 2;
             let y0 = y * 2;
             let x1 = (x0 + 1).min(width - 1);
             let y1 = (y0 + 1).min(height - 1);
-            
+
             let sum = full_res[y0 * width + x0]
                     + full_res[y0 * width + x1]
                     + full_res[y1 * width + x0]
                     + full_res[y1 * width + x1];
-            
+
             result[y * sub_width + x] = sum * 0.25;
         }
     }
@@ -50,15 +50,15 @@ fn downsample_chroma_420(full_res: &[f32], width: usize, height: usize) -> Vec<f
 fn downsample_chroma_422(full_res: &[f32], width: usize, height: usize) -> Vec<f32> {
     let sub_width = width.div_ceil(2);
     let mut result = vec![0.0f32; sub_width * height];
-    
+
     for y in 0..height {
         for x in 0..sub_width {
             let x0 = x * 2;
             let x1 = (x0 + 1).min(width - 1);
-            
+
             let sum = full_res[y * width + x0]
                     + full_res[y * width + x1];
-            
+
             result[y * sub_width + x] = sum * 0.5;
         }
     }
@@ -214,7 +214,7 @@ impl Jpeg1Encoder {
         if self.lossless_mode {
             return self.encode_lossless(source, frame_info, destination);
         }
-        
+
         if self.progressive_mode {
             // Placeholder for Progressive Encoding
             // This will use collect_quantized_coefficients and scan loops
@@ -274,7 +274,7 @@ impl Jpeg1Encoder {
                 let mut y_plane = vec![0.0f32; width * height];
                 let mut cb_plane = vec![0.0f32; width * height];
                 let mut cr_plane = vec![0.0f32; width * height];
-                
+
                 for py in 0..height {
                     for px in 0..width {
                         let idx = (py * width + px) * 3;
@@ -302,7 +302,7 @@ impl Jpeg1Encoder {
                 } else {
                     (cb_plane, width, height)
                 };
-                
+
                 let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                         (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
@@ -418,14 +418,9 @@ impl Jpeg1Encoder {
         }
 
         // Write Huffman Tables (Luminance)
-        // Note: For now we use the same tables for 8-bit and >8-bit, 
+        // Note: For now we use the same tables for 8-bit and >8-bit,
         // but this logic allows for future optimization or differentiation
-        #[allow(clippy::if_same_then_else)]
-        if self.bits_per_sample > 8 {
-            writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
-        } else {
-            writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
-        }
+        writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
         writer.write_dht(1, 0, &self.ac_table_lum.lengths, &self.ac_table_lum.values)?;
 
         if components_count > 1 {
@@ -447,7 +442,7 @@ impl Jpeg1Encoder {
         } else {
             vec![(1, 1)]
         };
-        
+
         if self.bits_per_sample > 8 {
             writer.write_sof1_segment_with_sampling(frame_info, &sampling_factors)?;
         } else {
@@ -467,7 +462,7 @@ impl Jpeg1Encoder {
         if components_count == 1 {
             // Grayscale encoding (unchanged)
             let total_mcus = height.div_ceil(8) * width.div_ceil(8);
-            
+
             for block_y in (0..height).step_by(8) {
                 for block_x in (0..width).step_by(8) {
                     if self.restart_interval > 0 && mcus_encoded > 0 && (mcus_encoded % self.restart_interval as usize == 0) && mcus_encoded < total_mcus {
@@ -504,7 +499,7 @@ impl Jpeg1Encoder {
             let mut y_plane = vec![0.0f32; width * height];
             let mut cb_plane = vec![0.0f32; width * height];
             let mut cr_plane = vec![0.0f32; width * height];
-            
+
             for py in 0..height {
                 for px in 0..width {
                     let idx = (py * width + px) * 3;
@@ -519,7 +514,7 @@ impl Jpeg1Encoder {
                     cr_plane[py * width + px] = cr - 128.0;
                 }
             }
-            
+
             // Step 2: Downsample chroma if needed
             let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
@@ -535,7 +530,7 @@ impl Jpeg1Encoder {
             } else {
                 (cb_plane.clone(), width, height)
             };
-            
+
             let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:0
@@ -549,14 +544,14 @@ impl Jpeg1Encoder {
             } else {
                 (cr_plane.clone(), width, height)
             };
-            
+
             // Step 3: Calculate MCU dimensions
             let mcu_width = 8 * self.h_samp_y as usize;
             let mcu_height = 8 * self.v_samp_y as usize;
             let mcu_cols = width.div_ceil(mcu_width);
             let mcu_rows = height.div_ceil(mcu_height);
             let total_mcus = mcu_rows * mcu_cols;
-            
+
             // Step 4: Encode MCUs
             for mcu_row in 0..mcu_rows {
                 for mcu_col in 0..mcu_cols {
@@ -574,14 +569,14 @@ impl Jpeg1Encoder {
                     }
 
                     let bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
-                    
+
                     // Encode Y blocks (h_samp_y * v_samp_y blocks per MCU)
                     for v in 0..self.v_samp_y {
                         for h in 0..self.h_samp_y {
                             let block_x = mcu_col * mcu_width + h as usize * 8;
                             let block_y = mcu_row * mcu_height + v as usize * 8;
                             let mut block_data = [0.0f32; 64];
-                            
+
                             for y in 0..8 {
                                 for x in 0..8 {
                                     let px = block_x + x;
@@ -594,14 +589,14 @@ impl Jpeg1Encoder {
                             Self::encode_block_internal(&mut self.huffman, &block_data, bit_writer, &self.dc_table_lum, &self.ac_table_lum, &self.quantization_table_lum, 0)?;
                         }
                     }
-                    
+
                     // Encode Cb blocks (h_samp_chroma * v_samp_chroma blocks per MCU)
                     for v in 0..self.v_samp_chroma {
                         for h in 0..self.h_samp_chroma {
                             let block_x = mcu_col * (mcu_width / (self.h_samp_y / self.h_samp_chroma) as usize) + h as usize * 8;
                             let block_y = mcu_row * (mcu_height / (self.v_samp_y / self.v_samp_chroma) as usize) + v as usize * 8;
                             let mut block_data = [0.0f32; 64];
-                            
+
                             for y in 0..8 {
                                 for x in 0..8 {
                                     let px = block_x + x;
@@ -614,14 +609,14 @@ impl Jpeg1Encoder {
                             Self::encode_block_internal(&mut self.huffman, &block_data, bit_writer, &self.dc_table_chrom, &self.ac_table_chrom, &self.quantization_table_chrom, 1)?;
                         }
                     }
-                    
+
                     // Encode Cr blocks (h_samp_chroma * v_samp_chroma blocks per MCU)
                     for v in 0..self.v_samp_chroma {
                         for h in 0..self.h_samp_chroma {
                             let block_x = mcu_col * (mcu_width / (self.h_samp_y / self.h_samp_chroma) as usize) + h as usize * 8;
                             let block_y = mcu_row * (mcu_height / (self.v_samp_y / self.v_samp_chroma) as usize) + v as usize * 8;
                             let mut block_data = [0.0f32; 64];
-                            
+
                             for y in 0..8 {
                                 for x in 0..8 {
                                     let px = block_x + x;
@@ -634,7 +629,7 @@ impl Jpeg1Encoder {
                             Self::encode_block_internal(&mut self.huffman, &block_data, bit_writer, &self.dc_table_chrom, &self.ac_table_chrom, &self.quantization_table_chrom, 2)?;
                         }
                     }
-                    
+
                     mcus_encoded += 1;
                 }
             }
@@ -705,7 +700,7 @@ impl Jpeg1Encoder {
                 let mut y_plane = vec![0.0f32; width * height];
                 let mut cb_plane = vec![0.0f32; width * height];
                 let mut cr_plane = vec![0.0f32; width * height];
-                
+
                 for py in 0..height {
                     for px in 0..width {
                         let idx = (py * width + px) * components_count;
@@ -733,7 +728,7 @@ impl Jpeg1Encoder {
                 } else {
                     (cb_plane, width, height)
                 };
-                
+
                 let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                         (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
@@ -849,14 +844,9 @@ impl Jpeg1Encoder {
         }
 
         // Write Huffman Tables (Luminance)
-        // Note: For now we use the same tables for 8-bit and >8-bit, 
+        // Note: For now we use the same tables for 8-bit and >8-bit,
         // but this logic allows for future optimization or differentiation
-        #[allow(clippy::if_same_then_else)]
-        if self.bits_per_sample > 8 {
-            writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
-        } else {
-            writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
-        }
+        writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
         writer.write_dht(1, 0, &self.ac_table_lum.lengths, &self.ac_table_lum.values)?;
 
         if components_count > 1 {
@@ -878,7 +868,7 @@ impl Jpeg1Encoder {
         } else {
             vec![(1, 1)]
         };
-        
+
         if frame_info.bits_per_sample > 8 {
             writer.write_sof1_segment_with_sampling(frame_info, &sampling_factors)?;
         } else {
@@ -898,7 +888,7 @@ impl Jpeg1Encoder {
         if components_count == 1 {
             // Grayscale encoding (unchanged)
             let total_mcus = height.div_ceil(8) * width.div_ceil(8);
-            
+
             for block_y in (0..height).step_by(8) {
                 for block_x in (0..width).step_by(8) {
                     if self.restart_interval > 0 && mcus_encoded > 0 && (mcus_encoded % self.restart_interval as usize == 0) && mcus_encoded < total_mcus {
@@ -935,7 +925,7 @@ impl Jpeg1Encoder {
             let mut y_plane = vec![0.0f32; width * height];
             let mut cb_plane = vec![0.0f32; width * height];
             let mut cr_plane = vec![0.0f32; width * height];
-            
+
             for py in 0..height {
                 for px in 0..width {
                     let idx = (py * width + px) * components_count;
@@ -950,7 +940,7 @@ impl Jpeg1Encoder {
                     cr_plane[py * width + px] = cr - level_shift;
                 }
             }
-            
+
             // Step 2: Downsample chroma if needed
             let (cb_downsampled, cb_width, cb_height) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
@@ -966,7 +956,7 @@ impl Jpeg1Encoder {
             } else {
                 (cb_plane.clone(), width, height)
             };
-            
+
             let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     // 4:2:0
@@ -980,14 +970,14 @@ impl Jpeg1Encoder {
             } else {
                 (cr_plane.clone(), width, height)
             };
-            
+
             // Step 3: Calculate MCU dimensions
             let mcu_width = 8 * self.h_samp_y as usize;
             let mcu_height = 8 * self.v_samp_y as usize;
             let mcu_cols = width.div_ceil(mcu_width);
             let mcu_rows = height.div_ceil(mcu_height);
             let total_mcus = mcu_rows * mcu_cols;
-            
+
             // Step 4: Encode MCUs
             for mcu_row in 0..mcu_rows {
                 for mcu_col in 0..mcu_cols {
@@ -1005,14 +995,14 @@ impl Jpeg1Encoder {
                     }
 
                     let bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
-                    
+
                     // Encode Y blocks (h_samp_y * v_samp_y blocks per MCU)
                     for v in 0..self.v_samp_y {
                         for h in 0..self.h_samp_y {
                             let block_x = mcu_col * mcu_width + h as usize * 8;
                             let block_y = mcu_row * mcu_height + v as usize * 8;
                             let mut block_data = [0.0f32; 64];
-                            
+
                             for y in 0..8 {
                                 for x in 0..8 {
                                     let px = block_x + x;
@@ -1025,14 +1015,14 @@ impl Jpeg1Encoder {
                             Self::encode_block_internal(&mut self.huffman, &block_data, bit_writer, &self.dc_table_lum, &self.ac_table_lum, &self.quantization_table_lum, 0)?;
                         }
                     }
-                    
+
                     // Encode Cb blocks (h_samp_chroma * v_samp_chroma blocks per MCU)
                     for v in 0..self.v_samp_chroma {
                         for h in 0..self.h_samp_chroma {
                             let block_x = mcu_col * (mcu_width / (self.h_samp_y / self.h_samp_chroma) as usize) + h as usize * 8;
                             let block_y = mcu_row * (mcu_height / (self.v_samp_y / self.v_samp_chroma) as usize) + v as usize * 8;
                             let mut block_data = [0.0f32; 64];
-                            
+
                             for y in 0..8 {
                                 for x in 0..8 {
                                     let px = block_x + x;
@@ -1045,14 +1035,14 @@ impl Jpeg1Encoder {
                             Self::encode_block_internal(&mut self.huffman, &block_data, bit_writer, &self.dc_table_chrom, &self.ac_table_chrom, &self.quantization_table_chrom, 1)?;
                         }
                     }
-                    
+
                     // Encode Cr blocks (h_samp_chroma * v_samp_chroma blocks per MCU)
                     for v in 0..self.v_samp_chroma {
                         for h in 0..self.h_samp_chroma {
                             let block_x = mcu_col * (mcu_width / (self.h_samp_y / self.h_samp_chroma) as usize) + h as usize * 8;
                             let block_y = mcu_row * (mcu_height / (self.v_samp_y / self.v_samp_chroma) as usize) + v as usize * 8;
                             let mut block_data = [0.0f32; 64];
-                            
+
                             for y in 0..8 {
                                 for x in 0..8 {
                                     let px = block_x + x;
@@ -1065,7 +1055,7 @@ impl Jpeg1Encoder {
                             Self::encode_block_internal(&mut self.huffman, &block_data, bit_writer, &self.dc_table_chrom, &self.ac_table_chrom, &self.quantization_table_chrom, 2)?;
                         }
                     }
-                    
+
                     mcus_encoded += 1;
                 }
             }
@@ -1134,7 +1124,7 @@ impl Jpeg1Encoder {
                 let mut y_plane = vec![0.0f32; width * height];
                 let mut cb_plane = vec![0.0f32; width * height];
                 let mut cr_plane = vec![0.0f32; width * height];
-                
+
                 for py in 0..height {
                     for px in 0..width {
                         let idx = (py * width + px) * 3;
@@ -1162,7 +1152,7 @@ impl Jpeg1Encoder {
                 } else {
                     (cb_plane, width, height)
                 };
-                
+
                 let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                     if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                         (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
@@ -1576,17 +1566,17 @@ impl Jpeg1Encoder {
         // For now, let's assume we can write the SOF2 marker manually or add a method.
         // Wait, JpegStreamWriter is in another file. I should check if it has SOF2 support.
         // If not, I'll use write_marker and write_segment_payload logic if possible, or modify JpegStreamWriter.
-        
+
         // Let's assume for a moment we can use write_sof0_segment but patch the marker code?
         // No, write_sof0_segment likely writes the marker byte.
         // Let's check JpegStreamWriter content if possible, or just implement a local helper.
-        // Since I can't see JpegStreamWriter content right now (I saw it earlier but didn't memorize it), 
+        // Since I can't see JpegStreamWriter content right now (I saw it earlier but didn't memorize it),
         // I'll assume I need to add `write_sof2_segment` to it or use a raw write.
-        
+
         // TEMPORARY: Write SOF0 for now to test flow, but this is WRONG for progressive.
         // The decoder will see SOF0 and expect sequential.
         // I need to write marker 0xC2 (SOF2).
-        
+
         // Let's try to use the public API of JpegStreamWriter to write raw marker + data.
         // Sampling factors
         let sampling_factors = if components_count > 1 {
@@ -1598,7 +1588,7 @@ impl Jpeg1Encoder {
         } else {
             vec![(1, 1)]
         };
-        
+
         // Manual SOF2 write
         writer.write_marker(crate::jpeg_marker_code::JpegMarkerCode::try_from(0xC2).unwrap())?; // SOF2
         let len = 8 + 3 * components_count as u16;
@@ -1607,7 +1597,7 @@ impl Jpeg1Encoder {
         writer.write_u16(frame_info.height as u16)?;
         writer.write_u16(frame_info.width as u16)?;
         writer.write_byte(components_count as u8)?;
-        for (i, &(h, v)) in sampling_factors.iter().enumerate().take(components_count) {
+        for (i, (h, v)) in sampling_factors.iter().enumerate().take(components_count) {
             writer.write_byte((i + 1) as u8)?; // ID
             writer.write_byte((h << 4) | v)?;
             writer.write_byte(if i == 0 { 0 } else { 1 })?; // Quant table selector
@@ -1617,7 +1607,7 @@ impl Jpeg1Encoder {
         // Initialize buffers for each component
         // 0: Y, 1: Cb, 2: Cr
         let mut buffers: Vec<CoefficientBuffer> = Vec::with_capacity(components_count);
-        
+
         if components_count == 1 {
             buffers.push(CoefficientBuffer::new(width, height, 1, 1));
         } else {
@@ -1633,18 +1623,18 @@ impl Jpeg1Encoder {
             // It takes (width, height, h_samp, v_samp).
             // It calculates mcu_cols/rows based on that.
             // So we just pass the full image dims and the component's sampling factors.
-            
+
             buffers.push(CoefficientBuffer::new(width, height, self.h_samp_chroma, self.v_samp_chroma)); // Cb
             buffers.push(CoefficientBuffer::new(width, height, self.h_samp_chroma, self.v_samp_chroma)); // Cr
         }
 
         // Fill buffers (reuse sequential logic structure)
         let level_shift = (1 << (frame_info.bits_per_sample - 1)) as f32;
-        
+
         // This part is very similar to sequential encode, but calls collect_quantized_coefficients
         // instead of encode_block_internal.
         // We can copy-paste the loop structure from `encode`.
-        
+
         // ... (Data collection loop) ...
         // I'll implement a helper `fill_coefficient_buffers` to keep this clean.
         self.fill_coefficient_buffers(source, frame_info, &mut buffers, level_shift);
@@ -1653,7 +1643,7 @@ impl Jpeg1Encoder {
         // Use Simple Spectral for maximum compatibility and robustness.
         // Successive Approximation (SA) is implemented but sensitive to bitstream details.
         let script = ScanScript::simple_spectral();
-        
+
         for scan in script.scans {
             self.write_scan(&scan, &mut writer, &mut buffers)?;
         }
@@ -1663,9 +1653,9 @@ impl Jpeg1Encoder {
     }
 
     fn fill_coefficient_buffers(
-        &self, 
-        source: &[u8], 
-        frame_info: &FrameInfo, 
+        &self,
+        source: &[u8],
+        frame_info: &FrameInfo,
         buffers: &mut [CoefficientBuffer],
         level_shift: f32
     ) {
@@ -1692,12 +1682,12 @@ impl Jpeg1Encoder {
                     let mcu_y = block_y / 8;
                     let mcu_width = width.div_ceil(8);
                     let mcu_idx = mcu_y * mcu_width + mcu_x;
-                    
+
                     Self::collect_quantized_coefficients(
-                        &block_data, 
-                        &self.quantization_table_lum, 
-                        &mut buffers[0], 
-                        mcu_idx, 
+                        &block_data,
+                        &self.quantization_table_lum,
+                        &mut buffers[0],
+                        mcu_idx,
                         0
                     );
                 }
@@ -1706,16 +1696,16 @@ impl Jpeg1Encoder {
             // RGB/YCbCr
             // Need planar conversion first (or on the fly)
             // Reuse on-the-fly logic from encode()
-            
+
             // ... (Copy YCbCr conversion and downsampling logic) ...
             // For brevity in this edit, I'll implement a simplified version or copy it.
             // Ideally, we refactor this into a helper, but `encode` is monolithic.
             // Let's implement the loop here.
-            
+
             let mut y_plane = vec![0.0f32; width * height];
             let mut cb_plane = vec![0.0f32; width * height];
             let mut cr_plane = vec![0.0f32; width * height];
-            
+
             for py in 0..height {
                 for px in 0..width {
                     let idx = (py * width + px) * 3;
@@ -1743,7 +1733,7 @@ impl Jpeg1Encoder {
             } else {
                 (cb_plane, width, height)
             };
-            
+
             let (cr_downsampled, _, _) = if self.h_samp_y > self.h_samp_chroma || self.v_samp_y > self.v_samp_chroma {
                 if self.h_samp_y == 2 && self.v_samp_y == 2 && self.h_samp_chroma == 1 && self.v_samp_chroma == 1 {
                     (downsample_chroma_420(&cr_plane, width, height), width.div_ceil(2), height.div_ceil(2))
@@ -1843,13 +1833,13 @@ impl Jpeg1Encoder {
         let len = 2 + 1 + 2 * scan.component_indices.len() as u16 + 3;
         writer.write_u16(len)?;
         writer.write_byte(scan.component_indices.len() as u8)?;
-        
+
         for &comp_idx in &scan.component_indices {
             writer.write_byte(comp_idx + 1)?; // Component ID (1-based)
             let (dc_tbl, ac_tbl) = if comp_idx == 0 { (0, 0) } else { (1, 1) };
             writer.write_byte((dc_tbl << 4) | ac_tbl)?;
         }
-        
+
         writer.write_byte(scan.ss_start)?;
         writer.write_byte(scan.ss_end)?;
         writer.write_byte((scan.ah << 4) | scan.al)?;
@@ -1857,11 +1847,11 @@ impl Jpeg1Encoder {
         // Bit writer setup
         let mut bit_writer_opt = Some(JpegBitWriter::new(writer.remaining_slice()));
         let mut bit_writer = bit_writer_opt.as_mut().ok_or(JpeglsError::InvalidOperation)?;
-        
+
         // Reset DC predictors at start of scan
         self.huffman.dc_previous_value = [0; 4];
         let mut next_restart_index = 0;
-        
+
         // Determine total MCUs
         let buf0 = &buffers[0];
         let mcu_width = 8 * buf0.h_samp as usize;
@@ -1891,38 +1881,38 @@ impl Jpeg1Encoder {
                 let comp_i = comp_idx as usize;
                 let buffer = &buffers[comp_i];
                 let blocks_per_mcu = buffer.h_samp as usize * buffer.v_samp as usize;
-                
+
                 // For each block in the MCU for this component
                 for blk_idx in 0..blocks_per_mcu {
                     let block_offset = mcu_idx * blocks_per_mcu + blk_idx;
                     let block = buffers[comp_i].blocks[block_offset]; // Copy
-                    
+
                     // Clone tables to avoid borrow checker issues
                     // This is slightly inefficient but safe. `HuffmanTable` contains vectors so clone is non-trivial.
                     // Better approach: pass references to tables inside `encode_progressive_block`
                     // But `encode_progressive_block` takes `&mut self` to update `self.huffman`.
                     // We need to split `self` borrows.
                     // Or, pass `&mut self.huffman` and `&table_dc` separately to a static function/method that doesn't take `&mut self`.
-                    
+
                     // Refactoring `encode_progressive_block` to NOT take `&mut self`, but `&mut HuffmanEncoder`
                     Self::encode_progressive_block_static(
                         &mut self.huffman,
-                        &block, 
-                        bit_writer, 
-                        if comp_idx == 0 { &self.dc_table_lum } else { &self.dc_table_chrom }, 
-                        if comp_idx == 0 { &self.ac_table_lum } else { &self.ac_table_chrom }, 
-                        scan, 
+                        &block,
+                        bit_writer,
+                        if comp_idx == 0 { &self.dc_table_lum } else { &self.dc_table_chrom },
+                        if comp_idx == 0 { &self.ac_table_lum } else { &self.ac_table_chrom },
+                        scan,
                         comp_i
                     )?;
                 }
             }
         }
-        
+
         bit_writer.flush()?;
         let encoded_len = bit_writer.len();
         let _ = bit_writer_opt.take();
         writer.advance(encoded_len);
-        
+
         Ok(())
     }
 
@@ -1943,14 +1933,14 @@ impl Jpeg1Encoder {
         // DC Encoding (Ss=0)
         if scan.ss_start == 0 {
             let dc_val = zigzag[0];
-            
+
             if scan.ah == 0 {
                 // Initial DC Scan
                 let diff = dc_val - huffman.dc_previous_value[dc_pred_idx];
                 huffman.dc_previous_value[dc_pred_idx] = dc_val;
-                
+
                 let v = diff >> scan.al;
-                
+
                 let category = HuffmanEncoder::get_category(v);
                 let code = dc_table.codes[category as usize];
                 bit_writer.write_bits(code.value, code.length)?;
@@ -1969,7 +1959,7 @@ impl Jpeg1Encoder {
         // scan.ss_end is the end of the spectral band.
         let start = std::cmp::max(1, scan.ss_start as usize);
         let end = scan.ss_end as usize;
-        
+
         if start <= end {
             if scan.ah == 0 {
                 // Initial AC Scan
@@ -1979,7 +1969,7 @@ impl Jpeg1Encoder {
                     // Check if coefficient is significant at this shift
                     // We need to encode `val >> Al`
                     let shifted = val >> scan.al;
-                    
+
                     if shifted == 0 {
                         run += 1;
                     } else {
@@ -1998,7 +1988,7 @@ impl Jpeg1Encoder {
                         run = 0;
                     }
                 }
-                
+
                 if run > 0 {
                     let eob = ac_table.codes[0x00];
                     bit_writer.write_bits(eob.value, eob.length)?;
@@ -2007,10 +1997,10 @@ impl Jpeg1Encoder {
                 // AC Refinement Scan (Ah > 0)
                 // This logic is complex. We need to process EOB runs and history.
                 // For "Simple Spectral + SA", we'll implement per-block refinement first (no EOB runs across blocks).
-                
+
                 let mut run = 0;
                 let _eob_run = 0; // We are not using cross-block EOB runs yet, but logic is similar.
-                
+
                 // For AC refinement:
                 // 1. Iterate over spectral band.
                 // 2. If coeff was non-zero in previous pass (abs(val) >= (1 << Ah)), send Refinement Bit.
@@ -2037,19 +2027,19 @@ impl Jpeg1Encoder {
                 //            "The code for ZRL or a run length... accounts only for coefficients which were zero in previous scans."
                 //            "Any non-zero coefficients [from history] are skipped over... however, immediately after the ZRL/run code is output, a single bit is output for each [skipped history coeff]."
                 //            "If the run length is non-zero, the refinement bits are output... for each non-zero coeff... skipped over."
-                
+
                 // Let's implement this carefully.
                 // We need to buffer refinement bits while counting the run.
-                
+
                 let mut refinement_bits = Vec::new(); // Bits to send after next symbol
-                
+
                 for &val in zigzag.iter().take(end + 1).skip(start) {
                     let abs_val = val.abs();
                     let history_mask = 1 << scan.ah; // Previously sent bits
                     let current_bit_mask = 1 << scan.al;
-                    
+
                     let was_nonzero = abs_val >= history_mask;
-                    
+
                     if was_nonzero {
                         // Already sent. We will send a refinement bit.
                         // Refinement bit = (abs_val >> Al) & 1
@@ -2058,7 +2048,7 @@ impl Jpeg1Encoder {
                     } else {
                         // Was zero. Check if it becomes non-zero now.
                         let is_nonzero_now = abs_val >= current_bit_mask;
-                        
+
                         if !is_nonzero_now {
                             // Still zero.
                             run += 1;
@@ -2069,7 +2059,7 @@ impl Jpeg1Encoder {
                                 // ZRL
                                 let zrl = ac_table.codes[0xF0];
                                 bit_writer.write_bits(zrl.value, zrl.length)?;
-                                
+
                                 // Send refinement bits for the history coeffs skipped during this run of 16
                                 // Note: The standard says "Each ZRL is followed by the refinement bits for the non-zero coefficients skipped over during the run of 16 zeros."
                                 // So we need to flush refinement bits that accumulated *during* this ZRL period.
@@ -2081,7 +2071,7 @@ impl Jpeg1Encoder {
                                 //     When we emit a ZRL or a Symbol, we flush the queue.
                                 //   Wait, ZRL corresponds to 16 *zeros* (newly-zero coeffs).
                                 //   If we skipped 5 history-non-zeros while counting 16 zeros, we emit ZRL then 5 bits.
-                                
+
                                 // Let's manage the queue better.
                                 // We consume `refinement_bits` up to what was seen *before* the 16th zero.
                                 // This is getting complicated with a simple vector.
@@ -2102,24 +2092,24 @@ impl Jpeg1Encoder {
                                 //     Emit saved bits.
                                 //     Clear saved bits.
                                 //     Run = 0.
-                                
+
                                 // Wait, does the order match?
                                 // "The refinement bits... are output... in the order in which they occur in the block."
                                 // Yes.
-                                
+
                                 // Let's rewrite the loop structure with this logic.
                                 // We need to handle the loop inside the check.
                                 // Since we are inside `while run > 15`, we implicitly handled 16 zeros.
                                 // But `refinement_bits` contains bits from "gaps" between those zeros.
                                 // So yes, we flush `refinement_bits` here.
-                                
+
                                 for &b in &refinement_bits {
                                     bit_writer.write_bits(b, 1)?;
                                 }
                                 refinement_bits.clear();
                                 run -= 16;
                             }
-                            
+
                             // Send Symbol for new coeff
                             // Value is always 1 or -1 at this bit plane (shifted).
                             // Effectively category is always 1 (size 1).
@@ -2128,13 +2118,13 @@ impl Jpeg1Encoder {
                             let code = ac_table.codes[symbol as usize];
                             if code.length == 0 { return Err(JpeglsError::InvalidData); }
                             bit_writer.write_bits(code.value, code.length)?;
-                            
+
                             // Send Sign bit
                             // If val > 0, sign is 1. If val < 0, sign is 0.
                             // Standard baseline logic: positive=1, negative=0.
                             let sign_bit = if val > 0 { 1 } else { 0 };
                             bit_writer.write_bits(sign_bit, 1)?;
-                            
+
                             // Flush refinement bits
                             for &b in &refinement_bits {
                                 bit_writer.write_bits(b, 1)?;
@@ -2144,14 +2134,14 @@ impl Jpeg1Encoder {
                         }
                     }
                 }
-                
+
                 // End of block.
                 if run > 0 || !refinement_bits.is_empty() {
                     // We have trailing zeros OR trailing refinement bits.
                     // We must emit EOB.
                     let eob = ac_table.codes[0x00];
                     bit_writer.write_bits(eob.value, eob.length)?;
-                    
+
                     // Flush remaining refinement bits
                     for &b in &refinement_bits {
                         bit_writer.write_bits(b, 1)?;
@@ -2169,7 +2159,7 @@ impl Jpeg1Encoder {
         destination: &mut [u8],
     ) -> Result<usize, JpeglsError> {
         use crate::jpeg1::lossless::Jpeg1LosslessEncoder;
-        
+
         let mut writer = JpegStreamWriter::new(destination);
         let components_count = frame_info.component_count as usize;
         let width = frame_info.width as usize;
@@ -2224,14 +2214,14 @@ impl Jpeg1Encoder {
             let mut r_pixels = vec![0i32; width * height];
             let mut g_pixels = vec![0i32; width * height];
             let mut b_pixels = vec![0i32; width * height];
-            
+
             for i in 0..(width * height) {
                 let idx = i * 3;
                 r_pixels[i] = source[idx] as i32;
                 g_pixels[i] = source[idx + 1] as i32;
                 b_pixels[i] = source[idx + 2] as i32;
             }
-            
+
             Jpeg1LosslessEncoder::encode_component(
                 self.lossless_predictor,
                 width,
@@ -2243,7 +2233,7 @@ impl Jpeg1Encoder {
                 &self.dc_table_lum,
                 0,
             )?;
-            
+
             Jpeg1LosslessEncoder::encode_component(
                 self.lossless_predictor,
                 width,
@@ -2255,7 +2245,7 @@ impl Jpeg1Encoder {
                 &self.dc_table_chrom,
                 1,
             )?;
-            
+
             Jpeg1LosslessEncoder::encode_component(
                 self.lossless_predictor,
                 width,
@@ -2283,7 +2273,7 @@ impl Jpeg1Encoder {
         destination: &mut [u8],
     ) -> Result<usize, JpeglsError> {
         use crate::jpeg1::lossless::Jpeg1LosslessEncoder;
-        
+
         let mut writer = JpegStreamWriter::new(destination);
         let components_count = frame_info.component_count as usize;
         let width = frame_info.width as usize;
@@ -2338,14 +2328,14 @@ impl Jpeg1Encoder {
             let mut r_pixels = vec![0i32; width * height];
             let mut g_pixels = vec![0i32; width * height];
             let mut b_pixels = vec![0i32; width * height];
-            
+
             for i in 0..(width * height) {
                 let idx = i * components_count;
                 r_pixels[i] = source[idx] as i32;
                 g_pixels[i] = source[idx + 1] as i32;
                 b_pixels[i] = source[idx + 2] as i32;
             }
-            
+
             Jpeg1LosslessEncoder::encode_component(
                 self.lossless_predictor,
                 width,
@@ -2357,7 +2347,7 @@ impl Jpeg1Encoder {
                 &self.dc_table_lum,
                 0,
             )?;
-            
+
             Jpeg1LosslessEncoder::encode_component(
                 self.lossless_predictor,
                 width,
@@ -2369,7 +2359,7 @@ impl Jpeg1Encoder {
                 &self.dc_table_chrom,
                 1,
             )?;
-            
+
             Jpeg1LosslessEncoder::encode_component(
                 self.lossless_predictor,
                 width,
@@ -2400,8 +2390,8 @@ mod tests {
         let width = 16;
         let height = 16;
         let mut source = vec![0u8; width * height];
-        for i in 0..source.len() {
-            source[i] = (i % 256) as u8;
+        for (i, val) in source.iter_mut().enumerate() {
+            *val = (i % 256) as u8;
         }
 
         let frame_info = FrameInfo {
@@ -2435,7 +2425,7 @@ mod tests {
         let height = 16;
         let mut source = vec![0u8; width * height * 3];
         for i in 0..(width * height) {
-            source[i * 3 + 0] = (i % 256) as u8;
+            source[i * 3] = (i % 256) as u8;
             source[i * 3 + 1] = ((i * 2) % 256) as u8;
             source[i * 3 + 2] = ((255 - i) % 256) as u8;
         }

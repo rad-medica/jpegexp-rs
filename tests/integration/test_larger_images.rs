@@ -1,5 +1,4 @@
-/// Test larger images with inverted G channel
-
+//! Test larger images with inverted G channel
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -8,7 +7,7 @@ use jpegexp_rs::FrameInfo;
 fn mae(a: &[u8], b: &[u8]) -> f64 {
     let sum: u64 = a.iter()
         .zip(b.iter())
-        .map(|(&x, &y)| (x as i32 - y as i32).abs() as u64)
+        .map(|(&x, &y)| x.abs_diff(y) as u64)
         .sum();
     sum as f64 / a.len() as f64
 }
@@ -19,7 +18,7 @@ fn test_larger_images_inverted_g() {
     println!("Testing Larger Images with Inverted G Channel");
     println!("================================================================================\n");
 
-    let sizes = vec![64, 128, 256, 512];
+    let sizes = [64, 128, 256, 512];
     let block_size = 8;
     let dwt_level = 3;
 
@@ -86,7 +85,7 @@ fn test_larger_images_inverted_g() {
                             comp,
                             pixels[idx],
                             decoded[idx],
-                            (pixels[idx] as i32 - decoded[idx] as i32).abs()
+                            pixels[idx].abs_diff(decoded[idx])
                         );
                         shown += 1;
                     }

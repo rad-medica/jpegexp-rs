@@ -1,13 +1,12 @@
-/// Test suite for 16-bit JPEG 2000 support
-///
-/// Validates that jpegexp-rs correctly handles 16-bit medical images
-/// per DICOM requirements (PS3.5 Section 8.2.4)
-///
-/// 16-bit support is critical for:
-/// - Nuclear medicine imaging
-/// - High dynamic range X-ray
-/// - Research and scientific imaging
-
+//! Test suite for 16-bit JPEG 2000 support
+//!
+//! Validates that jpegexp-rs correctly handles 16-bit medical images
+//! per DICOM requirements (PS3.5 Section 8.2.4)
+//!
+//! 16-bit support is critical for:
+//! - Nuclear medicine imaging
+//! - High dynamic range X-ray
+//! - Research and scientific imaging
 use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 use jpegexp_rs::jpeg2000::decoder::J2kDecoder;
 use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
@@ -19,7 +18,7 @@ fn calculate_mae_u16(original: &[u16], decoded: &[u16]) -> f64 {
     let sum: i64 = original
         .iter()
         .zip(decoded.iter())
-        .map(|(a, b)| (*a as i64 - *b as i64).abs())
+        .map(|(a, b)| a.abs_diff(*b))
         .sum();
     sum as f64 / original.len() as f64
 }
@@ -61,7 +60,7 @@ fn generate_16bit_nuclear_pattern(width: usize, height: usize) -> Vec<u16> {
     let mut pixels = vec![0u16; width * height];
 
     // Multiple "hot spots"
-    let spots = vec![
+    let spots = [
         (width / 3, height / 3, 50000u16),
         (2 * width / 3, height / 2, 45000u16),
         (width / 2, 2 * height / 3, 40000u16),
@@ -72,8 +71,8 @@ fn generate_16bit_nuclear_pattern(width: usize, height: usize) -> Vec<u16> {
             let mut value = 5000u16; // Background
 
             for (cx, cy, intensity) in &spots {
-                let dx = (x as i32 - *cx as i32).abs();
-                let dy = (y as i32 - *cy as i32).abs();
+                let dx = x.abs_diff(*cx);
+                let dy = y.abs_diff(*cy);
                 let dist_sq = (dx * dx + dy * dy) as f32;
                 let radius_sq = 1000.0; // Spot radius
 
@@ -331,7 +330,7 @@ fn test_16bit_lossy_q85() {
 fn test_16bit_multiple_sizes() {
     println!("\n=== 16-bit Multiple Sizes Test ===");
 
-    let test_sizes = vec![(64, 64), (128, 128), (256, 256), (512, 512)];
+    let test_sizes = [(64, 64), (128, 128), (256, 256), (512, 512)];
 
     for (width, height) in test_sizes {
         println!("\n  Testing {}x{}...", width, height);

@@ -276,7 +276,7 @@ impl J2kImage {
                         };
 
                         // Δ = 2^(depth + gain - epsilon) * (1 + mu/2048)
-                        
+
 
                         (1.0 + mu as f32 / 2048.0)
                             * 2.0f32.powi((depth) as i32 + gain - eps)
@@ -348,24 +348,24 @@ impl J2kImage {
                 * bytes_per_sample
         ];
         // DEBUG: Log first few reconstructed coefficients
-        
-        for i in 0..(self.width * self.height) as usize {
+
+        for (i, row) in out.chunks_exact_mut(self.component_count as usize * bytes_per_sample).enumerate() {
             for c in 0..self.component_count as usize {
                 let comp_info = self.components.get(c);
                 let depth = comp_info.map_or(8, |info| info.depth);
                 let is_signed = comp_info.is_some_and(|info| info.is_signed);
-                
+
                 // Apply DC level shift only for unsigned components (ISO/IEC 15444-1 Section G.1.1)
                 let level_offset = if is_signed { 0 } else { 1i32 << (depth - 1) };
                 let val = component_buffers[c][i] + level_offset;
                 let clamped = val.clamp(0, (1i32 << depth) - 1) as u32;
-                
+
                 // DEBUG: Log first few conversions
                 if max_depth > 8 {
-                    out[(i * self.component_count as usize + c) * 2] = clamped as u8;
-                    out[(i * self.component_count as usize + c) * 2 + 1] = (clamped >> 8) as u8;
+                    row[c * 2] = clamped as u8;
+                    row[c * 2 + 1] = (clamped >> 8) as u8;
                 } else {
-                    out[i * self.component_count as usize + c] = clamped as u8;
+                    row[c] = clamped as u8;
                 }
             }
         }

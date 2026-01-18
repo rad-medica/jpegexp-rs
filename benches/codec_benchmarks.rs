@@ -5,10 +5,10 @@ use jpegexp_rs::FrameInfo;
 
 fn generate_image(width: usize, height: usize, seed: u32) -> Vec<u8> {
     let mut pixels = vec![0u8; width * height];
-    for i in 0..pixels.len() {
+    for (i, val) in pixels.iter_mut().enumerate() {
         // Simple LCG for deterministic "random" noise
-        let val = (i as u32 * 1103515245 + 12345 + seed) % 256;
-        pixels[i] = val as u8;
+        let val_calc = (i as u32 * 1103515245 + 12345 + seed) % 256;
+        *val = val_calc as u8;
     }
     pixels
 }
