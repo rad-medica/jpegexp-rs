@@ -558,8 +558,8 @@ fn build_limited_length_codes(freq_list: &[(usize, u8)], max_len: usize) -> Vec<
         // Capacity = 2^16 = 65536
         // Node at depth L consumes 2^(16-L) units
         let mut used_capacity: u32 = 0;
-        for i in 1..=max_len {
-            used_capacity += (counts[i] as u32) * (1 << (max_len - i));
+        for (i, &count) in counts.iter().enumerate().take(max_len + 1).skip(1) {
+            used_capacity += (count as u32) * (1 << (max_len - i));
         }
 
         let max_capacity = 1 << max_len;

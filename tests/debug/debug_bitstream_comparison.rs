@@ -11,10 +11,14 @@ fn compare_bitstream_detailed() {
     let width = 4;
     let height = 4;
     let pixels = vec![128u8; (width * height) as usize]; // Solid gray
-    
-    println!("\n=== Testing {}x{} Solid Image (value=128) ===", width, height);
+
+    println!(
+        "\n=== Testing {}x{} Solid Image (value=128) ===",
+        width,
+        height
+    );
     encode_and_compare(&pixels, width, height, 1);
-    
+
     // If solid works, try a simple gradient
     let mut pixels = Vec::new();
     for y in 0..height {
@@ -52,7 +56,11 @@ fn compare_bitstream_detailed() {
     println!("\n=== Testing {}x{} 12-bit Noise ===", width, height);
     encode_and_compare_16bit(&pixels_noise, width, height, 1, 12);
 
-    println!("\n=== Testing {}x{} 12-bit Noise (LL Only, Levels=0) ===", width, height);
+    println!(
+        "\n=== Testing {}x{} 12-bit Noise (LL Only, Levels=0) ===",
+        width,
+        height
+    );
     encode_and_compare_16bit(&pixels_noise, width, height, 0, 12);
 }
 
@@ -67,9 +75,12 @@ fn encode_and_compare_16bit(pixels: &[u16], width: u32, height: u32, decomp_leve
         pgm_data.extend_from_slice(&p.to_be_bytes());
     }
     fs::write(pgm_path, &pgm_data).unwrap();
-    
-    println!("Input pixels (first 16): {:?}", &pixels[..pixels.len().min(16)]);
-    
+
+    println!(
+        "Input pixels (first 16): {:?}",
+        &pixels[..pixels.len().min(16)]
+    );
+
     // Encode with our implementation
     use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
     use jpegexp_rs::FrameInfo;
@@ -78,69 +89,84 @@ fn encode_and_compare_16bit(pixels: &[u16], width: u32, height: u32, decomp_leve
     encoder.set_decomposition_levels(decomp_levels);
     encoder.set_include_tlm(false); // Disable TLM to match OPJ
     encoder.set_include_plt(false); // Disable PLT to match OPJ
-    
+
     let frame_info = FrameInfo {
         width,
         height,
         bits_per_sample: depth as i32,
         component_count: 1,
     };
-    
+
     // Prepare input for our encoder (Little Endian bytes)
     let mut input_bytes = Vec::with_capacity(pixels.len() * 2);
     for &p in pixels {
         input_bytes.extend_from_slice(&p.to_ne_bytes());
     }
-    
+
     let mut our_j2k = vec![0u8; pixels.len() * 20];
-    let bytes_written = encoder.encode(&input_bytes, &frame_info, &mut our_j2k).unwrap();
+    let bytes_written = encoder
+        .encode(&input_bytes, &frame_info, &mut our_j2k)
+        .unwrap();
     our_j2k.truncate(bytes_written);
-    
+
     let our_path = "test_bitstream_ours_12.j2k";
     fs::write(our_path, &our_j2k).unwrap();
-    
+
     let opj_path = "test_bitstream_openjpeg_12.j2k";
     let num_resolutions = decomp_levels + 1;
     let output = Command::new("libs/bin/opj_compress.exe")
-        .args(&[
-            "-i", pgm_path,
-            "-o", opj_path,
-            "-n", &num_resolutions.to_string(),
-        ])
+        .args(
+            &[
+                "-i",
+                pgm_path,
+                "-o",
+                opj_path,
+                "-n",
+                &num_resolutions.to_string(),
+            ],
+        )
         .output()
         .expect("Failed to run opj_compress");
-    
+
     if !output.status.success() {
-        eprintln!("OpenJPEG failed: {}", String::from_utf8_lossy(&output.stderr));
+        eprintln!(
+            "OpenJPEG failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         panic!("OpenJPEG encoding failed");
     }
-    
+
     let opj_data = fs::read(opj_path).unwrap();
-    
+
     println!("\nFile sizes:");
     println!("  Ours:     {} bytes", our_j2k.len());
     println!("  OpenJPEG: {} bytes", opj_data.len());
-    
+
     // Find SOD markers and compare tile data
     let our_sod_pos = find_marker_position(&our_j2k, 0xFF93);
     let opj_sod_pos = find_marker_position(&opj_data, 0xFF93);
-    
+
     if let (Some(our_pos), Some(opj_pos)) = (our_sod_pos, opj_sod_pos) {
         println!("\nSOD marker positions:");
         println!("  Ours:     offset {}", our_pos);
         println!("  OpenJPEG: offset {}", opj_pos);
-        
+
         // Compare headers (up to SOD)
         println!("\nHeader comparison (Start to SOD):");
         println!("  Ours length:     {}", our_pos);
         println!("  OpenJPEG length: {}", opj_pos);
-        
+
         let min_header = our_pos.min(opj_pos);
         let mut header_diffs = 0;
         for i in 0..min_header {
             if our_j2k[i] != opj_data[i] {
                 if header_diffs < 10 {
-                    println!("  Diff at {}: Ours 0x{:02X} vs OPJ 0x{:02X}", i, our_j2k[i], opj_data[i]);
+                    println!(
+                        "  Diff at {}: Ours 0x{:02X} vs OPJ 0x{:02X}",
+                        i,
+                        our_j2k[i],
+                        opj_data[i]
+                    );
                 }
                 header_diffs += 1;
             }
@@ -150,23 +176,29 @@ fn encode_and_compare_16bit(pixels: &[u16], width: u32, height: u32, decomp_leve
         } else {
             println!("  Headers match exactly up to length {}!", min_header);
         }
-        
+
         println!("\nHeader Hex Dump (Ours):");
         println!("{}", hex_string(&our_j2k[..our_pos]));
         println!("\nHeader Hex Dump (OpenJPEG):");
         println!("{}", hex_string(&opj_data[..opj_pos]));
-        
+
         let our_tile_data = &our_j2k[our_pos + 2..];
         let opj_tile_data = &opj_data[opj_pos + 2..];
-        
+
         println!("\nTile data sizes:");
         println!("  Ours:     {} bytes", our_tile_data.len());
         println!("  OpenJPEG: {} bytes", opj_tile_data.len());
-        
+
         println!("\nTile data comparison (first 64 bytes):");
-        println!("  Ours:     {}", hex_string(&our_tile_data[..our_tile_data.len().min(64)]));
-        println!("  OpenJPEG: {}", hex_string(&opj_tile_data[..opj_tile_data.len().min(64)]));
-        
+        println!(
+            "  Ours:     {}",
+            hex_string(&our_tile_data[..our_tile_data.len().min(64)])
+        );
+        println!(
+            "  OpenJPEG: {}",
+            hex_string(&opj_tile_data[..opj_tile_data.len().min(64)])
+        );
+
         if our_tile_data.len() == opj_tile_data.len() {
             if our_tile_data == opj_tile_data {
                 println!("\n✓ Tile data matches perfectly!");
@@ -175,7 +207,12 @@ fn encode_and_compare_16bit(pixels: &[u16], width: u32, height: u32, decomp_leve
                 // Find first difference
                 for i in 0..our_tile_data.len() {
                     if our_tile_data[i] != opj_tile_data[i] {
-                        println!("  Diff at byte {}: Ours {:02X} vs OPJ {:02X}", i, our_tile_data[i], opj_tile_data[i]);
+                        println!(
+                            "  Diff at byte {}: Ours {:02X} vs OPJ {:02X}",
+                            i,
+                            our_tile_data[i],
+                            opj_tile_data[i]
+                        );
                         break;
                     }
                 }
@@ -184,7 +221,7 @@ fn encode_and_compare_16bit(pixels: &[u16], width: u32, height: u32, decomp_leve
             println!("\n✗ Length mismatch");
         }
     }
-    
+
     // Cleanup
     let _ = fs::remove_file(pgm_path);
     let _ = fs::remove_file(our_path);
@@ -200,9 +237,9 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
     pgm_data.extend_from_slice(pgm_header.as_bytes());
     pgm_data.extend_from_slice(pixels);
     fs::write(pgm_path, &pgm_data).unwrap();
-    
+
     println!("Input pixels: {:?}", pixels);
-    
+
     // Encode with our implementation
     use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
     use jpegexp_rs::FrameInfo;
@@ -211,64 +248,77 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
     encoder.set_decomposition_levels(decomp_levels);
     encoder.set_include_tlm(false); // Disable TLM to match OPJ
     encoder.set_include_plt(false); // Disable PLT to match OPJ
-    
+
     let frame_info = FrameInfo {
         width,
         height,
         bits_per_sample: 8,
         component_count: 1,
     };
-    
+
     let mut our_j2k = vec![0u8; pixels.len() * 20];
     let bytes_written = encoder.encode(pixels, &frame_info, &mut our_j2k).unwrap();
     our_j2k.truncate(bytes_written);
-    
+
     let our_path = "test_bitstream_ours.j2k";
     fs::write(our_path, &our_j2k).unwrap();
-    
+
     let opj_path = "test_bitstream_openjpeg.j2k";
     let num_resolutions = decomp_levels + 1;
     let output = Command::new("libs/bin/opj_compress.exe")
-        .args(&[
-            "-i", pgm_path,
-            "-o", opj_path,
-            "-n", &num_resolutions.to_string(),
-        ])
+        .args(
+            &[
+                "-i",
+                pgm_path,
+                "-o",
+                opj_path,
+                "-n",
+                &num_resolutions.to_string(),
+            ],
+        )
         .output()
         .expect("Failed to run opj_compress");
-    
+
     if !output.status.success() {
-        eprintln!("OpenJPEG failed: {}", String::from_utf8_lossy(&output.stderr));
+        eprintln!(
+            "OpenJPEG failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         panic!("OpenJPEG encoding failed");
     }
-    
+
     let opj_data = fs::read(opj_path).unwrap();
-    
+
     println!("\nFile sizes:");
     println!("  Ours:     {} bytes", our_j2k.len());
     println!("  OpenJPEG: {} bytes", opj_data.len());
-    
+
     // Find SOD markers and compare tile data
     let our_sod_pos = find_marker_position(&our_j2k, 0xFF93);
     let opj_sod_pos = find_marker_position(&opj_data, 0xFF93);
-    
+
     if let (Some(our_pos), Some(opj_pos)) = (our_sod_pos, opj_sod_pos) {
         println!("\nSOD marker positions:");
         println!("  Ours:     offset {}", our_pos);
         println!("  OpenJPEG: offset {}", opj_pos);
-        
+
         // Compare headers (up to SOD)
         println!("\nHeader comparison (Start to SOD):");
         println!("  Ours length:     {}", our_pos);
         println!("  OpenJPEG length: {}", opj_pos);
-        
+
         // Print header diffs
         let min_header = our_pos.min(opj_pos);
         let mut header_diffs = 0;
         for i in 0..min_header {
             if our_j2k[i] != opj_data[i] {
                 if header_diffs < 10 {
-                    println!("  Diff at {}: Ours 0x{:02X} vs OPJ 0x{:02X}", i, our_j2k[i], opj_data[i]);
+                    println!(
+                        "  Diff at {}: Ours 0x{:02X} vs OPJ 0x{:02X}",
+                        i,
+                        our_j2k[i],
+                        opj_data[i]
+                    );
                 }
                 header_diffs += 1;
             }
@@ -278,25 +328,31 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
         } else {
             println!("  Headers match exactly up to length {}!", min_header);
         }
-        
+
         // Dump full headers for manual inspection
         println!("\nHeader Hex Dump (Ours):");
         println!("{}", hex_string(&our_j2k[..our_pos]));
         println!("\nHeader Hex Dump (OpenJPEG):");
         println!("{}", hex_string(&opj_data[..opj_pos]));
-        
+
         // SOD marker is 2 bytes, data starts after it
         let our_tile_data = &our_j2k[our_pos + 2..];
         let opj_tile_data = &opj_data[opj_pos + 2..];
-        
+
         println!("\nTile data sizes:");
         println!("  Ours:     {} bytes", our_tile_data.len());
         println!("  OpenJPEG: {} bytes", opj_tile_data.len());
-        
+
         println!("\nTile data comparison (first 64 bytes):");
-        println!("  Ours:     {}", hex_string(&our_tile_data[..our_tile_data.len().min(64)]));
-        println!("  OpenJPEG: {}", hex_string(&opj_tile_data[..opj_tile_data.len().min(64)]));
-        
+        println!(
+            "  Ours:     {}",
+            hex_string(&our_tile_data[..our_tile_data.len().min(64)])
+        );
+        println!(
+            "  OpenJPEG: {}",
+            hex_string(&opj_tile_data[..opj_tile_data.len().min(64)])
+        );
+
         // Find first difference
         let min_len = our_tile_data.len().min(opj_tile_data.len());
         let mut first_diff = None;
@@ -306,28 +362,46 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
                 break;
             }
         }
-        
+
         if let Some(pos) = first_diff {
             println!("\n✗ First difference at byte {}", pos);
-            println!("  Context (ours):     {}", hex_string(&our_tile_data[pos.saturating_sub(4)..pos.saturating_add(8).min(our_tile_data.len())]));
-            println!("  Context (OpenJPEG): {}", hex_string(&opj_tile_data[pos.saturating_sub(4)..pos.saturating_add(8).min(opj_tile_data.len())]));
-            println!("  Ours byte:     0x{:02X} (0b{:08b})", our_tile_data[pos], our_tile_data[pos]);
-            println!("  OpenJPEG byte: 0x{:02X} (0b{:08b})", opj_tile_data[pos], opj_tile_data[pos]);
+            println!(
+                "  Context (ours):     {}",
+                hex_string(
+                    &our_tile_data[pos.saturating_sub(4)..pos.saturating_add(8).min(our_tile_data.len())],
+                )
+            );
+            println!(
+                "  Context (OpenJPEG): {}",
+                hex_string(
+                    &opj_tile_data[pos.saturating_sub(4)..pos.saturating_add(8).min(opj_tile_data.len())],
+                )
+            );
+            println!(
+                "  Ours byte:     0x{:02X} (0b{:08b})",
+                our_tile_data[pos],
+                our_tile_data[pos]
+            );
+            println!(
+                "  OpenJPEG byte: 0x{:02X} (0b{:08b})",
+                opj_tile_data[pos],
+                opj_tile_data[pos]
+            );
         } else if our_tile_data.len() == opj_tile_data.len() {
             println!("\n✓ Tile data matches perfectly!");
         } else {
-            println!("\n✗ Length mismatch (data matches up to {} bytes)", min_len);
+            println!(
+                "\n✗ Length mismatch (data matches up to {} bytes)",
+                min_len
+            );
         }
     }
-    
+
     // Test if OpenJPEG can decode its own output
     println!("\n=== OpenJPEG Self-Validation ===");
     let opj_decoded_path = "test_bitstream_opj_decoded.pgm";
     let decode_opj_output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&[
-            "-i", opj_path,
-            "-o", opj_decoded_path,
-        ])
+        .args(&["-i", opj_path, "-o", opj_decoded_path])
         .output()
         .expect("Failed to run opj_decompress on opj file");
 
@@ -335,7 +409,7 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
         println!("✓ OpenJPEG can decode its own file");
         let decoded_data = fs::read(opj_decoded_path).unwrap();
         let decoded_pixels = parse_pgm(&decoded_data);
-        
+
         let mut errors = 0;
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded_pixels.iter()).enumerate() {
             if orig != dec {
@@ -345,7 +419,10 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
         if errors == 0 {
             println!("  ✓ Perfect roundtrip (OpenJPEG -> OpenJPEG)");
         } else {
-            println!("  ✗ OpenJPEG self-decode failed with {} errors! (Something is wrong with ground truth)", errors);
+            println!(
+                "  ✗ OpenJPEG self-decode failed with {} errors! (Something is wrong with ground truth)",
+                errors
+            );
         }
     } else {
         println!("✗ OpenJPEG failed to decode its own file");
@@ -355,26 +432,29 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
     println!("\n=== Cross-validation ===");
     let our_decoded_path = "test_bitstream_ours_decoded.pgm";
     let decode_output = Command::new("libs/bin/opj_decompress.exe")
-        .args(&[
-            "-i", our_path,
-            "-o", our_decoded_path,
-        ])
+        .args(&["-i", our_path, "-o", our_decoded_path])
         .output()
         .expect("Failed to run opj_decompress");
-    
+
     if decode_output.status.success() {
         println!("✓ OpenJPEG can decode our file");
         let decoded_data = fs::read(our_decoded_path).unwrap();
         let decoded_pixels = parse_pgm(&decoded_data);
-        
+
         let mut errors = 0;
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded_pixels.iter()).enumerate() {
             if orig != dec {
-                println!("  Pixel {}: {} -> {} (error: {})", i, orig, dec, (orig as i32 - dec as i32).abs());
+                println!(
+                    "  Pixel {}: {} -> {} (error: {})",
+                    i,
+                    orig,
+                    dec,
+                    (orig as i32 - dec as i32).abs()
+                );
                 errors += 1;
             }
         }
-        
+
         if errors == 0 {
             println!("  ✓ Perfect lossless roundtrip");
         } else {
@@ -382,9 +462,12 @@ fn encode_and_compare(pixels: &[u8], width: u32, height: u32, decomp_levels: u8)
         }
     } else {
         println!("✗ OpenJPEG FAILED to decode our file");
-        eprintln!("  Error: {}", String::from_utf8_lossy(&decode_output.stderr));
+        eprintln!(
+            "  Error: {}",
+            String::from_utf8_lossy(&decode_output.stderr)
+        );
     }
-    
+
     // Cleanup
     let _ = fs::remove_file(pgm_path);
     let _ = fs::remove_file(our_path);
@@ -417,13 +500,13 @@ fn parse_pgm(data: &[u8]) -> Vec<u8> {
     // Robust PGM parser that handles comments and variable whitespace
     let mut pos = 0;
     let mut tokens = Vec::new();
-    
+
     while pos < data.len() && tokens.len() < 4 {
         // Skip whitespace
         while pos < data.len() && data[pos].is_ascii_whitespace() {
             pos += 1;
         }
-        
+
         // Check for comment
         if pos < data.len() && data[pos] == b'#' {
             while pos < data.len() && data[pos] != b'\n' {
@@ -431,9 +514,11 @@ fn parse_pgm(data: &[u8]) -> Vec<u8> {
             }
             continue; // Loop back to skip whitespace after comment
         }
-        
-        if pos >= data.len() { break; }
-        
+
+        if pos >= data.len() {
+            break;
+        }
+
         // Read token
         let start = pos;
         while pos < data.len() && !data[pos].is_ascii_whitespace() && data[pos] != b'#' {
@@ -441,12 +526,12 @@ fn parse_pgm(data: &[u8]) -> Vec<u8> {
         }
         tokens.push(&data[start..pos]);
     }
-    
+
     // After maxval token, there is exactly one whitespace char (usually newline)
     if pos < data.len() && data[pos].is_ascii_whitespace() {
         pos += 1;
     }
-    
+
     if data.len() > pos {
         data[pos..].to_vec()
     } else {

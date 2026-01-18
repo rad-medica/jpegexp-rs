@@ -150,11 +150,13 @@ pub fn is_default(
     true
 }
 
+use crate::JpeglsError;
+
 pub fn is_valid(
     pc_parameters: &JpeglsPcParameters,
     maximum_component_value: i32,
     near_lossless: i32,
-) -> Result<JpeglsPcParameters, ()> {
+) -> Result<JpeglsPcParameters, JpeglsError> {
     debug_assert!(maximum_component_value >= 3 && maximum_component_value <= u16::MAX as i32);
 
     // ISO/IEC 14495-1, C.2.4.1.1, Table C.1 defines the valid JPEG-LS preset coding parameters values.
@@ -162,7 +164,7 @@ pub fn is_valid(
         && (pc_parameters.maximum_sample_value < 1
             || pc_parameters.maximum_sample_value > maximum_component_value)
     {
-        return Err(());
+        return Err(JpeglsError::InvalidParameterJpeglsPresetParameters);
     }
 
     let maximum_sample_value = if pc_parameters.maximum_sample_value != 0 {
@@ -175,7 +177,7 @@ pub fn is_valid(
         && (pc_parameters.threshold1 < near_lossless + 1
             || pc_parameters.threshold1 > maximum_sample_value)
     {
-        return Err(());
+        return Err(JpeglsError::InvalidParameterJpeglsPresetParameters);
     }
 
     let defaults = compute_default(maximum_sample_value, near_lossless);
@@ -190,7 +192,7 @@ pub fn is_valid(
         && (pc_parameters.threshold2 < threshold1
             || pc_parameters.threshold2 > maximum_sample_value)
     {
-        return Err(());
+        return Err(JpeglsError::InvalidParameterJpeglsPresetParameters);
     }
 
     let threshold2 = if pc_parameters.threshold2 != 0 {
@@ -203,14 +205,14 @@ pub fn is_valid(
         && (pc_parameters.threshold3 < threshold2
             || pc_parameters.threshold3 > maximum_sample_value)
     {
-        return Err(());
+        return Err(JpeglsError::InvalidParameterJpeglsPresetParameters);
     }
 
     if pc_parameters.reset_value != 0
         && (pc_parameters.reset_value < 3
             || pc_parameters.reset_value > max(255, maximum_sample_value))
     {
-        return Err(());
+        return Err(JpeglsError::InvalidParameterJpeglsPresetParameters);
     }
 
     let validated_parameters = JpeglsPcParameters {

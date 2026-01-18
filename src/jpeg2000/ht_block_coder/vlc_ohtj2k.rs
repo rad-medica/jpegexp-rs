@@ -2113,7 +2113,7 @@ pub fn decode_vlc_ohtj2k(cwd: u32, context: u16) -> (u16, u8, u8, u8, u8, u8) {
 /// Calculate context for next quad (per OpenHTJ2K Eq. 1)
 pub fn calc_next_context(tv: u16) -> u16 {
     // context = ((tv & 0xE0) << 2) | ((tv & 0x10) << 3)
-    (((tv & 0xE0)) << 2) | (((tv & 0x10)) << 3)
+    ((tv & 0xE0) << 2) | ((tv & 0x10) << 3)
 }
 
 /// Backward-reading VLC bitstream decoder (rev_buf from OpenHTJ2K).

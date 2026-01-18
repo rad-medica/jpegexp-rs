@@ -1,5 +1,5 @@
 //! JPEG 1 10-bit Precision Tests
-//! 
+//!
 //! Tests 10-bit extended sequential encoding/decoding.
 //! Target: Low compression error (MAE < 10 for quality=90).
 
@@ -9,7 +9,11 @@ use jpegexp_rs::FrameInfo;
 
 fn calculate_mae_u16(original: &[u16], decoded: &[u16]) -> f64 {
     if original.len() != decoded.len() {
-        panic!("Buffer size mismatch: {} vs {}", original.len(), decoded.len());
+        panic!(
+            "Buffer size mismatch: {} vs {}",
+            original.len(),
+            decoded.len()
+        );
     }
     let sum: i64 = original
         .iter()
@@ -24,7 +28,7 @@ fn test_10bit_grayscale_encode_decode() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u16; width * height];
-    
+
     // Simple 10-bit pattern
     for i in 0..source.len() {
         source[i] = (i % 1024) as u16;
@@ -40,9 +44,10 @@ fn test_10bit_grayscale_encode_decode() {
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_bits_per_sample(10);
     encoder.set_quality(90);
-    
+
     let mut encoded = vec![0u8; 100000];
-    let enc_len = encoder.encode_u16(&source, &frame_info, &mut encoded)
+    let enc_len = encoder
+        .encode_u16(&source, &frame_info, &mut encoded)
         .expect("10-bit encode failed");
 
     let mut decoder = Jpeg1Decoder::new(&encoded[..enc_len]);
@@ -63,13 +68,13 @@ fn test_10bit_rgb_encode_decode() {
     let width = 32;
     let height = 32;
     let mut source = vec![0u16; width * height * 3];
-    
+
     // 10-bit RGB gradient
     for y in 0..height {
         for x in 0..width {
             let idx = (y * width + x) * 3;
-            source[idx] = ((x * 32) % 1024) as u16;       // R
-            source[idx + 1] = ((y * 32) % 1024) as u16;   // G
+            source[idx] = ((x * 32) % 1024) as u16; // R
+            source[idx + 1] = ((y * 32) % 1024) as u16; // G
             source[idx + 2] = (((x + y) * 16) % 1024) as u16; // B
         }
     }
@@ -84,9 +89,10 @@ fn test_10bit_rgb_encode_decode() {
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_bits_per_sample(10);
     encoder.set_quality(85);
-    
+
     let mut encoded = vec![0u8; 100000];
-    let enc_len = encoder.encode_u16(&source, &frame_info, &mut encoded)
+    let enc_len = encoder
+        .encode_u16(&source, &frame_info, &mut encoded)
         .expect("10-bit RGB encode failed");
 
     let mut decoder = Jpeg1Decoder::new(&encoded[..enc_len]);
@@ -104,7 +110,7 @@ fn test_10bit_high_quality() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u16; width * height];
-    
+
     // Smooth gradient
     for y in 0..height {
         for x in 0..width {
@@ -122,9 +128,10 @@ fn test_10bit_high_quality() {
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_bits_per_sample(10);
     encoder.set_quality(95); // Very high quality
-    
+
     let mut encoded = vec![0u8; 100000];
-    let enc_len = encoder.encode_u16(&source, &frame_info, &mut encoded)
+    let enc_len = encoder
+        .encode_u16(&source, &frame_info, &mut encoded)
         .expect("10-bit high quality encode failed");
 
     let mut decoder = Jpeg1Decoder::new(&encoded[..enc_len]);
@@ -142,7 +149,7 @@ fn test_10bit_lossless() {
     let width = 64;
     let height = 64;
     let mut source = vec![0u16; width * height];
-    
+
     for i in 0..source.len() {
         source[i] = (i * 7 % 1024) as u16;
     }
@@ -157,9 +164,10 @@ fn test_10bit_lossless() {
     let mut encoder = Jpeg1Encoder::new();
     encoder.set_bits_per_sample(10);
     encoder.set_lossless(1); // Lossless mode
-    
+
     let mut encoded = vec![0u8; 100000];
-    let enc_len = encoder.encode_u16(&source, &frame_info, &mut encoded)
+    let enc_len = encoder
+        .encode_u16(&source, &frame_info, &mut encoded)
         .expect("10-bit lossless encode failed");
 
     let mut decoder = Jpeg1Decoder::new(&encoded[..enc_len]);

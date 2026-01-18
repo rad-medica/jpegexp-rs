@@ -111,7 +111,7 @@ impl J2kEncoder {
     /// This parameter controls the quantization step size when using the irreversible 9-7 transform.
     /// For the 5-3 reversible transform, this parameter is ignored unless it affects post-compression rate control (future feature).
     pub fn set_quality(&mut self, quality: u8) {
-        self.quality = quality.min(100).max(1);
+        self.quality = quality.clamp(1, 100);
     }
 
     /// Set the number of DWT decomposition levels.
@@ -159,7 +159,7 @@ impl J2kEncoder {
     ///
     /// # Arguments
     /// * `pixels` - Raw pixel data. Format depends on `frame_info` (e.g., RGB interleaved, Grayscale).
-    ///              For >8-bit depth, input must be `u16` samples packed into `u8` slice (Little Endian).
+    ///   For >8-bit depth, input must be `u16` samples packed into `u8` slice (Little Endian).
     /// * `frame_info` - Metadata describing the image dimensions and format.
     /// * `destination` - Output buffer for the codestream. Must be large enough to hold the result.
     ///
@@ -402,13 +402,13 @@ impl J2kEncoder {
                     // So epsilon = ceil(R_b - log2(Δ))
                     let log_delta = subband_step.log2();
                     let epsilon_float = rb as f32 - log_delta;
-                    let epsilon = epsilon_float.ceil().max(0.0).min(31.0) as i32;
+                    let epsilon = epsilon_float.ceil().clamp(0.0, 31.0) as i32;
 
                     // Refine μ to match target step size exactly:
                     // (1 + μ/2048) = Δ / 2^(R_b - ε)
                     let scale = 2.0f32.powi(rb - epsilon);
                     let mu_float = (subband_step / scale - 1.0) * 2048.0;
-                    let mu = mu_float.round().max(0.0).min(2047.0) as i32;
+                    let mu = mu_float.round().clamp(0.0, 2047.0) as i32;
 
                     // Pack epsilon (5 bits) and mu (11 bits) into u16
                     
@@ -463,7 +463,7 @@ impl J2kEncoder {
         let mut packets: Vec<Packet> = Vec::new();
 
         // Level shift
-        let level_shift = (1i32 << (depth - 1));
+        let level_shift = 1i32 << (depth - 1);
         let mut component_data: Vec<Vec<i32>> = (0..components)
             .map(|c| {
                 (0..width * height)
@@ -487,6 +487,7 @@ impl J2kEncoder {
 
         // Apply RCT (Reversible Color Transform) if 3 components and not using irreversible transform
         if components == 3 && !self.use_irreversible {
+            #[allow(clippy::needless_range_loop)]
             for i in 0..width * height {
                 let r = component_data[0][i];
                 let g = component_data[1][i];
@@ -503,6 +504,7 @@ impl J2kEncoder {
         }
         // Apply ICT (Irreversible Color Transform) if 3 components and using irreversible transform
         else if components == 3 && self.use_irreversible {
+            #[allow(clippy::needless_range_loop)]
             for i in 0..width * height {
                 let r = component_data[0][i] as f32;
                 let g = component_data[1][i] as f32;
@@ -819,6 +821,7 @@ impl J2kEncoder {
     }
 
     /// Encode a component's coefficients into packets (internal)
+    #[allow(clippy::too_many_arguments)]
     fn encode_component_packets(
         &self,
         coeffs: &[i32],
@@ -890,9 +893,8 @@ impl J2kEncoder {
 
             let mut packet_body = Vec::new();
 
-            for band in 0..num_bands {
+            for (band, &(grid_w, grid_h)) in subband_grids.iter().enumerate().take(num_bands) {
                 let sb_idx = if res == 0 { 0 } else { band }; // 0, 1, 2
-                let (grid_w, grid_h) = subband_grids[band];
 
                 let (sb_coeffs, sb_w, sb_h) = self.extract_subband_coeffs(
                     coeffs,
@@ -1146,6 +1148,7 @@ impl J2kEncoder {
     }
 
     /// Quantize 9-7 coefficients
+    #[allow(clippy::too_many_arguments)]
     fn quantize_97(
         &self,
         coeffs: &mut [f32],

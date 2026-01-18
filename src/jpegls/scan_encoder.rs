@@ -46,10 +46,7 @@ impl<'a> ScanEncoder<'a> {
             frame_info.component_count as usize
         };
 
-        let mut run_index = Vec::with_capacity(num_components);
-        for _ in 0..num_components {
-            run_index.push(0);
-        }
+        let run_index = vec![0; num_components];
 
         let regular_mode_contexts = vec![RegularModeContext::new(range); 365];
         let run_mode_contexts = vec![
@@ -247,9 +244,7 @@ impl<'a> ScanEncoder<'a> {
             curr[components..buffer_width].copy_from_slice(current_source_row);
 
             // Replicate boundary pixels for padding
-            for c in 0..components {
-                curr[c] = prev[components + c];
-            }
+            curr[..components].copy_from_slice(&prev[components..2 * components]);
 
             self.encode_sample_line(prev, curr, width, components, line == 0)?;
             source_idx += pixel_stride;
@@ -504,6 +499,7 @@ impl<'a> ScanEncoder<'a> {
     }
 
     // Updated for Interleaved
+    #[allow(clippy::too_many_arguments)]
     fn encode_run_mode_interleaved<T: JpeglsSample>(
         &mut self,
         start_pixel_idx: usize,
@@ -522,14 +518,14 @@ impl<'a> ScanEncoder<'a> {
 
         // Capture Ra for all components (left neighbor)
         let mut ra = vec![T::default(); components];
-        for c in 0..components {
+        for (c, ra_val) in ra.iter_mut().enumerate().take(components) {
             let ra_idx = if start_pixel_idx > 0 {
                 base_offset + (start_pixel_idx - 1) * components + c
             } else {
                 // First pixel: use boundary pixel at index c
                 c
             };
-            ra[c] = curr_line[ra_idx];
+            *ra_val = curr_line[ra_idx];
         }
 
         while run_length < count_type_remain {
@@ -569,10 +565,9 @@ impl<'a> ScanEncoder<'a> {
             // In sample-interleaved mode, ALL components of the interrupting pixel
             // are coded using the interruption context (context 0).
             // See T.87 Section 4.5.2 and CharLS implementation.
-            for c in 0..components {
+            for (c, &ra_val) in ra.iter().enumerate().take(components) {
                 let idx = base_offset + interruption_pixel_idx * components + c;
                 let val = curr_line[idx];
-                let ra_val = ra[c];
                 let up_val = prev_line[idx]; // Rb
 
                 // Prediction is always Rb for interleaved interruption
@@ -585,10 +580,9 @@ impl<'a> ScanEncoder<'a> {
         } else {
             // For non-interleaved or line-interleaved, components are coded
             // according to their individual Ra == Rb relationship.
-            for c in 0..components {
+            for (c, &ra_val) in ra.iter().enumerate().take(components) {
                 let idx = base_offset + interruption_pixel_idx * components + c;
                 let val = curr_line[idx];
-                let ra_val = ra[c];
                 let up_val = prev_line[idx]; // Rb
 
                 let encoded_val = self.encode_run_interruption_pixel::<T>(

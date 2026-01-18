@@ -418,6 +418,9 @@ impl Jpeg1Encoder {
         }
 
         // Write Huffman Tables (Luminance)
+        // Note: For now we use the same tables for 8-bit and >8-bit, 
+        // but this logic allows for future optimization or differentiation
+        #[allow(clippy::if_same_then_else)]
         if self.bits_per_sample > 8 {
             writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
         } else {
@@ -846,6 +849,9 @@ impl Jpeg1Encoder {
         }
 
         // Write Huffman Tables (Luminance)
+        // Note: For now we use the same tables for 8-bit and >8-bit, 
+        // but this logic allows for future optimization or differentiation
+        #[allow(clippy::if_same_then_else)]
         if self.bits_per_sample > 8 {
             writer.write_dht(0, 0, &self.dc_table_lum.lengths, &self.dc_table_lum.values)?;
         } else {
@@ -1416,8 +1422,7 @@ impl Jpeg1Encoder {
         bit_writer.write_bits(dc_bits, dc_bit_len)?;
 
         let mut run = 0;
-        for i in 1..64 {
-            let ac_val = zigzag_coeffs[i];
+        for &ac_val in zigzag_coeffs.iter().skip(1) {
             if ac_val == 0 {
                 run += 1;
             } else {
@@ -1602,9 +1607,8 @@ impl Jpeg1Encoder {
         writer.write_u16(frame_info.height as u16)?;
         writer.write_u16(frame_info.width as u16)?;
         writer.write_byte(components_count as u8)?;
-        for i in 0..components_count {
+        for (i, &(h, v)) in sampling_factors.iter().enumerate().take(components_count) {
             writer.write_byte((i + 1) as u8)?; // ID
-            let (h, v) = sampling_factors[i];
             writer.write_byte((h << 4) | v)?;
             writer.write_byte(if i == 0 { 0 } else { 1 })?; // Quant table selector
         }
@@ -1857,7 +1861,6 @@ impl Jpeg1Encoder {
         // Reset DC predictors at start of scan
         self.huffman.dc_previous_value = [0; 4];
         let mut next_restart_index = 0;
-        let mut mcus_encoded = 0;
         
         // Determine total MCUs
         let buf0 = &buffers[0];
@@ -1870,7 +1873,7 @@ impl Jpeg1Encoder {
         // Iterate over MCUs
         for mcu_idx in 0..total_mcus {
             // Handle restart intervals
-            if self.restart_interval > 0 && mcus_encoded > 0 && (mcus_encoded % self.restart_interval as usize == 0) {
+            if self.restart_interval > 0 && mcu_idx > 0 && (mcu_idx % self.restart_interval as usize == 0) {
                 bit_writer.flush()?;
                 let len = bit_writer.len();
                 let _ = bit_writer_opt.take();
@@ -1913,7 +1916,6 @@ impl Jpeg1Encoder {
                     )?;
                 }
             }
-            mcus_encoded += 1;
         }
         
         bit_writer.flush()?;
@@ -1972,8 +1974,7 @@ impl Jpeg1Encoder {
             if scan.ah == 0 {
                 // Initial AC Scan
                 let mut run = 0;
-                for k in start..=end {
-                    let val = zigzag[k];
+                for &val in zigzag.iter().take(end + 1).skip(start) {
                     let _abs_val = val.abs();
                     // Check if coefficient is significant at this shift
                     // We need to encode `val >> Al`
@@ -2042,8 +2043,7 @@ impl Jpeg1Encoder {
                 
                 let mut refinement_bits = Vec::new(); // Bits to send after next symbol
                 
-                for k in start..=end {
-                    let val = zigzag[k];
+                for &val in zigzag.iter().take(end + 1).skip(start) {
                     let abs_val = val.abs();
                     let history_mask = 1 << scan.ah; // Previously sent bits
                     let current_bit_mask = 1 << scan.al;

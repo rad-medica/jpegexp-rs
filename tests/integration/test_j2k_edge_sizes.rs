@@ -47,15 +47,21 @@ fn test_size(width: usize, height: usize) {
     let mut reader = JpegStreamReader::new(&encoded);
     let mut decoder = J2kDecoder::new(&mut reader);
     let decoded_image = decoder.decode().expect("Decoding failed");
-    let reconstructed_bytes = decoded_image
-        .reconstruct_pixels()
-        .expect("Reconstruction failed");
+    let reconstructed_bytes = decoded_image.reconstruct_pixels().expect(
+        "Reconstruction failed",
+    );
 
     // Calculate MAE
     let mae = calculate_mae(&original_bytes, &reconstructed_bytes);
     println!("MAE: {:.6}", mae);
 
-    assert_eq!(mae, 0.0, "Lossless encoding should have MAE=0 for {}×{}", width, height);
+    assert_eq!(
+        mae,
+        0.0,
+        "Lossless encoding should have MAE=0 for {}×{}",
+        width,
+        height
+    );
 }
 
 #[test]

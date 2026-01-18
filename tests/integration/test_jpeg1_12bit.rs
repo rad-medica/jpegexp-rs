@@ -29,18 +29,28 @@ fn test_jpeg1_12bit_roundtrip() {
 
     // Verify SOF marker
     let mut found_sof = false;
-    let expected_sof = if frame_info.bits_per_sample > 8 { 0xC1 } else { 0xC0 };
+    let expected_sof = if frame_info.bits_per_sample > 8 {
+        0xC1
+    } else {
+        0xC0
+    };
     for i in 0..enc_len - 1 {
         if encoded[i] == 0xFF && encoded[i + 1] == expected_sof {
             found_sof = true;
             break;
         }
     }
-    assert!(found_sof, "Encoded stream should contain expected SOF marker");
+    assert!(
+        found_sof,
+        "Encoded stream should contain expected SOF marker"
+    );
 
     let mut decoder = Jpeg1Decoder::new(&encoded[..enc_len]);
     decoder.read_header().expect("Read header failed");
-    assert_eq!(decoder.frame_info().bits_per_sample, frame_info.bits_per_sample);
+    assert_eq!(
+        decoder.frame_info().bits_per_sample,
+        frame_info.bits_per_sample
+    );
 
     let mut decoded = vec![0u16; width * height];
     decoder.decode_u16(&mut decoded).expect("Decode failed");

@@ -545,9 +545,9 @@ impl HTBlockEncoder {
         let mut emb_k = 0u8;
         let mut emb_1 = 0u8;
         
-        for i in 0..4 {
+        for (i, &coeff) in coeffs.iter().enumerate().take(4) {
             if (rho >> i) & 1 == 1 {
-                let mag = coeffs[i].unsigned_abs();
+                let mag = coeff.unsigned_abs();
                 
                 // For lossless: all significant samples have MSB = 1
                 // We can skip transmitting it (bit_k = 1)

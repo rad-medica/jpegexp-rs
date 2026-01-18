@@ -1,5 +1,5 @@
 /// Integration test for DICOM-encapsulated JPEG 2000
-/// 
+///
 /// Tests the complete workflow:
 /// 1. Encode images to JPEG 2000 codestreams
 /// 2. Encapsulate codestreams in DICOM format
@@ -54,7 +54,8 @@ fn test_dicom_j2k_single_frame_lossless() {
     };
 
     let mut j2k_buffer = vec![0u8; pixels.len() * 4];
-    let j2k_size = encoder.encode(&pixels, &frame_info, &mut j2k_buffer)
+    let j2k_size = encoder
+        .encode(&pixels, &frame_info, &mut j2k_buffer)
         .expect("JPEG 2000 encoding failed");
     let j2k_codestream = j2k_buffer[..j2k_size].to_vec();
 
@@ -71,20 +72,29 @@ fn test_dicom_j2k_single_frame_lossless() {
     println!("Overhead: {} bytes", dicom_data.len() - j2k_size);
 
     // Verify DICOM structure
-    assert!(dicom_data.len() > j2k_size, "DICOM data should include encapsulation overhead");
+    assert!(
+        dicom_data.len() > j2k_size,
+        "DICOM data should include encapsulation overhead"
+    );
 
     // Parse DICOM encapsulation
     let mut parser = DicomParser::new(&dicom_data);
     let frames = parser.parse_frames().expect("DICOM parsing failed");
 
     assert_eq!(frames.len(), 1, "Should extract 1 frame");
-    assert_eq!(frames[0].len(), j2k_codestream.len(), "Extracted codestream should match original");
+    assert_eq!(
+        frames[0].len(),
+        j2k_codestream.len(),
+        "Extracted codestream should match original"
+    );
 
     // Decode JPEG 2000
     let mut reader = JpegStreamReader::new(&frames[0]);
     let mut decoder = J2kDecoder::new(&mut reader);
     let image = decoder.decode().expect("JPEG 2000 decoding failed");
-    let decoded_pixels = image.reconstruct_pixels().expect("Pixel reconstruction failed");
+    let decoded_pixels = image.reconstruct_pixels().expect(
+        "Pixel reconstruction failed",
+    );
 
     // Verify lossless
     let mae = calculate_mae(&pixels, &decoded_pixels);
@@ -130,8 +140,9 @@ fn test_dicom_j2k_multi_frame_lossless() {
     let mut j2k_codestreams = Vec::new();
     for (i, frame) in frames.iter().enumerate() {
         let mut j2k_buffer = vec![0u8; frame.len() * 4];
-        let j2k_size = encoder.encode(frame, &frame_info, &mut j2k_buffer)
-            .expect(&format!("Frame {} encoding failed", i));
+        let j2k_size = encoder.encode(frame, &frame_info, &mut j2k_buffer).expect(
+            &format!("Frame {} encoding failed", i),
+        );
         j2k_codestreams.push(j2k_buffer[..j2k_size].to_vec());
         println!("Frame {} J2K size: {} bytes", i, j2k_size);
     }
@@ -145,7 +156,10 @@ fn test_dicom_j2k_multi_frame_lossless() {
     let mut dicom_data = Vec::new();
     encapsulator.write(&mut dicom_data).unwrap();
 
-    println!("DICOM multi-frame encapsulated size: {} bytes", dicom_data.len());
+    println!(
+        "DICOM multi-frame encapsulated size: {} bytes",
+        dicom_data.len()
+    );
 
     // Parse DICOM encapsulation
     let mut parser = DicomParser::new(&dicom_data);
@@ -160,8 +174,13 @@ fn test_dicom_j2k_multi_frame_lossless() {
         // Decode
         let mut reader = JpegStreamReader::new(extracted);
         let mut decoder = J2kDecoder::new(&mut reader);
-        let image = decoder.decode().expect(&format!("Frame {} decoding failed", i));
-        let decoded = image.reconstruct_pixels().expect(&format!("Frame {} reconstruction failed", i));
+        let image = decoder.decode().expect(
+            &format!("Frame {} decoding failed", i),
+        );
+        let decoded = image.reconstruct_pixels().expect(&format!(
+            "Frame {} reconstruction failed",
+            i
+        ));
 
         // Verify
         let mae = calculate_mae(original, &decoded);
@@ -192,7 +211,8 @@ fn test_dicom_j2k_lossy_quality() {
     };
 
     let mut j2k_buffer = vec![0u8; pixels.len() * 4];
-    let j2k_size = encoder.encode(&pixels, &frame_info, &mut j2k_buffer)
+    let j2k_size = encoder
+        .encode(&pixels, &frame_info, &mut j2k_buffer)
         .expect("JPEG 2000 encoding failed");
     let j2k_codestream = j2k_buffer[..j2k_size].to_vec();
 
@@ -217,7 +237,11 @@ fn test_dicom_j2k_lossy_quality() {
     // Verify quality
     let mae = calculate_mae(&pixels, &decoded);
     println!("Lossy Q95 MAE: {:.4}", mae);
-    assert!(mae < 0.5, "Q95 should have very low MAE (< 0.5), got {:.4}", mae);
+    assert!(
+        mae < 0.5,
+        "Q95 should have very low MAE (< 0.5), got {:.4}",
+        mae
+    );
 
     println!("✅ DICOM J2K lossy quality test passed");
 }
@@ -237,18 +261,26 @@ fn test_dicom_encapsulation_overhead() {
     };
 
     let mut j2k_buffer = vec![0u8; pixels.len() * 4];
-    let j2k_size = encoder.encode(&pixels, &frame_info, &mut j2k_buffer).unwrap();
+    let j2k_size = encoder
+        .encode(&pixels, &frame_info, &mut j2k_buffer)
+        .unwrap();
 
     // Single frame encapsulation
     let mut encapsulator = DicomEncapsulator::new();
-    encapsulator.add_frame(j2k_buffer[..j2k_size].to_vec()).unwrap();
+    encapsulator
+        .add_frame(j2k_buffer[..j2k_size].to_vec())
+        .unwrap();
 
     let calculated_size = encapsulator.calculate_size();
     let mut dicom_data = Vec::new();
     encapsulator.write(&mut dicom_data).unwrap();
 
     // Verify size calculation
-    assert_eq!(dicom_data.len(), calculated_size, "Calculated size should match actual size");
+    assert_eq!(
+        dicom_data.len(),
+        calculated_size,
+        "Calculated size should match actual size"
+    );
 
     // Check overhead
     let overhead = dicom_data.len() - j2k_size;
@@ -257,8 +289,12 @@ fn test_dicom_encapsulation_overhead() {
     println!("  Fragment header: 8 bytes");
     println!("  Sequence delimiter: 8 bytes");
     println!("  Total expected: 24 bytes");
-    
-    assert_eq!(overhead, 24, "Single frame overhead should be exactly 24 bytes");
+
+    assert_eq!(
+        overhead,
+        24,
+        "Single frame overhead should be exactly 24 bytes"
+    );
 
     println!("✅ DICOM encapsulation overhead test passed");
 }
@@ -267,7 +303,7 @@ fn test_dicom_encapsulation_overhead() {
 fn test_dicom_offset_table() {
     let width = 64;
     let height = 64;
-    
+
     // Create 3 frames of different sizes
     let frames = vec![
         vec![100u8; width * height],
@@ -302,22 +338,27 @@ fn test_dicom_offset_table() {
 
     // Verify offset table is present
     // Offset table: Item Tag (4) + Length (4) + Offsets (12 for 3 frames)
-    let offset_table_length = u32::from_le_bytes([
-        dicom_data[4],
-        dicom_data[5],
-        dicom_data[6],
-        dicom_data[7],
-    ]);
-    
-    assert_eq!(offset_table_length, 12, "Offset table should have 3 offsets (12 bytes)");
+    let offset_table_length =
+        u32::from_le_bytes([dicom_data[4], dicom_data[5], dicom_data[6], dicom_data[7]]);
+
+    assert_eq!(
+        offset_table_length,
+        12,
+        "Offset table should have 3 offsets (12 bytes)"
+    );
 
     // Parse and verify all frames can be extracted
     let mut parser = DicomParser::new(&dicom_data);
     let extracted = parser.parse_frames().unwrap();
-    
+
     assert_eq!(extracted.len(), 3);
     for (i, (original, extracted_stream)) in codestreams.iter().zip(extracted.iter()).enumerate() {
-        assert_eq!(original.len(), extracted_stream.len(), "Frame {} size mismatch", i);
+        assert_eq!(
+            original.len(),
+            extracted_stream.len(),
+            "Frame {} size mismatch",
+            i
+        );
     }
 
     println!("✅ DICOM offset table test passed");

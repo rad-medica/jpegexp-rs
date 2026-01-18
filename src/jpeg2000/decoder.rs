@@ -728,11 +728,13 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
 
                 if is_ht_block {
                     // HTJ2K Decoding Path
-                    let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
-                    block.x = cb_info.x as u32;
-                    block.y = cb_info.y as u32;
-                    block.width = cb_width as u32;
-                    block.height = cb_height as u32;
+                    let mut block = crate::jpeg2000::image::J2kCodeBlock {
+                        x: cb_info.x as u32,
+                        y: cb_info.y as u32,
+                        width: cb_width as u32,
+                        height: cb_height as u32,
+                        ..crate::jpeg2000::image::J2kCodeBlock::default()
+                    };
                     block.layer_data.push(data.clone());
                     block.layers_decoded = (layer + 1) as u8;
 
@@ -939,15 +941,17 @@ impl<'a, 'b> J2kDecoder<'a, 'b> {
                         block.state = bpc.state;
                         block.coding_passes += cb_info.num_passes; // Accumulate passes
                     } else {
-                        let mut block = crate::jpeg2000::image::J2kCodeBlock::default();
-                        block.x = cb_info.x as u32;
-                        block.y = cb_info.y as u32;
-                        block.width = cb_width as u32;
-                        block.height = cb_height as u32;
+                        let mut block = crate::jpeg2000::image::J2kCodeBlock {
+                            x: cb_info.x as u32,
+                            y: cb_info.y as u32,
+                            width: cb_width as u32,
+                            height: cb_height as u32,
+                            coding_passes: 0,
+                            zero_bit_planes: zero_bp,
+                            ..crate::jpeg2000::image::J2kCodeBlock::default()
+                        };
                         block.layer_data.push(data.clone());
                         block.layers_decoded = (layer + 1) as u8;
-                        block.coding_passes = 0;
-                        block.zero_bit_planes = zero_bp;
 
                         let mut bpc = crate::jpeg2000::bit_plane_coder::BitPlaneCoder::new(
                             block.width,

@@ -60,10 +60,9 @@ fn generate_noise_image(width: usize, height: usize, bit_depth: u32, seed: u32) 
 
     for i in 0..(width * height) {
         let val = ((i as u64)
-            .wrapping_mul(1103515245)
-            .wrapping_add(12345)
-            .wrapping_add(seed as u64))
-            % (max_val + 1);
+                       .wrapping_mul(1103515245)
+                       .wrapping_add(12345)
+                       .wrapping_add(seed as u64)) % (max_val + 1);
 
         if bit_depth <= 8 {
             pixels.push(val as u8);
@@ -138,26 +137,23 @@ fn bench_jpegls_encode(c: &mut Criterion) {
         let input_16bit = generate_gradient_image(width, height, 16);
         group.throughput(Throughput::Bytes(input_16bit.len() as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("rust_16bit", size),
-            &input_16bit,
-            |b, input| {
-                let frame_info = FrameInfo {
-                    width: width as u32,
-                    height: height as u32,
-                    bits_per_sample: 16,
-                    component_count: 1,
-                };
-                let mut output = vec![0u8; input.len() * 2];
+        group.bench_with_input(BenchmarkId::new("rust_16bit", size), &input_16bit, |b,
+         input| {
+            let frame_info = FrameInfo {
+                width: width as u32,
+                height: height as u32,
+                bits_per_sample: 16,
+                component_count: 1,
+            };
+            let mut output = vec![0u8; input.len() * 2];
 
-                b.iter(|| {
-                    let mut encoder = JpeglsEncoder::new(&mut output);
-                    encoder.set_frame_info(frame_info).unwrap();
-                    let size = encoder.encode(black_box(input)).unwrap();
-                    black_box(size)
-                });
-            },
-        );
+            b.iter(|| {
+                let mut encoder = JpeglsEncoder::new(&mut output);
+                encoder.set_frame_info(frame_info).unwrap();
+                let size = encoder.encode(black_box(input)).unwrap();
+                black_box(size)
+            });
+        });
     }
 
     group.finish();
@@ -188,19 +184,16 @@ fn bench_jpegls_decode(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(input_8bit.len() as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("rust_8bit", size),
-            &encoded_8bit,
-            |b, encoded| {
-                b.iter(|| {
-                    let mut output = vec![0u8; width * height];
-                    let mut decoder = JpeglsDecoder::new(black_box(encoded));
-                    decoder.read_header().unwrap();
-                    decoder.decode(&mut output).unwrap();
-                    black_box(output)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("rust_8bit", size), &encoded_8bit, |b,
+         encoded| {
+            b.iter(|| {
+                let mut output = vec![0u8; width * height];
+                let mut decoder = JpeglsDecoder::new(black_box(encoded));
+                decoder.read_header().unwrap();
+                decoder.decode(&mut output).unwrap();
+                black_box(output)
+            });
+        });
 
         // Pre-encode 16-bit image
         let input_16bit = generate_gradient_image(width, height, 16);
@@ -325,19 +318,16 @@ fn bench_j2k_decode(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(input.len() as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("rust_lossless", size),
-            &encoded,
-            |b, encoded| {
-                b.iter(|| {
-                    let mut reader = JpegStreamReader::new(black_box(encoded));
-                    let mut decoder = J2kDecoder::new(&mut reader);
-                    let image = decoder.decode().unwrap();
-                    let pixels = image.reconstruct_pixels().unwrap();
-                    black_box(pixels)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("rust_lossless", size), &encoded, |b,
+         encoded| {
+            b.iter(|| {
+                let mut reader = JpegStreamReader::new(black_box(encoded));
+                let mut decoder = J2kDecoder::new(&mut reader);
+                let image = decoder.decode().unwrap();
+                let pixels = image.reconstruct_pixels().unwrap();
+                black_box(pixels)
+            });
+        });
     }
 
     group.finish();
@@ -412,19 +402,15 @@ fn bench_jpeg1_decode(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(input.len() as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("rust_q90", size),
-            &encoded,
-            |b, encoded| {
-                b.iter(|| {
-                    let mut output = vec![0u8; width * height];
-                    let mut decoder = Jpeg1Decoder::new(black_box(encoded));
-                    decoder.read_header().unwrap();
-                    decoder.decode(&mut output).unwrap();
-                    black_box(output)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("rust_q90", size), &encoded, |b, encoded| {
+            b.iter(|| {
+                let mut output = vec![0u8; width * height];
+                let mut decoder = Jpeg1Decoder::new(black_box(encoded));
+                decoder.read_header().unwrap();
+                decoder.decode(&mut output).unwrap();
+                black_box(output)
+            });
+        });
     }
 
     group.finish();

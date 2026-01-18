@@ -297,6 +297,7 @@ impl<'a> HTBlockCoder<'a> {
         max_e.saturating_sub(1).max(1)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn reconstruct_quad(
         &mut self,
         x: usize,

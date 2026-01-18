@@ -15,12 +15,12 @@ fn generate_image(width: usize, height: usize, seed: u32) -> Vec<u8> {
 
 fn bench_jpeg2000_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("jpeg2000_encode");
-    
+
     for size in [256, 512, 1024].iter() {
         let width = *size;
         let height = *size;
         let input = generate_image(width, height, 42);
-        
+
         group.throughput(Throughput::Bytes((width * height) as u64));
         group.bench_with_input(BenchmarkId::new("lossless_5_3", size), size, |b, &_s| {
             let mut output = vec![0u8; width * height * 2]; // Pre-allocate output buffer
@@ -30,7 +30,7 @@ fn bench_jpeg2000_encode(c: &mut Criterion) {
                 bits_per_sample: 8,
                 component_count: 1,
             };
-            
+
             b.iter(|| {
                 let mut encoder = J2kEncoder::new();
                 encoder.set_quality(100);
@@ -44,12 +44,12 @@ fn bench_jpeg2000_encode(c: &mut Criterion) {
 
 fn bench_jpegls_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("jpegls_encode");
-    
+
     for size in [256, 512, 1024].iter() {
         let width = *size;
         let height = *size;
         let input = generate_image(width, height, 42);
-        
+
         group.throughput(Throughput::Bytes((width * height) as u64));
         group.bench_with_input(BenchmarkId::new("lossless_default", size), size, |b, &_s| {
             let mut output = vec![0u8; width * height * 2];
@@ -59,7 +59,7 @@ fn bench_jpegls_encode(c: &mut Criterion) {
                 bits_per_sample: 8,
                 component_count: 1,
             };
-            
+
             b.iter(|| {
                 let mut encoder = JpeglsEncoder::new(&mut output);
                 encoder.set_frame_info(frame_info).unwrap();

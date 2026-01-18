@@ -65,9 +65,13 @@ fn run_universal_roundtrip(
             encoder.set_quality(quality);
             if bits <= 8 {
                 let source_u8: Vec<u8> = source_u16.iter().map(|&v| v as u8).collect();
-                encoded_len = encoder.encode(&source_u8, &frame_info, &mut encoded).expect("JPEG 1 encode failed");
+                encoded_len = encoder
+                    .encode(&source_u8, &frame_info, &mut encoded)
+                    .expect("JPEG 1 encode failed");
             } else {
-                encoded_len = encoder.encode_u16(&source_u16, &frame_info, &mut encoded).expect("JPEG 1 u16 encode failed");
+                encoded_len = encoder
+                    .encode_u16(&source_u16, &frame_info, &mut encoded)
+                    .expect("JPEG 1 u16 encode failed");
             }
         }
         CodecType::Jpegls => {
@@ -86,17 +90,20 @@ fn run_universal_roundtrip(
                     source_bytes[i * 2] = b[0];
                     source_bytes[i * 2 + 1] = b[1];
                 }
-                encoded_len = encoder.encode(&source_bytes).expect("JLS u16 encode failed");
+                encoded_len = encoder.encode(&source_bytes).expect(
+                    "JLS u16 encode failed",
+                );
             }
         }
-        CodecType::Jpeg2000 | CodecType::Htj2k => {
+        CodecType::Jpeg2000 |
+        CodecType::Htj2k => {
             let mut encoder = J2kEncoder::new();
             encoder.set_htj2k(matches!(codec_type, CodecType::Htj2k));
             encoder.set_irreversible(quality < 100);
             if quality < 100 {
                 encoder.set_quality(quality);
             }
-            
+
             let bytes = if bits <= 8 {
                 source_u16.iter().map(|&v| v as u8).collect()
             } else {
@@ -106,8 +113,10 @@ fn run_universal_roundtrip(
                 }
                 b
             };
-            
-            encoded_len = encoder.encode(&bytes, &frame_info, &mut encoded).expect("J2K encode failed");
+
+            encoded_len = encoder.encode(&bytes, &frame_info, &mut encoded).expect(
+                "J2K encode failed",
+            );
         }
     }
 
@@ -119,9 +128,13 @@ fn run_universal_roundtrip(
             if bits <= 8 {
                 let mut recon_u8 = vec![0u8; pixel_count];
                 decoder.decode(&mut recon_u8).expect("JPEG 1 decode failed");
-                for i in 0..pixel_count { reconstructed_u16[i] = recon_u8[i] as u16; }
+                for i in 0..pixel_count {
+                    reconstructed_u16[i] = recon_u8[i] as u16;
+                }
             } else {
-                decoder.decode_u16(&mut reconstructed_u16).expect("JPEG 1 u16 decode failed");
+                decoder.decode_u16(&mut reconstructed_u16).expect(
+                    "JPEG 1 u16 decode failed",
+                );
             }
         }
         CodecType::Jpegls => {
@@ -130,29 +143,52 @@ fn run_universal_roundtrip(
             if bits <= 8 {
                 let mut recon_u8 = vec![0u8; pixel_count];
                 decoder.decode(&mut recon_u8).expect("JLS decode failed");
-                for i in 0..pixel_count { reconstructed_u16[i] = recon_u8[i] as u16; }
+                for i in 0..pixel_count {
+                    reconstructed_u16[i] = recon_u8[i] as u16;
+                }
             } else {
                 let mut recon_bytes = vec![0u8; pixel_count * 2];
-                decoder.decode(&mut recon_bytes).expect("JLS u16 decode failed");
+                decoder.decode(&mut recon_bytes).expect(
+                    "JLS u16 decode failed",
+                );
                 for i in 0..pixel_count {
-                    reconstructed_u16[i] = u16::from_ne_bytes([recon_bytes[i * 2], recon_bytes[i * 2 + 1]]);
+                    reconstructed_u16[i] =
+                        u16::from_ne_bytes([recon_bytes[i * 2], recon_bytes[i * 2 + 1]]);
                 }
             }
         }
-        CodecType::Jpeg2000 | CodecType::Htj2k => {
+        CodecType::Jpeg2000 |
+        CodecType::Htj2k => {
             let mut reader = JpegStreamReader::new(&encoded[..encoded_len]);
             let mut decoder = J2kDecoder::new(&mut reader);
             let image = decoder.decode().expect("J2K decode failed");
-            let pixels = image.reconstruct_pixels().expect("J2K reconstruction failed");
-            for i in 0..pixel_count { reconstructed_u16[i] = pixels[i] as u16; }
+            let pixels = image.reconstruct_pixels().expect(
+                "J2K reconstruction failed",
+            );
+            for i in 0..pixel_count {
+                reconstructed_u16[i] = pixels[i] as u16;
+            }
         }
     }
 
     let mae = calculate_mae(&source_u16, &reconstructed_u16);
-    println!("{:?} ({}x{}x{}, {}b): MAE={:.4}", codec_type, width, height, components, bits, mae);
-    
+    println!(
+        "{:?} ({}x{}x{}, {}b): MAE={:.4}",
+        codec_type,
+        width,
+        height,
+        components,
+        bits,
+        mae
+    );
+
     let threshold = if quality == 100 { 0.1 } else { 50.0 };
-    assert!(mae < threshold, "MAE too high for {:?}: {}", codec_type, mae);
+    assert!(
+        mae < threshold,
+        "MAE too high for {:?}: {}",
+        codec_type,
+        mae
+    );
 }
 
 #[test]

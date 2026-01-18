@@ -237,6 +237,7 @@ fn decode_image(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_image(
     input: &PathBuf,
     output: &PathBuf,
@@ -517,6 +518,7 @@ fn list_codecs() -> Result<(), Box<dyn std::error::Error>> {
 
 // Internal helpers
 
+#[allow(clippy::type_complexity)]
 fn detect_and_decode(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     if data.starts_with(&[0xFF, 0xD8]) {
         if is_jpegls(data) {
@@ -553,6 +555,7 @@ fn is_jpegls(data: &[u8]) -> bool {
     false
 }
 
+#[allow(clippy::type_complexity)]
 fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
     let mut spiff = None;
@@ -573,6 +576,7 @@ fn decode_jpeg1(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std
     Ok((pixels, width, height, components, depth))
 }
 
+#[allow(clippy::type_complexity)]
 fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     let mut reader = jpegexp_rs::jpeg_stream_reader::JpegStreamReader::new(data);
     let mut decoder = jpegexp_rs::jpeg2000::decoder::J2kDecoder::new(&mut reader);
@@ -596,6 +600,7 @@ fn decode_j2k(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn decode_jpegls(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u32, u8), Box<dyn std::error::Error>> {
     let mut decoder = jpegexp_rs::jpegls::JpeglsDecoder::new(data);
     decoder.read_header()?;

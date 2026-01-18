@@ -1,11 +1,11 @@
 # Comprehensive Codec Interoperability Test Report
 
 **Project:** jpegexp-rs
-**Test Date:** 2026-01-15 (Encoder Levels=0 and 12-bit fixes)
+**Test Date:** 2026-01-17 (Re-verified all codecs)
 **Test Framework:** Comprehensive Interop Test Suite v1.1
 **Total Tests Run:** 1,260 (full suite)
 
-> **Latest Update (2026-01-15)**: Fixed critical "Levels=0" encoding bug and verified 12-bit gradient parity.
+> **Latest Update (2026-01-17)**: Re-verified all codecs with identical results to 2026-01-15.
 > - **JPEG 1**: 100% pass rate (320/320) - **Production Ready**
 > - **JPEG 2000**: 36% pass rate (108/300) - **Improved Partial Interoperability**
 >   - ✅ **Solid Patterns**: 100% pass (MAE=0.0) at all depths (8/10/12/16-bit).
@@ -31,9 +31,9 @@ This report documents comprehensive interoperability testing between `jpegexp-rs
 | **JPEG 2000** | 300       | 108    | 192    | **36%**   | ⚠️ **PARTIAL INTEROPERABILITY** |
 | **JPEG-LS**   | 160 (lossless) | 98 | 62 | **61.3%** | ✅ **DECODER PRODUCTION READY** |
 
-> **Note (2026-01-15)**: 
-> - **JPEG 2000**: Fixed critical bug where `Levels=0` encoding returned empty data. "Raw" slice encoding (common in medical imaging) is now **production ready** and bit-exact to OpenJPEG for 12-bit data.
-> - **JPEG-LS**: Corrected assessment. Decoder validated via 23/23 reference bitstream tests (100%). Encoder has 61.3% lossless interop (98/160), with 480 near-lossless tests excluded due to CharLS CLI limitations.
+> **Note (2026-01-17)**: 
+> - **JPEG 2000**: Results confirmed consistent. "Raw" slice encoding (common in medical imaging) is **production ready** and bit-exact to OpenJPEG for 12-bit data.
+> - **JPEG-LS**: Results confirmed consistent. Decoder validated via 23/23 reference bitstream tests (100%). Encoder has 61.3% lossless interop (98/160), with 480 near-lossless tests excluded due to CharLS CLI limitations.
 
 ### Reference Codecs Used
 
@@ -600,6 +600,6 @@ All tests follow the critical rule: **never test a codec against itself**.
 
 ---
 
-**Report Generated:** 2026-01-15
+**Report Generated:** 2026-01-17
 **Test Framework Version:** 1.1
 **Total Test Duration:** ~5 mins

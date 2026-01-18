@@ -31,9 +31,7 @@ use jpegexp_rs::FrameInfo;
 #[path = "../common/synthetic_images.rs"]
 mod synthetic_images;
 
-use synthetic_images::{
-    SyntheticImage, TestPresets,
-};
+use synthetic_images::{SyntheticImage, TestPresets};
 
 // ============================================================================
 // Test Result Structures
@@ -45,7 +43,7 @@ pub struct TestResult {
     // Test identification
     pub codec: String,
     pub direction: String, // "Rust->Ref" or "Ref->Rust"
-    pub mode: String,      // "Lossless", "NearLossless(N)", "Lossy(Q)"
+    pub mode: String, // "Lossless", "NearLossless(N)", "Lossy(Q)"
 
     // Image parameters
     pub width: u32,
@@ -181,7 +179,7 @@ impl TestSuite {
     pub fn to_csv(&self) -> String {
         let mut csv = String::from(
             "Codec,Direction,Mode,Width,Height,BitDepth,Components,Pattern,QualityParam,\
-             EncTime_us,DecTime_us,OriginalSize,CompressedSize,CompressionRatio,MAE,MaxError,PSNR,Throughput_MBps,Status\n"
+             EncTime_us,DecTime_us,OriginalSize,CompressedSize,CompressionRatio,MAE,MaxError,PSNR,Throughput_MBps,Status\n",
         );
 
         for r in &self.results {
@@ -214,9 +212,15 @@ impl TestSuite {
     /// Generate summary report
     pub fn summary(&self) -> String {
         let mut report = String::new();
-        report.push_str("================================================================================\n");
-        report.push_str("                    COMPREHENSIVE INTEROPERABILITY TEST REPORT\n");
-        report.push_str("================================================================================\n\n");
+        report.push_str(
+            "================================================================================\n",
+        );
+        report.push_str(
+            "                    COMPREHENSIVE INTEROPERABILITY TEST REPORT\n",
+        );
+        report.push_str(
+            "================================================================================\n\n",
+        );
 
         report.push_str(&format!("Test Duration: {:?}\n", self.duration()));
         report.push_str(&format!(
@@ -248,7 +252,14 @@ impl TestSuite {
             // Print header
             report.push_str(&format!(
                 "{:<12} {:<10} {:>8} {:>4} {:>3} {:>10} {:>8} {:>6}\n",
-                "Direction", "Mode", "Size", "Bits", "C", "Ratio", "MAE", "Status"
+                "Direction",
+                "Mode",
+                "Size",
+                "Bits",
+                "C",
+                "Ratio",
+                "MAE",
+                "Status"
             ));
 
             for r in &codec_results {
@@ -394,7 +405,14 @@ fn calculate_metrics(original: &[u8], decoded: &[u8], bit_depth: u32) -> (f64, u
 // PNM File Utilities
 // ============================================================================
 
-fn write_pnm(path: &str, pixels: &[u8], w: u32, h: u32, components: u32, bit_depth: u32) -> std::io::Result<()> {
+fn write_pnm(
+    path: &str,
+    pixels: &[u8],
+    w: u32,
+    h: u32,
+    components: u32,
+    bit_depth: u32,
+) -> std::io::Result<()> {
     let magic = if components == 3 { "P6" } else { "P5" };
     let max_val = (1u32 << bit_depth) - 1;
     let mut data = format!("{}\n{} {}\n{}\n", magic, w, h, max_val).into_bytes();
@@ -413,7 +431,12 @@ fn write_pnm(path: &str, pixels: &[u8], w: u32, h: u32, components: u32, bit_dep
     fs::write(path, data)
 }
 
-fn read_pnm_pixels(data: &[u8], expected_pixel_count: usize, bit_depth: u32, components: u32) -> Option<Vec<u8>> {
+fn read_pnm_pixels(
+    data: &[u8],
+    expected_pixel_count: usize,
+    bit_depth: u32,
+    components: u32,
+) -> Option<Vec<u8>> {
     // Simple PNM parser
     let mut pos = 0;
     let magic = if components == 3 { b"P6" } else { b"P5" };
@@ -472,11 +495,7 @@ fn read_pnm_pixels(data: &[u8], expected_pixel_count: usize, bit_depth: u32, com
 // JPEG-LS Interoperability Tests
 // ============================================================================
 
-fn run_jpegls_test(
-    img: &SyntheticImage,
-    near_lossless: i32,
-    suite: &mut TestSuite,
-) {
+fn run_jpegls_test(img: &SyntheticImage, near_lossless: i32, suite: &mut TestSuite) {
     // NOTE: CharLS CLI tool only supports lossless encoding.
     // Near-lossless (NEAR > 0) is not supported via CLI.
     // Skip near-lossless interop tests with CharLS.
@@ -549,8 +568,12 @@ fn run_jpegls_test(
 
                         if let Ok(data) = fs::read(temp_pnm) {
                             let pixel_count = (img.width() * img.height()) as usize;
-                            if let Some(decoded) =
-                                read_pnm_pixels(&data, pixel_count, img.bit_depth(), img.components())
+                            if let Some(decoded) = read_pnm_pixels(
+                                &data,
+                                pixel_count,
+                                img.bit_depth(),
+                                img.components(),
+                            )
                             {
                                 let (mae, max_err, psnr) =
                                     calculate_metrics(&img.pixels, &decoded, img.bit_depth());
@@ -560,14 +583,14 @@ fn run_jpegls_test(
 
                                 // Verify lossless or near-lossless tolerance
                                 if near_lossless == 0 && mae > 0.0 {
-                                    result = result.fail(&format!(
-                                        "Lossless test failed: MAE={:.4}",
-                                        mae
-                                    ));
+                                    result = result.fail(
+                                        &format!("Lossless test failed: MAE={:.4}", mae),
+                                    );
                                 } else if near_lossless > 0 && max_err > near_lossless as u32 {
                                     result = result.fail(&format!(
                                         "Near-lossless tolerance exceeded: max_err={} > NL={}",
-                                        max_err, near_lossless
+                                        max_err,
+                                        near_lossless
                                     ));
                                 }
                             } else {
@@ -616,7 +639,8 @@ fn run_jpegls_test(
             img.height(),
             img.components(),
             img.bit_depth(),
-        ) {
+        )
+        {
             result = result.fail(&format!("Failed to write PNM: {}", e));
             suite.add(result);
             return;
@@ -660,7 +684,8 @@ fn run_jpegls_test(
                                     } else if near_lossless > 0 && max_err > near_lossless as u32 {
                                         result = result.fail(&format!(
                                             "Near-lossless tolerance exceeded: max_err={} > NL={}",
-                                            max_err, near_lossless
+                                            max_err,
+                                            near_lossless
                                         ));
                                     }
                                 }
@@ -760,8 +785,12 @@ fn run_j2k_test(img: &SyntheticImage, lossless: bool, suite: &mut TestSuite) {
 
                         if let Ok(data) = fs::read(temp_pnm) {
                             let pixel_count = (img.width() * img.height()) as usize;
-                            if let Some(decoded) =
-                                read_pnm_pixels(&data, pixel_count, img.bit_depth(), img.components())
+                            if let Some(decoded) = read_pnm_pixels(
+                                &data,
+                                pixel_count,
+                                img.bit_depth(),
+                                img.components(),
+                            )
                             {
                                 let (mae, max_err, psnr) =
                                     calculate_metrics(&img.pixels, &decoded, img.bit_depth());
@@ -813,8 +842,7 @@ fn run_j2k_test(img: &SyntheticImage, lossless: bool, suite: &mut TestSuite) {
             img.height(),
             img.components(),
             img.bit_depth(),
-        )
-        .unwrap();
+        ).unwrap();
 
         let mut args = vec!["-i", temp_pnm, "-o", temp_j2k];
         if lossless {
@@ -838,24 +866,26 @@ fn run_j2k_test(img: &SyntheticImage, lossless: bool, suite: &mut TestSuite) {
                     let mut decoder = J2kDecoder::new(&mut reader);
 
                     match decoder.decode() {
-                        Ok(img_decoded) => match img_decoded.reconstruct_pixels() {
-                            Ok(decoded) => {
-                                result.decode_time_us = start_dec.elapsed().as_micros() as u64;
+                        Ok(img_decoded) => {
+                            match img_decoded.reconstruct_pixels() {
+                                Ok(decoded) => {
+                                    result.decode_time_us = start_dec.elapsed().as_micros() as u64;
 
-                                let (mae, max_err, psnr) =
-                                    calculate_metrics(&img.pixels, &decoded, img.bit_depth());
-                                result.mae = mae;
-                                result.max_error = max_err;
-                                result.psnr = psnr;
+                                    let (mae, max_err, psnr) =
+                                        calculate_metrics(&img.pixels, &decoded, img.bit_depth());
+                                    result.mae = mae;
+                                    result.max_error = max_err;
+                                    result.psnr = psnr;
 
-                                if lossless && mae > 0.0 {
-                                    result = result.fail(&format!("Lossless MAE={:.4}", mae));
+                                    if lossless && mae > 0.0 {
+                                        result = result.fail(&format!("Lossless MAE={:.4}", mae));
+                                    }
+                                }
+                                Err(e) => {
+                                    result = result.fail(&format!("Reconstruct failed: {:?}", e));
                                 }
                             }
-                            Err(e) => {
-                                result = result.fail(&format!("Reconstruct failed: {:?}", e));
-                            }
-                        },
+                        }
                         Err(e) => {
                             result = result.fail(&format!("Decode failed: {:?}", e));
                         }
@@ -950,8 +980,12 @@ fn run_jpeg1_test(img: &SyntheticImage, quality: i32, suite: &mut TestSuite) {
 
                         if let Ok(data) = fs::read(temp_pnm) {
                             let pixel_count = (img.width() * img.height()) as usize;
-                            if let Some(decoded) =
-                                read_pnm_pixels(&data, pixel_count, 8, img.components())
+                            if let Some(decoded) = read_pnm_pixels(
+                                &data,
+                                pixel_count,
+                                8,
+                                img.components(),
+                            )
                             {
                                 let (mae, max_err, psnr) =
                                     calculate_metrics(&img.pixels, &decoded, 8);
@@ -991,7 +1025,14 @@ fn run_jpeg1_test(img: &SyntheticImage, quality: i32, suite: &mut TestSuite) {
         let temp_pnm = "tests/fixtures/out/temp_j1_in.pnm";
         let temp_jpg = "tests/fixtures/out/temp_j1_ljt.jpg";
 
-        write_pnm(temp_pnm, &img.pixels, img.width(), img.height(), img.components(), 8).unwrap();
+        write_pnm(
+            temp_pnm,
+            &img.pixels,
+            img.width(),
+            img.height(),
+            img.components(),
+            8,
+        ).unwrap();
 
         let quality_str = quality.to_string();
         let start_enc = Instant::now();
@@ -1249,7 +1290,12 @@ fn quick_jpegls_interop() {
     let real_failures = suite
         .results
         .iter()
-        .filter(|r| r.status != "OK" && !r.error_message.as_deref().unwrap_or("").contains("not found"))
+        .filter(|r| {
+            r.status != "OK" &&
+                !r.error_message.as_deref().unwrap_or("").contains(
+                    "not found",
+                )
+        })
         .count();
 
     assert!(

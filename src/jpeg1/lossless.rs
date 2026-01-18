@@ -31,6 +31,7 @@ pub struct Jpeg1LosslessEncoder;
 impl Jpeg1LosslessEncoder {
     /// Encodes a single component of a lossless scan.
     /// Returns the encoded bitstream length in bytes.
+    #[allow(clippy::too_many_arguments)]
     pub fn encode_component(
         predictor_id: u8,
         width: usize,

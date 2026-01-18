@@ -60,6 +60,7 @@ impl<'a> J2kWriter<'a> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn write_siz(
         &mut self,
         width: u32,

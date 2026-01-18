@@ -39,7 +39,9 @@ fn generate_test_image(width: usize, height: usize, pattern: &str) -> Vec<u8> {
                     let idx = y * width + x;
                     let fx = x as f32 / width as f32;
                     let fy = y as f32 / height as f32;
-                    let value = (128.0 + 64.0 * (fx * std::f32::consts::TAU).sin() + 64.0 * (fy * std::f32::consts::TAU).cos()) as u8;
+                    let value = (128.0 + 64.0 * (fx * std::f32::consts::TAU).sin() +
+                                     64.0 * (fy * std::f32::consts::TAU).cos()) as
+                        u8;
                     pixels[idx] = value;
                 }
             }
@@ -86,12 +88,7 @@ fn bench_encode(
 }
 
 /// Print benchmark results in a formatted table
-fn print_results(
-    label: &str,
-    original_size: usize,
-    compressed_size: usize,
-    duration_us: u128,
-) {
+fn print_results(label: &str, original_size: usize, compressed_size: usize, duration_us: u128) {
     if compressed_size == 0 {
         // Skip failed encodings
         return;
@@ -101,7 +98,11 @@ fn print_results(
 
     println!(
         "{:30} | {:8} bytes | {:6.2}x | {:8} µs | {:6.2} MB/s",
-        label, compressed_size, ratio, duration_us, throughput_mbps
+        label,
+        compressed_size,
+        ratio,
+        duration_us,
+        throughput_mbps
     );
 }
 
@@ -112,8 +113,20 @@ fn main() {
     let patterns = ["gradient", "checkerboard", "noise", "natural"];
 
     for &(width, height) in &sizes {
-        println!("\n--- Image Size: {}x{} ({} bytes) ---", width, height, width * height);
-        println!("{:30} | {:>15} | {:>7} | {:>11} | {:>11}", "Configuration", "Size", "Ratio", "Time", "Throughput");
+        println!(
+            "\n--- Image Size: {}x{} ({} bytes) ---",
+            width,
+            height,
+            width * height
+        );
+        println!(
+            "{:30} | {:>15} | {:>7} | {:>11} | {:>11}",
+            "Configuration",
+            "Size",
+            "Ratio",
+            "Time",
+            "Throughput"
+        );
         println!("{}", "-".repeat(85));
 
         for pattern in &patterns {
@@ -145,15 +158,24 @@ fn main() {
     }
 
     println!("\n=== Comparison Summary ===\n");
-    
+
     // Generate summary statistics for 512x512 natural image
     let width = 512;
     let height = 512;
     let pixels = generate_test_image(width, height, "natural");
     let original_size = pixels.len();
 
-    println!("Test Image: 512x512 natural pattern ({} bytes)\n", original_size);
-    println!("{:25} | {:>12} | {:>8} | {:>12}", "Mode", "Size", "Ratio", "Savings");
+    println!(
+        "Test Image: 512x512 natural pattern ({} bytes)\n",
+        original_size
+    );
+    println!(
+        "{:25} | {:>12} | {:>8} | {:>12}",
+        "Mode",
+        "Size",
+        "Ratio",
+        "Savings"
+    );
     println!("{}", "-".repeat(65));
 
     let (lossless_size, _) = bench_encode(&pixels, width, height, 100, false, 5);
@@ -166,7 +188,12 @@ fn main() {
         (1.0 - lossless_size as f64 / original_size as f64) * 100.0
     );
 
-    let qualities = [(100, "Near-lossless"), (90, "Visually lossless"), (75, "High quality"), (50, "Medium quality")];
+    let qualities = [
+        (100, "Near-lossless"),
+        (90, "Visually lossless"),
+        (75, "High quality"),
+        (50, "Medium quality"),
+    ];
     for (quality, desc) in &qualities {
         let (size, _) = bench_encode(&pixels, width, height, *quality, true, 5);
         let ratio = original_size as f64 / size as f64;
@@ -182,7 +209,12 @@ fn main() {
     }
 
     println!("\n=== Pattern Compressibility ===\n");
-    println!("{:20} | {:>15} | {:>8}", "Pattern", "Lossless Size", "Ratio");
+    println!(
+        "{:20} | {:>15} | {:>8}",
+        "Pattern",
+        "Lossless Size",
+        "Ratio"
+    );
     println!("{}", "-".repeat(50));
 
     for pattern in &patterns {
@@ -193,7 +225,12 @@ fn main() {
     }
 
     println!("\n=== Performance Scaling ===\n");
-    println!("{:15} | {:>15} | {:>12}", "Image Size", "Time (µs)", "Throughput");
+    println!(
+        "{:15} | {:>15} | {:>12}",
+        "Image Size",
+        "Time (µs)",
+        "Throughput"
+    );
     println!("{}", "-".repeat(48));
 
     for &(width, height) in &sizes {

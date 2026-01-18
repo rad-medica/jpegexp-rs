@@ -84,10 +84,7 @@ impl<'a> ScanDecoder<'a> {
             frame_info.component_count as usize
         };
 
-        let mut run_index = Vec::with_capacity(num_components);
-        for _ in 0..num_components {
-            run_index.push(0);
-        }
+        let run_index = vec![0; num_components];
 
         let regular_mode_contexts = vec![RegularModeContext::new(range); 365];
         let run_mode_contexts = vec![
@@ -212,9 +209,7 @@ impl<'a> ScanDecoder<'a> {
 
             // Initialize edge pixels per CharLS/ITU-T.87
             // Left edge: current[0..comp] = previous[comp..2*comp]
-            for c in 0..components {
-                curr_line[c] = prev_line[components + c];
-            }
+            curr_line[..components].copy_from_slice(&prev_line[components..2 * components]);
 
             // Right edge extension
             for c in 0..components {
@@ -720,6 +715,7 @@ impl<'a> ScanDecoder<'a> {
         crate::jpegls::traits::apply_sign_for_index(val, sign)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn decode_run_mode_interleaved<T: crate::jpegls::traits::JpeglsSample>(
         &mut self,
         start_index: usize,

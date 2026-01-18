@@ -148,9 +148,9 @@ pub unsafe extern "C" fn jpegexp_decoder_read_header(
                 state.data.starts_with(&[0xFF, 0xD8]),
                 state.data.starts_with(&[0xFF, 0x4F])
                     || state.data.starts_with(b"\x00\x00\x00\x0CjP"),
-                !state.data.starts_with(&[0xFF, 0xD8])
-                    && !(state.data.starts_with(&[0xFF, 0x4F])
-                        || state.data.starts_with(b"\x00\x00\x00\x0CjP")),
+                !(state.data.starts_with(&[0xFF, 0xD8])
+                    || state.data.starts_with(&[0xFF, 0x4F])
+                    || state.data.starts_with(b"\x00\x00\x00\x0CjP")),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()

@@ -356,7 +356,7 @@ impl J2kImage {
                 let is_signed = comp_info.is_some_and(|info| info.is_signed);
                 
                 // Apply DC level shift only for unsigned components (ISO/IEC 15444-1 Section G.1.1)
-                let level_offset = if is_signed { 0 } else { (1i32 << (depth - 1)) };
+                let level_offset = if is_signed { 0 } else { 1i32 << (depth - 1) };
                 let val = component_buffers[c][i] + level_offset;
                 let clamped = val.clamp(0, (1i32 << depth) - 1) as u32;
                 

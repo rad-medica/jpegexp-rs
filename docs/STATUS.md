@@ -47,12 +47,12 @@
 - **Files Modified**: `src/jpeg2000/encoder.rs`
 - **Verified**: Matches decoder logic in `decoder.rs:330-347`
 
-### 2. Comprehensive Interoperability Test Suite (2026-01-11)
+### 2. Comprehensive Interoperability Test Suite (2026-01-17)
 - **Implemented**: Full cross-codec validation framework against reference implementations
 - **Test Results**: 
   - **JPEG 1**: 320/320 tests passed (100%) - Perfect interoperability with libjpeg-turbo 3.1.3
-  - **JPEG 2000**: 128/300 tests passed (43%) - Solid patterns perfect, complex patterns improved to MAE=0.05
-  - **JPEG-LS**: 98/640 tests passed (15%) - 8-bit lossless perfect, limited by CharLS CLI
+  - **JPEG 2000**: 108/300 tests passed (36%) - Solid patterns perfect, complex patterns have issues at >8-bit
+  - **JPEG-LS**: 98/160 tests passed (61.3%) - 8-bit lossless perfect, limited by CharLS CLI
 - **Documentation**: [Full 573-line report](test-results/INTEROP_REPORT.md) with extensive comparison tables
 - **Test Data**: 1,260 total test results across all codecs with detailed metrics (MAE, compression ratio, speed)
 - **Coverage**: 8/10/12/16-bit, grayscale/RGB, lossless/lossy, multiple resolutions (16×16 to 512×512)

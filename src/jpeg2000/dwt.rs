@@ -37,14 +37,14 @@ impl Dwt53 {
         // De-interleave
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for i in 0..len {
+        for (i, &val) in x.iter().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < out_l.len() {
-                    out_l[l_idx] = x[i];
+                    out_l[l_idx] = val;
                     l_idx += 1;
                 }
             } else if h_idx < out_h.len() {
-                out_h[h_idx] = x[i];
+                out_h[h_idx] = val;
                 h_idx += 1;
             }
         }
@@ -67,14 +67,14 @@ impl Dwt53 {
         let mut x = vec![0i32; len];
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for i in 0..len {
+        for (i, val) in x.iter_mut().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < in_l.len() {
-                    x[i] = in_l[l_idx];
+                    *val = in_l[l_idx];
                     l_idx += 1;
                 }
             } else if h_idx < in_h.len() {
-                x[i] = in_h[h_idx];
+                *val = in_h[h_idx];
                 h_idx += 1;
             }
         }
@@ -142,16 +142,16 @@ impl Dwt53 {
         for x in 0..ll_w {
             let mut col_l = vec![0i32; ll_h];
             let mut col_h = vec![0i32; lh_h];
-            for y in 0..ll_h {
+            for (y, val) in col_l.iter_mut().enumerate().take(ll_h) {
                 let idx = y * ll_w + x;
                 if idx < ll.len() {
-                    col_l[y] = ll[idx];
+                    *val = ll[idx];
                 }
             }
-            for y in 0..lh_h {
+            for (y, val) in col_h.iter_mut().enumerate().take(lh_h) {
                 let idx = y * ll_w + x; // Fixed indexing: LH has same width as LL
                 if idx < lh.len() {
-                    col_h[y] = lh[idx];
+                    *val = lh[idx];
                 }
             }
             let mut col_output = vec![0i32; h];
@@ -164,16 +164,16 @@ impl Dwt53 {
         for x in 0..hl_w {
             let mut col_l = vec![0i32; ll_h];
             let mut col_h = vec![0i32; lh_h];
-            for y in 0..ll_h {
+            for (y, val) in col_l.iter_mut().enumerate().take(ll_h) {
                 let idx = y * hl_w + x;
                 if idx < hl.len() {
-                    col_l[y] = hl[idx];
+                    *val = hl[idx];
                 }
             }
-            for y in 0..lh_h {
+            for (y, val) in col_h.iter_mut().enumerate().take(lh_h) {
                 let idx = y * hl_w + x;
                 if idx < hh.len() {
-                    col_h[y] = hh[idx];
+                    *val = hh[idx];
                 }
             }
             let mut col_output = vec![0i32; h];
@@ -247,24 +247,24 @@ impl Dwt97 {
             x[i] += Self::DELTA * (left + right);
         }
 
-        for i in 0..len {
+        for (i, val) in x.iter_mut().enumerate().take(len) {
             if i % 2 == 0 {
-                x[i] *= Self::INV_K;
+                *val *= Self::INV_K;
             } else {
-                x[i] *= Self::K;
+                *val *= Self::K;
             }
         }
 
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for i in 0..len {
+        for (i, &val) in x.iter().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < out_l.len() {
-                    out_l[l_idx] = x[i];
+                    out_l[l_idx] = val;
                     l_idx += 1;
                 }
             } else if h_idx < out_h.len() {
-                out_h[h_idx] = x[i];
+                out_h[h_idx] = val;
                 h_idx += 1;
             }
         }
@@ -284,23 +284,23 @@ impl Dwt97 {
         let mut x = vec![0.0f32; len];
         let mut l_idx = 0;
         let mut h_idx = 0;
-        for i in 0..len {
+        for (i, val) in x.iter_mut().enumerate().take(len) {
             if i % 2 == 0 {
                 if l_idx < in_l.len() {
-                    x[i] = in_l[l_idx];
+                    *val = in_l[l_idx];
                     l_idx += 1;
                 }
             } else if h_idx < in_h.len() {
-                x[i] = in_h[h_idx];
+                *val = in_h[h_idx];
                 h_idx += 1;
             }
         }
 
-        for i in 0..len {
+        for (i, val) in x.iter_mut().enumerate().take(len) {
             if i % 2 == 0 {
-                x[i] *= Self::K;
+                *val *= Self::K;
             } else {
-                x[i] *= Self::INV_K;
+                *val *= Self::INV_K;
             }
         }
 
@@ -353,16 +353,16 @@ impl Dwt97 {
         for x in 0..ll_w {
             let mut col_l = vec![0.0f32; ll_h];
             let mut col_h = vec![0.0f32; lh_h];
-            for y in 0..ll_h {
+            for (y, val) in col_l.iter_mut().enumerate().take(ll_h) {
                 let idx = y * ll_w + x;
                 if idx < ll.len() {
-                    col_l[y] = ll[idx];
+                    *val = ll[idx];
                 }
             }
-            for y in 0..lh_h {
+            for (y, val) in col_h.iter_mut().enumerate().take(lh_h) {
                 let idx = y * ll_w + x;
                 if idx < lh.len() {
-                    col_h[y] = lh[idx];
+                    *val = lh[idx];
                 }
             }
             let mut col_output = vec![0.0f32; h];
@@ -375,16 +375,16 @@ impl Dwt97 {
         for x in 0..hl_w {
             let mut col_l = vec![0.0f32; ll_h];
             let mut col_h = vec![0.0f32; lh_h];
-            for y in 0..ll_h {
+            for (y, val) in col_l.iter_mut().enumerate().take(ll_h) {
                 let idx = y * hl_w + x;
                 if idx < hl.len() {
-                    col_l[y] = hl[idx];
+                    *val = hl[idx];
                 }
             }
-            for y in 0..lh_h {
+            for (y, val) in col_h.iter_mut().enumerate().take(lh_h) {
                 let idx = y * hl_w + x;
                 if idx < hh.len() {
-                    col_h[y] = hh[idx];
+                    *val = hh[idx];
                 }
             }
             let mut col_output = vec![0.0f32; h];

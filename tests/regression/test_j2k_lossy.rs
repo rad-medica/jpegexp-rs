@@ -28,8 +28,7 @@ fn calculate_psnr(original: &[u8], decoded: &[u8], max_value: f64) -> f64 {
             let diff = a as f64 - b as f64;
             diff * diff
         })
-        .sum::<f64>()
-        / original.len() as f64;
+        .sum::<f64>() / original.len() as f64;
 
     if mse == 0.0 {
         f64::INFINITY
@@ -80,9 +79,9 @@ fn test_lossy_grayscale_quality_levels() {
         };
 
         let mut output = vec![0u8; pixels.len() * 4];
-        let compressed_size = encoder
-            .encode(&pixels, &frame_info, &mut output)
-            .expect("Encoding failed");
+        let compressed_size = encoder.encode(&pixels, &frame_info, &mut output).expect(
+            "Encoding failed",
+        );
 
         output.truncate(compressed_size);
 
@@ -99,7 +98,11 @@ fn test_lossy_grayscale_quality_levels() {
 
         println!(
             "Quality {}: Size={} bytes, Ratio={:.2}x, MAE={:.2}, PSNR={:.2} dB",
-            quality, compressed_size, compression_ratio, mae, psnr
+            quality,
+            compressed_size,
+            compression_ratio,
+            mae,
+            psnr
         );
 
         // Quality assertions
@@ -110,16 +113,11 @@ fn test_lossy_grayscale_quality_levels() {
             psnr,
             expected_psnr_min[idx]
         );
-        
+
         // Higher quality should produce larger files
         if idx > 0 {
             // Allow some tolerance for similar quality levels
-            assert!(
-                mae < 50.0,
-                "Quality {} MAE {:.2} too high",
-                quality,
-                mae
-            );
+            assert!(mae < 50.0, "Quality {} MAE {:.2} too high", quality, mae);
         }
     }
 }
@@ -147,9 +145,9 @@ fn test_lossy_rgb_quality_levels() {
         };
 
         let mut output = vec![0u8; pixels.len() * 4];
-        let compressed_size = encoder
-            .encode(&pixels, &frame_info, &mut output)
-            .expect("Encoding failed");
+        let compressed_size = encoder.encode(&pixels, &frame_info, &mut output).expect(
+            "Encoding failed",
+        );
 
         output.truncate(compressed_size);
 
@@ -166,7 +164,11 @@ fn test_lossy_rgb_quality_levels() {
 
         println!(
             "RGB Quality {}: Size={} bytes, Ratio={:.2}x, MAE={:.2}, PSNR={:.2} dB",
-            quality, compressed_size, compression_ratio, mae, psnr
+            quality,
+            compressed_size,
+            compression_ratio,
+            mae,
+            psnr
         );
 
         assert!(
@@ -217,8 +219,16 @@ fn test_lossy_vs_lossless_compression_ratio() {
     let lossless_ratio = pixels.len() as f64 / lossless_size as f64;
     let lossy_ratio = pixels.len() as f64 / lossy_size as f64;
 
-    println!("Lossless: {} bytes (ratio {:.2}x)", lossless_size, lossless_ratio);
-    println!("Lossy Q75: {} bytes (ratio {:.2}x)", lossy_size, lossy_ratio);
+    println!(
+        "Lossless: {} bytes (ratio {:.2}x)",
+        lossless_size,
+        lossless_ratio
+    );
+    println!(
+        "Lossy Q75: {} bytes (ratio {:.2}x)",
+        lossy_size,
+        lossy_ratio
+    );
     println!("Lossy improvement: {:.2}x", lossy_ratio / lossless_ratio);
 
     // Lossy should provide better compression
@@ -251,9 +261,9 @@ fn test_near_lossless_quality_100() {
     };
 
     let mut output = vec![0u8; pixels.len() * 4];
-    let compressed_size = encoder
-        .encode(&pixels, &frame_info, &mut output)
-        .expect("Encoding failed");
+    let compressed_size = encoder.encode(&pixels, &frame_info, &mut output).expect(
+        "Encoding failed",
+    );
 
     output.truncate(compressed_size);
 
@@ -269,12 +279,23 @@ fn test_near_lossless_quality_100() {
     println!("Near-lossless (Q100): MAE={:.2}, PSNR={:.2} dB", mae, psnr);
     println!("Original first 10: {:?}", &pixels[0..10]);
     println!("Decoded first 10: {:?}", &decoded_pixels[0..10]);
-    println!("Original last 10: {:?}", &pixels[pixels.len()-10..]);
-    println!("Decoded last 10: {:?}", &decoded_pixels[decoded_pixels.len()-10..]);
+    println!("Original last 10: {:?}", &pixels[pixels.len() - 10..]);
+    println!(
+        "Decoded last 10: {:?}",
+        &decoded_pixels[decoded_pixels.len() - 10..]
+    );
 
     // Near-lossless should have very low error
-    assert!(mae < 1.0, "Near-lossless MAE should be < 1.0, got {:.2}", mae);
-    assert!(psnr > 50.0, "Near-lossless PSNR should be > 50 dB, got {:.2}", psnr);
+    assert!(
+        mae < 1.0,
+        "Near-lossless MAE should be < 1.0, got {:.2}",
+        mae
+    );
+    assert!(
+        psnr > 50.0,
+        "Near-lossless PSNR should be > 50 dB, got {:.2}",
+        psnr
+    );
 }
 
 #[test]
@@ -298,9 +319,9 @@ fn test_different_dwt_levels_lossy() {
         encoder.set_decomposition_levels(levels);
 
         let mut output = vec![0u8; pixels.len() * 4];
-        let compressed_size = encoder
-            .encode(&pixels, &frame_info, &mut output)
-            .expect("Encoding failed");
+        let compressed_size = encoder.encode(&pixels, &frame_info, &mut output).expect(
+            "Encoding failed",
+        );
 
         output.truncate(compressed_size);
 
@@ -316,7 +337,11 @@ fn test_different_dwt_levels_lossy() {
 
         println!(
             "Levels {}: Size={} bytes, Ratio={:.2}x, MAE={:.2}, PSNR={:.2} dB",
-            levels, compressed_size, ratio, mae, psnr
+            levels,
+            compressed_size,
+            ratio,
+            mae,
+            psnr
         );
 
         assert!(
@@ -349,9 +374,13 @@ fn test_lossy_various_image_sizes() {
         };
 
         let mut output = vec![0u8; pixels.len() * 4];
-        let compressed_size = encoder
-            .encode(&pixels, &frame_info, &mut output)
-            .expect(&format!("Encoding {}x{} failed", width, height));
+        let compressed_size = encoder.encode(&pixels, &frame_info, &mut output).expect(
+            &format!(
+                "Encoding {}x{} failed",
+                width,
+                height
+            ),
+        );
 
         output.truncate(compressed_size);
 
@@ -367,7 +396,12 @@ fn test_lossy_various_image_sizes() {
 
         println!(
             "Size {}x{}: Compressed to {} bytes, Ratio={:.2}x, MAE={:.2}, PSNR={:.2} dB",
-            width, height, compressed_size, ratio, mae, psnr
+            width,
+            height,
+            compressed_size,
+            ratio,
+            mae,
+            psnr
         );
 
         assert!(

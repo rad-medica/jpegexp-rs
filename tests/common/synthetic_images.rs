@@ -65,7 +65,12 @@ impl Pattern {
 
     /// Subset of patterns for quick testing
     pub fn quick_set() -> Vec<Pattern> {
-        vec![Pattern::Solid, Pattern::GradientD, Pattern::Checkerboard, Pattern::Noise]
+        vec![
+            Pattern::Solid,
+            Pattern::GradientD,
+            Pattern::Checkerboard,
+            Pattern::Noise,
+        ]
     }
 }
 
@@ -138,8 +143,8 @@ pub struct SyntheticImageConfig {
     pub bit_depth: u32,
     pub components: u32,
     pub seed: u32,
-    pub block_size: u32,  // For checkerboard
-    pub frequency: f64,   // For sine wave
+    pub block_size: u32, // For checkerboard
+    pub frequency: f64, // For sine wave
 }
 
 impl Default for SyntheticImageConfig {
@@ -226,12 +231,18 @@ impl SyntheticImageGenerator {
             }
         }
 
-        SyntheticImage { config: config.clone(), pixels }
+        SyntheticImage {
+            config: config.clone(),
+            pixels,
+        }
     }
 
     fn compute_pixel_value(
-        x: u32, y: u32, c: u32,
-        w: u32, h: u32,
+        x: u32,
+        y: u32,
+        c: u32,
+        w: u32,
+        h: u32,
         max_val: u64,
         config: &SyntheticImageConfig,
     ) -> u64 {
@@ -239,18 +250,27 @@ impl SyntheticImageGenerator {
             Pattern::Solid => max_val / 2,
 
             Pattern::GradientH => {
-                if w <= 1 { max_val / 2 }
-                else { x as u64 * max_val / (w - 1) as u64 }
+                if w <= 1 {
+                    max_val / 2
+                } else {
+                    x as u64 * max_val / (w - 1) as u64
+                }
             }
 
             Pattern::GradientV => {
-                if h <= 1 { max_val / 2 }
-                else { y as u64 * max_val / (h - 1) as u64 }
+                if h <= 1 {
+                    max_val / 2
+                } else {
+                    y as u64 * max_val / (h - 1) as u64
+                }
             }
 
             Pattern::GradientD => {
-                if w + h <= 2 { max_val / 2 }
-                else { ((x + y) as u64 * max_val) / ((w + h - 2) as u64) }
+                if w + h <= 2 {
+                    max_val / 2
+                } else {
+                    ((x + y) as u64 * max_val) / ((w + h - 2) as u64)
+                }
             }
 
             Pattern::Checkerboard => {
@@ -259,9 +279,7 @@ impl SyntheticImageGenerator {
                 if (bx + by) % 2 == 0 { 0 } else { max_val }
             }
 
-            Pattern::Noise => {
-                Self::lcg_noise(x, y, c, w, config.seed, max_val)
-            }
+            Pattern::Noise => Self::lcg_noise(x, y, c, w, config.seed, max_val),
 
             Pattern::MedicalCT => {
                 // Simulate CT-like patterns with high contrast edges
@@ -288,8 +306,11 @@ impl SyntheticImageGenerator {
 
             Pattern::Natural => {
                 // Natural-like: smooth gradient with subtle noise
-                let base = if w + h <= 2 { max_val / 2 }
-                    else { ((x + y) as u64 * max_val) / ((w + h - 2) as u64) };
+                let base = if w + h <= 2 {
+                    max_val / 2
+                } else {
+                    ((x + y) as u64 * max_val) / ((w + h - 2) as u64)
+                };
                 let noise = Self::lcg_noise(x, y, c, w, config.seed, max_val / 50);
                 let signed_noise = (noise as i64) - (max_val / 100) as i64;
                 (base as i64 + signed_noise).clamp(0, max_val as i64) as u64
@@ -305,8 +326,11 @@ impl SyntheticImageGenerator {
 
             Pattern::Ramp => {
                 // Each row is constant, value increments per row
-                if h <= 1 { max_val / 2 }
-                else { y as u64 * max_val / (h - 1) as u64 }
+                if h <= 1 {
+                    max_val / 2
+                } else {
+                    y as u64 * max_val / (h - 1) as u64
+                }
             }
         }
     }
@@ -314,7 +338,10 @@ impl SyntheticImageGenerator {
     /// Linear congruential generator for deterministic noise
     fn lcg_noise(x: u32, y: u32, c: u32, w: u32, seed: u32, max_val: u64) -> u64 {
         let idx = (y * w + x) * 3 + c;
-        let val = ((idx as u64).wrapping_mul(1103515245).wrapping_add(12345).wrapping_add(seed as u64)) % (max_val + 1);
+        let val = ((idx as u64)
+                       .wrapping_mul(1103515245)
+                       .wrapping_add(12345)
+                       .wrapping_add(seed as u64)) % (max_val + 1);
         val
     }
 
@@ -361,12 +388,7 @@ impl SyntheticImageGenerator {
 
     /// Quick test suite for fast iteration
     pub fn quick_test_suite() -> Vec<SyntheticImage> {
-        Self::generate_test_suite(
-            &Pattern::quick_set(),
-            &Dimensions::quick_set(),
-            &[8],
-            &[1],
-        )
+        Self::generate_test_suite(&Pattern::quick_set(), &Dimensions::quick_set(), &[8], &[1])
     }
 
     /// Comprehensive test suite for full validation
@@ -396,7 +418,13 @@ pub struct TestPresets;
 impl TestPresets {
     /// JPEG-LS test configurations (supports all bit depths, grayscale + RGB)
     pub fn jpegls() -> Vec<SyntheticImage> {
-        let patterns = vec![Pattern::Solid, Pattern::GradientD, Pattern::Checkerboard, Pattern::Noise, Pattern::MedicalCT];
+        let patterns = vec![
+            Pattern::Solid,
+            Pattern::GradientD,
+            Pattern::Checkerboard,
+            Pattern::Noise,
+            Pattern::MedicalCT,
+        ];
         let dims = vec![
             Dimensions::new(16, 16),
             Dimensions::new(64, 64),
@@ -421,7 +449,12 @@ impl TestPresets {
 
     /// JPEG 1 test configurations (8-bit baseline, extended for 12-bit)
     pub fn jpeg1() -> Vec<SyntheticImage> {
-        let patterns = vec![Pattern::Solid, Pattern::GradientD, Pattern::Checkerboard, Pattern::Natural];
+        let patterns = vec![
+            Pattern::Solid,
+            Pattern::GradientD,
+            Pattern::Checkerboard,
+            Pattern::Natural,
+        ];
         let dims = vec![
             Dimensions::new(16, 16),
             Dimensions::new(64, 64),
@@ -436,7 +469,13 @@ impl TestPresets {
 
     /// JPEG 2000 test configurations (all bit depths, single and multi-component)
     pub fn jpeg2000() -> Vec<SyntheticImage> {
-        let patterns = vec![Pattern::Solid, Pattern::GradientD, Pattern::Checkerboard, Pattern::Noise, Pattern::MedicalCT];
+        let patterns = vec![
+            Pattern::Solid,
+            Pattern::GradientD,
+            Pattern::Checkerboard,
+            Pattern::Noise,
+            Pattern::MedicalCT,
+        ];
         let dims = vec![
             Dimensions::new(64, 64),
             Dimensions::new(256, 256),
@@ -450,7 +489,11 @@ impl TestPresets {
 
     /// HTJ2K test configurations
     pub fn htj2k() -> Vec<SyntheticImage> {
-        let patterns = vec![Pattern::GradientD, Pattern::Checkerboard, Pattern::MedicalCT];
+        let patterns = vec![
+            Pattern::GradientD,
+            Pattern::Checkerboard,
+            Pattern::MedicalCT,
+        ];
         let dims = vec![
             Dimensions::new(64, 64),
             Dimensions::new(256, 256),

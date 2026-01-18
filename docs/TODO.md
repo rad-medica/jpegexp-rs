@@ -10,6 +10,11 @@ This document tracks the backlog of planned features, improvements, and known is
 - [x] **Constraint Checks**: Added to `FrameInfo` validation
 - [x] **Unsafe**: Documented invariants for 20 unsafe blocks
 - [x] **Unwrap**: Eliminated 57 unwraps in core library
+- [x] **Clippy Cleanup (2026-01-17)**: Resolved 50+ lints (loops, logic simplification, function arguments)
+  - Refactored `needless_range_loop` to iterators
+  - Fixed `double_parens` and `nonminimal_bool`
+  - Suppressed `too_many_arguments` where contextually necessary
+  - Fixed `field_reassign_with_default` patterns
 
 ### ✅ 2. Comprehensive Interoperability Test Suite (2026-01-10)
 - [x] **JPEG 1 Interop Tests**: 5 tests implemented (libjpeg-turbo compatibility)
@@ -130,7 +135,7 @@ This document tracks the backlog of planned features, improvements, and known is
 
 | ID | Component | Issue | Status |
 |----|-----------|-------|--------|
-| **CI-01** | Build | 8 clippy errors blocking CI | 🔴 **BLOCKING** |
+| **CI-01** | Build | 8 clippy errors blocking CI | 🟢 **Fixed 2026-01-17** |
 | **CI-02** | Testing | Interop tests don't run in Ubuntu CI | 🔴 **CRITICAL** |
 | **CI-03** | Tooling | rustfmt version incompatibility | 🟡 Minor |
 | **J2K-01** | Encoder | Lossy quantization formula (guard_bits) | 🟢 **Fixed 2026-01-09** - PSNR 13→51 dB |

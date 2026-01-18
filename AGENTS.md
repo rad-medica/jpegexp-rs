@@ -120,11 +120,11 @@ cargo run --bin jpegexp -- --help
 
 ## NOTES
 
-### Current Status (as of 2026-01-16)
+### Current Status (as of 2026-01-17)
 - **JPEG 1**: ✅ Production ready (320/320 interop tests passing)
 - **JPEG-LS Decoder**: ✅ Production ready (100% validation vs CharLS)
 - **JPEG-LS Encoder**: ⚠️ 61.3% interop (98/160) - 10/12-bit has CharLS CLI compatibility issues
-- **JPEG 2000**: ⚠️ 36% interop (107/300) - bit-plane coder fixed, multi-level DWT bug identified
+- **JPEG 2000**: ⚠️ 36% interop (108/300) - bit-plane coder fixed, complex patterns at >8-bit failing
 - **HTJ2K Encoder**: ⚠️ Experimental
 - **HTJ2K Decoder**: ❌ Broken
 

@@ -123,16 +123,16 @@ A 573-line comprehensive analysis with detailed comparison tables covering:
 - Speed benchmarks
 - Detailed failure analysis for each codec family
 
-### Quick Summary (2026-01-11)
+### Quick Summary (2026-01-17)
 
 | Codec | Tests Run | Passed | Pass Rate | Status |
 |-------|-----------|--------|-----------|--------|
 | **JPEG 1** | 320 | 320 | **100%** | ✅ Production Ready |
-| **JPEG 2000** | 300 | 128 | **43%** | ⚠️ Needs Work |
-| **JPEG-LS** | 640 | 98 | **15%** | ⚠️ Limited (CharLS CLI issues) |
+| **JPEG 2000** | 300 | 108 | **36%** | ⚠️ Partial Interoperability |
+| **JPEG-LS** | 160 | 98 | **61.3%** | ✅ Decoder Production Ready |
 
 ### Data Files
 
-- `jpeg1_interop_1768182324.csv` — 320 JPEG 1 tests
-- `j2k_interop_1768182293.csv` — 300 JPEG 2000 tests
-- `jpegls_interop_1768182576.csv` — 640 JPEG-LS tests
+- `jpeg1_interop_1768433574.csv` — 320 JPEG 1 tests
+- `j2k_interop_1768433546.csv` — 300 JPEG 2000 tests
+- `jpegls_interop_1768433476.csv` — 640 JPEG-LS tests

@@ -5,7 +5,11 @@ use jpegexp_rs::jpeg_stream_reader::JpegStreamReader;
 use jpegexp_rs::FrameInfo;
 
 fn calculate_mae(original: &[u8], reconstructed: &[u8], depth: u8) -> f64 {
-    assert_eq!(original.len(), reconstructed.len(), "Buffers must have same length");
+    assert_eq!(
+        original.len(),
+        reconstructed.len(),
+        "Buffers must have same length"
+    );
 
     let bytes_per_sample = if depth <= 8 { 1 } else { 2 };
     let sample_count = original.len() / bytes_per_sample;
@@ -49,7 +53,12 @@ fn test_bug1_multilevel_dwt_64x64() {
     ];
 
     for (width, height, decomp_levels) in sizes_and_levels {
-        println!("\n=== Testing {}×{} with {} decomposition levels ===", width, height, decomp_levels);
+        println!(
+            "\n=== Testing {}×{} with {} decomposition levels ===",
+            width,
+            height,
+            decomp_levels
+        );
 
         // Create a simple gradient pattern
         let mut original_bytes = Vec::with_capacity(width * height);
@@ -82,15 +91,22 @@ fn test_bug1_multilevel_dwt_64x64() {
         let mut reader = JpegStreamReader::new(&encoded);
         let mut decoder = J2kDecoder::new(&mut reader);
         let decoded_image = decoder.decode().expect("Decoding failed");
-        let reconstructed_bytes = decoded_image
-            .reconstruct_pixels()
-            .expect("Reconstruction failed");
+        let reconstructed_bytes = decoded_image.reconstruct_pixels().expect(
+            "Reconstruction failed",
+        );
 
         // Calculate MAE
         let mae = calculate_mae(&original_bytes, &reconstructed_bytes, 8);
         println!("MAE: {:.4}", mae);
 
-        assert_eq!(mae, 0.0, "Lossless encoding should have MAE=0 for {}×{} with {} levels", width, height, decomp_levels);
+        assert_eq!(
+            mae,
+            0.0,
+            "Lossless encoding should have MAE=0 for {}×{} with {} levels",
+            width,
+            height,
+            decomp_levels
+        );
     }
 }
 
@@ -99,7 +115,10 @@ fn test_bug1_multilevel_dwt_128x128() {
     let decomp_levels_to_test = vec![1, 2, 3, 5];
 
     for decomp_levels in decomp_levels_to_test {
-        println!("\n=== Testing 128×128 with {} decomposition levels ===", decomp_levels);
+        println!(
+            "\n=== Testing 128×128 with {} decomposition levels ===",
+            decomp_levels
+        );
 
         let width = 128;
         let height = 128;
@@ -135,15 +154,20 @@ fn test_bug1_multilevel_dwt_128x128() {
         let mut reader = JpegStreamReader::new(&encoded);
         let mut decoder = J2kDecoder::new(&mut reader);
         let decoded_image = decoder.decode().expect("Decoding failed");
-        let reconstructed_bytes = decoded_image
-            .reconstruct_pixels()
-            .expect("Reconstruction failed");
+        let reconstructed_bytes = decoded_image.reconstruct_pixels().expect(
+            "Reconstruction failed",
+        );
 
         // Calculate MAE
         let mae = calculate_mae(&original_bytes, &reconstructed_bytes, 8);
         println!("MAE: {:.4}", mae);
 
-        assert_eq!(mae, 0.0, "Lossless encoding should have MAE=0 for 128×128 with {} levels", decomp_levels);
+        assert_eq!(
+            mae,
+            0.0,
+            "Lossless encoding should have MAE=0 for 128×128 with {} levels",
+            decomp_levels
+        );
     }
 }
 
@@ -188,9 +212,9 @@ fn test_bug2_large_image_160x160() {
     let mut reader = JpegStreamReader::new(&encoded);
     let mut decoder = J2kDecoder::new(&mut reader);
     let decoded_image = decoder.decode().expect("Decoding failed");
-    let reconstructed_bytes = decoded_image
-        .reconstruct_pixels()
-        .expect("Reconstruction failed");
+    let reconstructed_bytes = decoded_image.reconstruct_pixels().expect(
+        "Reconstruction failed",
+    );
 
     // Calculate MAE
     let mae = calculate_mae(&original_bytes, &reconstructed_bytes, 8);
@@ -237,9 +261,9 @@ fn test_bug2_large_image_256x256() {
     let mut reader = JpegStreamReader::new(&encoded);
     let mut decoder = J2kDecoder::new(&mut reader);
     let decoded_image = decoder.decode().expect("Decoding failed");
-    let reconstructed_bytes = decoded_image
-        .reconstruct_pixels()
-        .expect("Reconstruction failed");
+    let reconstructed_bytes = decoded_image.reconstruct_pixels().expect(
+        "Reconstruction failed",
+    );
 
     // Calculate MAE
     let mae = calculate_mae(&original_bytes, &reconstructed_bytes, 8);
@@ -287,9 +311,9 @@ fn test_baseline_128x128_1level() {
     let mut reader = JpegStreamReader::new(&encoded);
     let mut decoder = J2kDecoder::new(&mut reader);
     let decoded_image = decoder.decode().expect("Decoding failed");
-    let reconstructed_bytes = decoded_image
-        .reconstruct_pixels()
-        .expect("Reconstruction failed");
+    let reconstructed_bytes = decoded_image.reconstruct_pixels().expect(
+        "Reconstruction failed",
+    );
 
     // Calculate MAE
     let mae = calculate_mae(&original_bytes, &reconstructed_bytes, 8);
