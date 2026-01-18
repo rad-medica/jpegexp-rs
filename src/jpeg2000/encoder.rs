@@ -30,6 +30,7 @@ use crate::JpeglsError;
 /// use jpegexp_rs::jpeg2000::encoder::J2kEncoder;
 /// use jpegexp_rs::FrameInfo;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut encoder = J2kEncoder::new();
 /// encoder.set_quality(90);
 /// encoder.set_irreversible(true); // Use 9-7 transform for better lossy compression
@@ -41,8 +42,11 @@ use crate::JpeglsError;
 ///     component_count: 3,
 /// };
 ///
+/// let input_pixels = vec![0u8; 512 * 512 * 3]; // Dummy input
 /// let mut output = vec![0u8; 512 * 512 * 3]; // Allocate sufficient buffer
 /// let bytes_written = encoder.encode(&input_pixels, &frame_info, &mut output)?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct J2kEncoder {
     /// Number of DWT decomposition levels
@@ -229,7 +233,7 @@ impl J2kEncoder {
         // HTJ2K mode requires bit 6 (0x40) to be set in code_block_style (SPcod_Scoc byte 9)
         // This signals that blocks use HT coding instead of standard EBCOT
         let code_block_style = if self.use_htj2k { 0x40 } else { 0 };
-        
+
         // Coding style flags (Scod):
         // Bit 0: Selective arithmetic coding bypass
         // Bit 1: Reset context probabilities on coding pass boundaries
@@ -237,13 +241,13 @@ impl J2kEncoder {
         // Bit 3: Vertically causal context
         // Bit 4: Predictable termination
         // Bit 5: Segmentation symbols
-        // 
+        //
         // OpenJPEG default: 0x00 (no special modes)
         // For better compatibility, we can enable:
         // - Bit 2 (0x04): Termination on each coding pass (helps decoder synchronization)
         // - Bit 4 (0x10): Predictable termination (adds extra bits for error resilience)
         let coding_style = 0; // Use default for now (matching OpenJPEG)
-        
+
         let cod = J2kCod {
             coding_style,
             progression_order: 0, // LRCP
@@ -309,13 +313,13 @@ impl J2kEncoder {
             // 9-7 Coefficients are roughly in the same dynamic range as input pixels (after multiple levels).
             // A delta of 1.0 preserves roughly integer precision.
             // A delta of 0.0001 preserves 13+ fractional bits, which causes massive expansion.
-            
+
             // Heuristic:
             // Quality 100 -> delta = 1.0 (Approx integer precision)
             // Quality 90  -> delta = 2.0
             // Quality 50  -> delta = 16.0
             // Quality 1   -> delta = 256.0
-            
+
             let quality_factor = (100 - self.quality) as f32;
             // Use a power law to ramp up step size quickly for lower qualities
             // Lower step = higher quality (more bits preserved)
@@ -350,7 +354,7 @@ impl J2kEncoder {
             //   - HL/LH subbands: gain = 1
             //   - HH subband: gain = 2
             //
-            // Note: Guard bits are NOT part of R_b. They only affect the number of 
+            // Note: Guard bits are NOT part of R_b. They only affect the number of
             // magnitude bits available for coding, not the quantization formula.
             //
             // For a desired step size Δ_target:
@@ -411,7 +415,7 @@ impl J2kEncoder {
                     let mu = mu_float.round().clamp(0.0, 2047.0) as i32;
 
                     // Pack epsilon (5 bits) and mu (11 bits) into u16
-                    
+
 
 
                     ((epsilon as u16) << 11) | (mu as u16)
@@ -690,7 +694,7 @@ impl J2kEncoder {
         // Write packet data
         for p in packets {
             if std::env::var("J2K_PACKET_SIZES").is_ok() {
-                eprintln!("[PACKET] res={}, header={} bytes, body={} bytes", 
+                eprintln!("[PACKET] res={}, header={} bytes, body={} bytes",
                     p.resolution, p.header_data.len(), p.body_data.len());
             }
             writer.write_bytes(&p.header_data)?;
@@ -914,7 +918,7 @@ impl J2kEncoder {
                         .take(3)
                         .map(|(i, &v)| (i, v))
                         .collect();
-                    eprintln!("[SUBBAND] res={}, band={}, size={}x{}, nonzero={}/{}, max_abs={}, nz_samples={:?}", 
+                    eprintln!("[SUBBAND] res={}, band={}, size={}x{}, nonzero={}/{}, max_abs={}, nz_samples={:?}",
                         res, band, sb_w, sb_h, nonzero_count, sb_coeffs.len(), max_abs, nonzero_samples);
                 }
 
@@ -1028,7 +1032,7 @@ impl J2kEncoder {
                                 // Force zero_bp to 0 for robustness debugging
                                 // Ideally: mb.saturating_sub(1).saturating_sub(_max_bp as u8)
                                 let zero_bp = 0;
-                                
+
                                 packet_header
                                     .included_cblks
                                     .push(super::packet::CodeBlockInfo {
@@ -1036,7 +1040,7 @@ impl J2kEncoder {
                                         y: cby,
                                         subband_index: band as u8,
                                         included: true,
-                                        num_passes: 1, 
+                                        num_passes: 1,
                                         data_len: encoded.len() as u32,
                                         zero_bp,
                                         numlenbits: 3,
@@ -1052,14 +1056,14 @@ impl J2kEncoder {
                             // Force debug printing for analysis
                             if true {
                                 let max_abs = block_data.iter().map(|&v| v.abs()).max().unwrap_or(0);
-                                println!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}", 
-                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs, 
+                                println!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}",
+                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs,
                                     if block_data.len() <= 16 { block_data.clone() } else { block_data[..16].to_vec() });
                             }
 
                             if max_bp_opt.is_some() || has_nonzero {
                                 let max_bp = max_bp_opt.unwrap_or(0);
-                                
+
                                 let min_bp = 0;
 
                                 // Map band 0..2 to orientation 1..3
@@ -1067,7 +1071,7 @@ impl J2kEncoder {
                                 // band=1 (LH) -> orientation=2
                                 // band=2 (HH) -> orientation=3
                                 let orientation = if res == 0 { 0 } else { band as u8 + 1 };
-                                
+
                                 if std::env::var("J2K_ORIENT_DEBUG").is_ok() {
                                     let orient_name = match orientation {
                                         0 => "LL",
@@ -1076,7 +1080,7 @@ impl J2kEncoder {
                                         3 => "HH",
                                         _ => "??"
                                     };
-                                    eprintln!("[ORIENT] res={}, band={}, orientation={}({}), cb=({},{}), size={}x{}", 
+                                    eprintln!("[ORIENT] res={}, band={}, orientation={}({}), cb=({},{}), size={}x{}",
                                               res, band, orientation, orient_name, cbx, cby, bw, bh);
                                 }
 
@@ -1092,9 +1096,9 @@ impl J2kEncoder {
                                 };
 
                                 if std::env::var("J2K_CBLK_DETAIL").is_ok() {
-                                    eprintln!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}, max_bp={}", 
+                                    eprintln!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}, max_bp={}",
                                         res, band, cbx, cby, passes, encoded.len(), zero_bp, epsilon, mb, max_bp);
-                                    println!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}, max_bp={}", 
+                                    println!("[CBLK_POST] res={}, band={}, cb=({},{}), passes={}, data_len={}, zero_bp={}, epsilon={}, mb={}, max_bp={}",
                                         res, band, cbx, cby, passes, encoded.len(), zero_bp, epsilon, mb, max_bp);
                                 }
 
@@ -1136,9 +1140,9 @@ impl J2kEncoder {
                 header_data: header_writer.finish(),
                 body_data: packet_body,
             });
-            
+
             if std::env::var("J2K_RES_DEBUG").is_ok() {
-                eprintln!("[RES] Created packet for res={}, header_len={}, body_len={}", 
+                eprintln!("[RES] Created packet for res={}, header_len={}, body_len={}",
                          res, packets.last().unwrap().header_data.len(), packets.last().unwrap().body_data.len());
             }
 
@@ -1273,12 +1277,12 @@ impl J2kEncoder {
             h = h.div_ceil(2);
         }
         let result = (w.max(1), h.max(1));
-        
+
         if std::env::var("J2K_LL_SIZE_DEBUG").is_ok() {
             eprintln!("[GET_LL_SIZE] width={}, height={}, num_levels={}, res={}, reductions={}, result={:?}",
                 width, height, num_levels, res, reductions, result);
         }
-        
+
         result
     }
 
