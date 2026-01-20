@@ -9,7 +9,7 @@ use std::process::Command;
 fn test_4x4_simple() {
     // 1. Generate reference using Python script
     let status = Command::new("python3")
-        .arg("gen_ref.py")
+        .arg("tests/reproduce_j2k_issue_ref.py")
         .status()
         .expect("Failed to run gen_ref.py");
     assert!(status.success(), "gen_ref.py failed");

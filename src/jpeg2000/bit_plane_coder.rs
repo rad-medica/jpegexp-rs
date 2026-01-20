@@ -483,7 +483,11 @@ impl<'a> BitPlaneCoder<'a> {
         }
 
         // Finalize coefficients: return magnitude * sign
-        Ok(self.coefficients.clone())
+        // Truncate to original dimensions to hide internal padding
+        let original_size = (self.width * self.height) as usize;
+        let mut result = self.coefficients.clone();
+        result.truncate(original_size);
+        Ok(result)
     }
 
     fn decode_sigprop(&mut self, bp: u8, orient: u8) {
@@ -687,8 +691,7 @@ mod tests {
         bpc.mq.flush();
         let buf = bpc.mq.get_buffer().to_vec();
         let mut dec = BitPlaneCoder::new(8, 1, &[]);
-        let mut res = dec.decode_codeblock(&buf, 3, passes, 0).unwrap();
-        res.truncate(data.len());
+        let res = dec.decode_codeblock(&buf, 3, passes, 0).unwrap();
         assert_eq!(res, [0, 1, 2, 3, 4, 5, 6, 7]);
     }
 
@@ -705,8 +708,7 @@ mod tests {
         println!("Encoded to {} bytes, {} passes", buf.len(), passes);
 
         let mut dec = BitPlaneCoder::new(8, 1, &[]);
-        let mut res = dec.decode_codeblock(&buf, max_bp, passes, 0).unwrap();
-        res.truncate(data.len());
+        let res = dec.decode_codeblock(&buf, max_bp, passes, 0).unwrap();
 
         println!("Small constant: {:?} -> {:?}", data, res);
         assert_eq!(res, data.to_vec(), "Small constant block should roundtrip");
