@@ -467,7 +467,11 @@ impl J2kEncoder {
         let mut packets: Vec<Packet> = Vec::new();
 
         // Level shift
-        let level_shift = 1i32 << (depth - 1);
+        let level_shift = if self.is_signed {
+            0
+        } else {
+            1i32 << (depth - 1)
+        };
         let mut component_data: Vec<Vec<i32>> = (0..components)
             .map(|c| {
                 (0..width * height)
@@ -1053,13 +1057,6 @@ impl J2kEncoder {
                             let mut bpc = BitPlaneCoder::new(bw as u32, bh as u32, &block_data);
                             let max_bp_opt = bpc.calculate_max_bit_plane();
 
-                            // Force debug printing for analysis
-                            if true {
-                                let max_abs = block_data.iter().map(|&v| v.abs()).max().unwrap_or(0);
-                                println!("[CBLK_PRE] res={}, band={}, cb=({},{}), size={}x{}, max_bp={:?}, has_nz={}, max_abs={}, coeffs={:?}",
-                                    res, band, cbx, cby, bw, bh, max_bp_opt, has_nonzero, max_abs,
-                                    if block_data.len() <= 16 { block_data.clone() } else { block_data[..16].to_vec() });
-                            }
 
                             if max_bp_opt.is_some() || has_nonzero {
                                 let max_bp = max_bp_opt.unwrap_or(0);

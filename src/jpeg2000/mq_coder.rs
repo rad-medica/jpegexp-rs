@@ -539,7 +539,7 @@ impl MqCoder {
         let qe = MQ_TABLE[idx].qe as u32;
 
         self.a -= qe;
-        if (self.c >> 16) < qe {
+        let d = if (self.c >> 16) < qe {
             let d = self.lps_exchange(cx, idx, mps);
             self.renorm_d();
             d
@@ -552,7 +552,14 @@ impl MqCoder {
             } else {
                 mps
             }
+        };
+
+        if std::env::var("MQ_SYMBOL_TRACE").is_ok() {
+            self.symbol_count += 1;
+            eprintln!("[MQ] Symbol #{}: d={}, cx={}", self.symbol_count, d, cx);
         }
+
+        d
     }
 
     fn mps_exchange(&mut self, cx: usize, idx: usize, mps: u8) -> u8 {

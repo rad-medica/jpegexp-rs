@@ -23,10 +23,9 @@ impl<'a> BitPlaneCoder<'a> {
     const SIGN: u8 = 1 << 3;
 
     pub fn new(width: u32, height: u32, data: &'a [i32]) -> Self {
-        let padded_height = (height + 3) & !3;
-        let size = (width * padded_height) as usize;
+        let size = (width * height) as usize;
         let stride = width as usize + 2;
-        let padded_flags = vec![0u8; (padded_height as usize + 2) * stride];
+        let padded_flags = vec![0u8; (height as usize + 2) * stride];
 
         let mut mq = MqCoder::new();
         mq.init_contexts(19);
@@ -264,16 +263,15 @@ impl<'a> BitPlaneCoder<'a> {
         // uses significance state as it was at the START of the pass.
         // We delay flag updates until after all encoding is done.
         let mut updates: Vec<(u32, u32, u8)> = Vec::new(); // (x, y, sign)
-        let padded_height = (self.height + 3) & !3;
         
-        for y_stripe in (0..padded_height).step_by(4) {
+        for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
-                for y in y_stripe..y_stripe + 4 {
+                for y in y_stripe..(y_stripe + 4).min(self.height) {
                     let idx = (y * self.width + x) as usize;
                     if (self.state[idx] & Self::SIG) == 0 {
                         let (h, v, d) = self.get_neighbor_counts(x, y);
                         if h + v + d > 0 {
-                            let val = if y < self.height { self.data[idx] } else { 0 };
+                            let val = self.data[idx];
                             let bit = ((val.abs() >> bp) & 1) as u8;
                             let cx = self.get_context_zc(x, y, orient);
                             self.mq.encode(bit, cx);
@@ -303,16 +301,14 @@ impl<'a> BitPlaneCoder<'a> {
         // uses significance state as it was at the START of the pass.
         // We delay flag updates until after all encoding is done.
         let mut updates: Vec<(u32, u32)> = Vec::new(); // (x, y)
-        let padded_height = (self.height + 3) & !3;
         
-        for y_stripe in (0..padded_height).step_by(4) {
+        for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
-                for y in y_stripe..y_stripe + 4 {
+                for y in y_stripe..(y_stripe + 4).min(self.height) {
                     let idx = (y * self.width + x) as usize;
                     if (self.state[idx] & Self::SIG) != 0 && (self.state[idx] & Self::VISITED) == 0
                     {
-                        let val = if y < self.height { self.data[idx] } else { 0 };
-                        let bit = ((val.abs() >> bp) & 1) as u8;
+                        let bit = ((self.data[idx].abs() >> bp) & 1) as u8;
                         let cx = self.get_context_mag(x, y);
                         self.mq.encode(bit, cx);
                         self.state[idx] |= Self::REFINE;
@@ -334,15 +330,18 @@ impl<'a> BitPlaneCoder<'a> {
         if trace {
             eprintln!("[CLEANUP] bp={}, orient={}, size={}x{}", bp, orient, self.width, self.height);
         }
-        let padded_height = (self.height + 3) & !3;
-        for y_stripe in (0..padded_height).step_by(4) {
+        for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 // Check if we can use RLC (Run-Length Coding)
+                let stripe_height = (y_stripe + 4).min(self.height) - y_stripe;
+                if trace && stripe_height != 4 {
+                    eprintln!("[CLEANUP]   Partial stripe at y={}, height={}", y_stripe, stripe_height);
+                }
                 let mut all_insignificant = true;
                 let mut all_no_neighbors = true;
 
                 // Check if all pixels in this stripe column are candidates for RLC
-                for y in y_stripe..y_stripe + 4 {
+                for y in y_stripe..(y_stripe + stripe_height).min(self.height) {
                     let idx = (y * self.width + x) as usize;
                     if (self.state[idx] & (Self::SIG | Self::VISITED)) != 0 {
                         all_insignificant = false;
@@ -355,7 +354,7 @@ impl<'a> BitPlaneCoder<'a> {
                 }
 
                 // Use RLC if all 4 pixels are insignificant with no significant neighbors
-                if all_insignificant && all_no_neighbors {
+                if stripe_height == 4 && all_insignificant && all_no_neighbors {
                     if trace {
                         eprintln!("[CLEANUP]   x={}, y_stripe={}: Using RLC", x, y_stripe);
                     }
@@ -364,7 +363,7 @@ impl<'a> BitPlaneCoder<'a> {
                     for i in 0..4 {
                         let y = y_stripe + i;
                         let idx = (y * self.width + x) as usize;
-                        let val = if y < self.height { self.data[idx] } else { 0 };
+                        let val = self.data[idx];
                         let bit = ((val.abs() >> bp) & 1) as u8;
                         if bit != 0 {
                             runlen = i as u8;
@@ -387,7 +386,7 @@ impl<'a> BitPlaneCoder<'a> {
                         for i in runlen..4 {
                             let y = y_stripe + i as u32;
                             let idx = (y * self.width + x) as usize;
-                            let val = if y < self.height { self.data[idx] } else { 0 };
+                            let val = self.data[idx];
                             let bit = ((val.abs() >> bp) & 1) as u8;
 
                             // First pixel after runlen is known to be significant
@@ -414,14 +413,17 @@ impl<'a> BitPlaneCoder<'a> {
                         }
                     }
                 } else {
-                    if trace {
+                    if trace && stripe_height != 4 {
+                        eprintln!("[CLEANUP]   x={}, y_stripe={}: NO RLC (partial stripe, height={})",
+                                  x, y_stripe, stripe_height);
+                    } else if trace {
                         eprintln!("[CLEANUP]   x={}, y_stripe={}: NO RLC (has neighbors or already sig)", x, y_stripe);
                     }
                     // No RLC - encode each pixel normally
-                    for y in y_stripe..y_stripe + 4 {
+                    for y in y_stripe..(y_stripe + 4).min(self.height) {
                         let idx = (y * self.width + x) as usize;
                         if (self.state[idx] & (Self::SIG | Self::VISITED)) == 0 {
-                            let val = if y < self.height { self.data[idx] } else { 0 };
+                            let val = self.data[idx];
                             let bit = ((val.abs() >> bp) & 1) as u8;
                             let cx = self.get_context_zc(x, y, orient);
                             self.mq.encode(bit, cx);
@@ -483,11 +485,7 @@ impl<'a> BitPlaneCoder<'a> {
         }
 
         // Finalize coefficients: return magnitude * sign
-        // Truncate to original dimensions to hide internal padding
-        let original_size = (self.width * self.height) as usize;
-        let mut result = self.coefficients.clone();
-        result.truncate(original_size);
-        Ok(result)
+        Ok(self.coefficients.clone())
     }
 
     fn decode_sigprop(&mut self, bp: u8, orient: u8) {
@@ -495,11 +493,10 @@ impl<'a> BitPlaneCoder<'a> {
         // uses significance state as it was at the START of the pass.
         // We delay flag updates until after all decoding is done.
         let mut updates: Vec<(u32, u32, u8)> = Vec::new(); // (x, y, sign)
-        let padded_height = (self.height + 3) & !3;
         
-        for y_stripe in (0..padded_height).step_by(4) {
+        for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
-                for y in y_stripe..y_stripe + 4 {
+                for y in y_stripe..(y_stripe + 4).min(self.height) {
                     let idx = (y * self.width + x) as usize;
                     if (self.state[idx] & Self::SIG) == 0 {
                         let (h, v, d) = self.get_neighbor_counts(x, y);
@@ -535,11 +532,10 @@ impl<'a> BitPlaneCoder<'a> {
         // uses significance state as it was at the START of the pass.
         // We delay flag updates until after all decoding is done.
         let mut updates: Vec<(u32, u32)> = Vec::new(); // (x, y)
-        let padded_height = (self.height + 3) & !3;
         
-        for y_stripe in (0..padded_height).step_by(4) {
+        for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
-                for y in y_stripe..y_stripe + 4 {
+                for y in y_stripe..(y_stripe + 4).min(self.height) {
                     let idx = (y * self.width + x) as usize;
                     if (self.state[idx] & Self::SIG) != 0 && (self.state[idx] & Self::VISITED) == 0
                     {
@@ -567,14 +563,14 @@ impl<'a> BitPlaneCoder<'a> {
     }
 
     fn decode_cleanup(&mut self, bp: u8, orient: u8) {
-        let padded_height = (self.height + 3) & !3;
-        for y_stripe in (0..padded_height).step_by(4) {
+        for y_stripe in (0..self.height).step_by(4) {
             for x in 0..self.width {
                 // Check if we should decode using RLC (Run-Length Coding)
+                let stripe_height = (y_stripe + 4).min(self.height) - y_stripe;
                 let mut all_insignificant = true;
                 let mut all_no_neighbors = true;
 
-                for y in y_stripe..y_stripe + 4 {
+                for y in y_stripe..(y_stripe + stripe_height).min(self.height) {
                     let idx = (y * self.width + x) as usize;
                     if (self.state[idx] & (Self::SIG | Self::VISITED)) != 0 {
                         all_insignificant = false;
@@ -587,7 +583,7 @@ impl<'a> BitPlaneCoder<'a> {
                 }
 
                 // Use RLC if all 4 pixels are insignificant with no significant neighbors
-                if all_insignificant && all_no_neighbors {
+                if stripe_height == 4 && all_insignificant && all_no_neighbors {
                     // Decode aggregate bit (AGG context 17)
                     let agg = self.mq.decode_bit(17);
 
@@ -633,7 +629,7 @@ impl<'a> BitPlaneCoder<'a> {
                     }
                 } else {
                     // No RLC - decode each pixel normally
-                    for y in y_stripe..y_stripe + 4 {
+                    for y in y_stripe..(y_stripe + 4).min(self.height) {
                         let idx = (y * self.width + x) as usize;
                         if (self.state[idx] & (Self::SIG | Self::VISITED)) == 0 {
                             let cx = self.get_context_zc(x, y, orient);
