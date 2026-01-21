@@ -351,12 +351,12 @@ impl MqCoder {
     }
 
     pub fn encode(&mut self, d: u8, cx: usize) {
-        self.symbol_count += 1;
+        // self.symbol_count += 1;
 
         // Trace symbol encoding if MQ_SYMBOL_TRACE is set
-        if std::env::var("MQ_SYMBOL_TRACE").is_ok() {
-            eprintln!("[MQ] Symbol #{}: d={}, cx={}", self.symbol_count, d, cx);
-        }
+        // if std::env::var("MQ_SYMBOL_TRACE").is_ok() {
+        //     eprintln!("[MQ] Symbol #{}: d={}, cx={}", self.symbol_count, d, cx);
+        // }
 
         let ctx = self.contexts[cx];
         let idx = (ctx >> 1) as usize;
@@ -554,10 +554,10 @@ impl MqCoder {
             }
         };
 
-        if std::env::var("MQ_SYMBOL_TRACE").is_ok() {
-            self.symbol_count += 1;
-            eprintln!("[MQ] Symbol #{}: d={}, cx={}", self.symbol_count, d, cx);
-        }
+        // if std::env::var("MQ_SYMBOL_TRACE").is_ok() {
+        //     self.symbol_count += 1;
+        //     eprintln!("[MQ] Symbol #{}: d={}, cx={}", self.symbol_count, d, cx);
+        // }
 
         d
     }
